@@ -1,0 +1,23 @@
+# Store and check out every text file with LF endings, on every platform.
+#
+# Without this, git on Windows converts LF to CRLF in the working copy and back
+# on commit. For most projects that is invisible. Here it is not: the corpus
+# writer exists to put exact bytes on disk, because every recorded PHI offset is
+# a character position into a file, and HL7 v2 terminates its segments with a
+# bare carriage return. A newline conversion applied to a fixture or an expected
+# output would shift those offsets and the cause would be nearly impossible to
+# see in a diff.
+#
+# Generated corpora are gitignored, so they are not what this protects today.
+# It protects against the day somebody commits one as a fixture.
+* text=auto eol=lf
+
+# Binary files, declared so git never attempts a line-ending or diff conversion.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gz binary
+*.zip binary
+*.pdf binary
+*.nii binary
+*.dcm binary

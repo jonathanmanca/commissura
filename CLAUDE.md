@@ -1,0 +1,494 @@
+# commissura — project brief
+
+> Context handoff. Read this first in any new session.
+
+## What this is
+
+A command-line tool (plus Python library) that turns raw clinical material —
+HL7 v2 lab messages, free-text reports, DICOM imaging metadata — into a
+**standardised, de-identified, research-ready dataset** with a verifiable
+manifest.
+
+One-line pitch: *BIDS exists for neuroimaging; nothing equivalent links lab
+results and clinical reports to the same subject. This builds that bridge.*
+
+The name is the commissure — the fibre bundle joining two hemispheres that
+would otherwise not communicate. Say this once in the README; it is the kind of
+detail that makes a repo memorable.
+
+## Why it exists
+
+EU Regulation 2025/327 (European Health Data Space) makes secondary use of
+health data a legal obligation for data holders. The access mechanism is a data
+permit issued by a Health Data Access Body plus a patient opt-out — **not**
+case-by-case consent. Hospitals, IRCCS and labs will have to produce
+structured, de-identified, documented datasets and mostly have no idea how.
+
+Dates that matter (from the Commission's EHDS FAQ, 26 March 2026):
+
+| Date | What |
+| --- | --- |
+| 26 Mar 2027 | Key implementing acts adopted, incl. **Art. 77(4) dataset descriptions** and **Art. 78(6) data quality and utility label**. Member States designate digital health authorities; Italy's HDAB due. |
+| 26 Mar 2029 | Chapter IV secondary use applies for most Art. 51 categories — **including EHR data, i.e. this project's scope**. Data holders must have submitted dataset descriptions to their HDAB. |
+| 26 Mar 2031 | Remaining categories: genomic and other -omics, clinical trial data, research cohorts, determinants of health. |
+
+So the relevant window is 2029, and the specification this project must match
+lands in **March 2027** — sixteen months out, via comitology with mandatory
+public consultation. Watching that consultation is part of the plan.
+
+Secondary goal, equally important: this is a portfolio project to build real
+software-delivery skills (packaging, testing, CI, documentation,
+deployability), which is the gap in the author's profile.
+
+## Hard constraints
+
+- **Synthetic data only.** No real patient data ever enters this repo, in any
+  form, at any time. All fixtures are generated.
+- **Runs locally.** No service to install in a hospital, no network component,
+  no accreditation needed.
+- **Cross-platform**, Python >= 3.11, CLI + importable library, `--json`
+  everywhere so the tool composes inside someone else's pipeline.
+- **Deployable by a stranger**: `pip install`, README in English, working demo.
+  If someone has to ask the author how to run it, that's a bug.
+
+## Alignment decision: HealthDCAT-AP
+
+The manifest must not be an invented schema. The HealthData@EU Pilot (concluded
+Dec 2024) produced **HealthDCAT-AP**, an RDF extension of DCAT-AP for health
+datasets, built explicitly against EHDS Art. 77 — source, scope, main
+characteristics, nature of the data, access conditions. It is the most likely
+basis for the 2027 implementing act.
+
+Read before touching the manifest schema. **Go to the source repository, not the
+rendered site** — both the old `healthdcat-ap.github.io` address and the current
+`data.health.europa.eu/healthdcat-ap/releases/latest/` are dead ends for a
+script: the first is decommissioned, the second is client-side rendered and
+returns zero bytes to a plain fetch.
+
+The specification's source is a public GitLab repository, and its REST API
+returns plain JSON with no JavaScript:
+
+- Repo: https://code.europa.eu/healthdataeu/healthdcat-ap (CC BY 4.0, branch `main`)
+- File tree: `https://code.europa.eu/api/v4/projects/healthdataeu%2Fhealthdcat-ap/repository/tree?ref=main&recursive=true&per_page=100` (paginate with `&page=`)
+- One file: `https://code.europa.eu/api/v4/projects/healthdataeu%2Fhealthdcat-ap/repository/files/<url-encoded-path>/raw?ref=main`
+- Whole repo as a zip: https://code.europa.eu/healthdataeu/healthdcat-ap/-/archive/main/healthdcat-ap-main.zip
+
+What is in there, per release (`public/releases/release-<n>/`):
+
+| Path | What it is |
+| --- | --- |
+| `context/healthdcat-cardinality-rules.json` | **The cardinalities, machine-readable.** Start here. |
+| `context/dcat-ap.jsonld` | JSON-LD context: short names to IRIs. |
+| `html/shacl/public-shapes.ttl` | SHACL for the public tier, plus `_recommended` variant. |
+| `html/shacl/non-public-shapes.ttl`, `restricted-shapes.ttl` | The other two tiers, plus `_recommended` variants. |
+| `shacl/dcat-ap-SHACL.ttl`, `shacl/ranges.ttl` | Base DCAT-AP shapes and property ranges. |
+| `html/examples/healthdcatap*.ttl` | One worked example per health-specific property. |
+| `html/index.html` | The rendered specification itself. |
+
+Health-specific properties, read off the example filenames (names confirmed,
+cardinalities not yet): `analytics`, `codingSystem`, `hasCodeValues`,
+`hasCodingSystem`, `hdab`, `healthCategory`, `healthTheme`, `legalBasis`,
+`minTypicalAge`, `maxTypicalAge`, `typicalAge`, `numberOfRecords`,
+`numberOfUniqueIndividuals`, `personalData`, `populationCoverage`,
+`publisherNote`, `publisherType`, `purpose`, `retentionPeriod`,
+`trustedDataHolder`. It also reuses DPV (`dpv:hasLegalBasis`,
+`dpv:hasPersonalData`, `dpv:hasPurpose`) and DQV (`dqv:hasQualityAnnotation`).
+
+**Release: 8, decided 2026-11-07.** The repository carries releases 5 through 8;
+the rendered site still serves 5 as "latest". 8 ships a packaged SHACL validator
+that 5 does not, so conformance can be checked against the profile's own tool.
+Pinned in `healthdcat.RELEASE`.
+
+**The obligation table is already transcribed** into
+[`commissura/healthdcat.py`](src/commissura/healthdcat.py): 57 properties × 3
+tiers, with cardinalities, obligations, the one conditional rule, and
+`SOURCE_URL` so it can be re-checked. Read that module rather than re-fetching.
+
+The three-tier split (public / non-public / restricted) is a finding worth
+absorbing: the profile distinguishes what may be published openly from what is
+restricted, and 14 of the 57 properties genuinely differ between tiers, so
+"conformant" is not one claim but three. A dataset description must declare its
+tier.
+
+**The public tier shapes have been read too** and their value constraints are in
+the same module: node kinds, datatypes, the `sh:hasValue` on `dct:accessRights`,
+and the CSVW structure behind `hasVariables`.
+
+**All three tiers have now been read**, along with the first half of the health
+category vocabulary. Everything found is in that module.
+
+**Read and encoded so far**: the cardinality table, all three tiers' shapes, and
+three authority lists in full — `healthcategories.rdf` (17 concepts),
+`access-right.rdf` (7, with definitions) and `data-theme.rdf` (14). Nothing
+blocking remains before `build` can emit a dataset description.
+
+Still unread, now in order of how much they would change things:
+
+1. `ranges/range.ttl` — the class range constraints the shapes file explicitly
+   excludes from itself. The largest remaining gap in the constraint set.
+2. The imported DCAT-AP 3.0.0 shapes, for `Agent_Shape` and
+   `PeriodOfTime_Shape`, both referenced by the health shapes and defined
+   upstream.
+3. `catalogue/health-theme.rdf` and `publisher-type.rdf` —
+   `healthdcatap:healthTheme` is only recommended, and its shape says the
+   controlled vocabulary does not exist yet, so this is lower value than it
+   looks.
+4. The packaged validator in `html/shacl/HealthDCAT-AP_validator/` — the point
+   of choosing Release 8. Running our output through it is the real conformance
+   check, and worth doing before claiming conformance anywhere.
+
+The validator config also ships `catalogue/dcat-ap_2.0.1.rdf`, which is worth a
+glance: the shapes import DCAT-AP **3.0.0** while the catalogue carries 2.0.1,
+and it is not yet clear which one the packaged validator actually loads.
+- D6.1 Extension of DCAT-AP: https://zenodo.org/records/15088611
+- D6.2 recommendations (incl. "how to break a warehouse into logical datasets"):
+  https://zenodo.org/records/15085025
+- D8.2 quality control, assurance & provenance: https://zenodo.org/records/15096761
+- D8.1 standards for interoperability and exchange: https://zenodo.org/records/15096755
+- Open-source catalogue components: https://code.europa.eu/healthdataeu/healthdataeu-eu-dataset-catalogue
+  — check for an existing HealthDCAT-AP validator before writing one.
+
+Target claim: *commissura emits HealthDCAT-AP-conformant dataset descriptions.*
+That sentence is worth more than any feature.
+
+The quality/utility label (Art. 78) gives a general assessment plus
+per-characteristic detail (documentation, accuracy, ...) and is **mandatory for
+datasets whose collection was publicly funded**. The EU project QUANTUM is
+developing the criteria. The `risk` command should grow toward this, not toward
+an invented metric.
+
+## Open question to resolve
+
+FAQ Q49 asks who actually performs pseudonymisation and anonymisation — the
+health data holder, the HDAB, or both. The answer determines which side of the
+chain commissura sits on, and therefore what `build` is responsible for. Read
+it and record the answer here.
+
+## Scope
+
+In scope:
+- Synthetic generator: multimodal subjects (lab messages, free-text reports,
+  imaging metadata) with injectable, realistic defects and ground-truth PHI
+  annotations.
+- Dataset layout: BIDS-compatible, extended with `lab/` and `reports/`.
+- Consistent pseudonymisation across modalities.
+- `validate`: is this dataset conformant? What is missing?
+- Manifest: HealthDCAT-AP-aligned, plus schema version, de-identification rule
+  version, per-modality record of fields removed / replaced / kept, key
+  fingerprint, tool versions.
+- Risk report: k-anonymity over participant attributes, flag k < 5.
+
+Explicitly **not** in scope (resist scope creep):
+- Statistical analysis of the data — users bring their own tools.
+- Writing a DICOM converter — orchestrate `dcm2bids` / `HeuDiConv`.
+- LLM-based de-identification. General-purpose LLM tools have been shown to
+  miss over half of clinical PHI. Rules first, measurement always.
+- Any federated / platform / TRE ambitions. HealthData@EU covers the
+  cross-border layer; Lifebit, Aridhia, TriNetX, Datavant and BC Platforms
+  cover the commercial one. This project is the on-ramp, not the motorway.
+
+## Pseudonymisation design (decided)
+
+Single secret key, everything derives from it, key never enters the dataset:
+
+```
+subject_id  = HMAC-SHA256(key, "subject|" + national_id)[:12]   -> sub-a3f9c21b4e07
+date_offset = HMAC(key, "offset|" + subject_id) % 730 - 365     -> stable +/- 1 year
+dicom_uid   = prefix + HMAC(key, "uid|" + original_uid)         -> relinkable
+```
+
+Deterministic, domain-separated by prefix, useless without the key. Never plain
+`hash(national_id)` — the identifier space is enumerable and trivially
+brute-forced.
+
+Dates: no absolute dates in the dataset, only `day_offset` from the subject's
+baseline. Intervals stay exact. Age truncated at 89, "90+" above.
+
+Imaging gotchas: identifiers hide in vendor private headers, series
+descriptions, burned-in pixel annotations, and the head volume itself
+(defacing required).
+
+## Layout
+
+```
+dataset/
+  dataset_description.json
+  participants.tsv
+  sub-<id>/ses-<n>/
+    anat/ pet/ lab/ reports/
+  derivatives/
+  .deident/
+    manifest.json
+    risk_report.json
+```
+
+## Current state
+
+Done: `generate` (synthetic corpus, injectable defects, ground-truth PHI
+annotations with character offsets, per-subject seed streams), `defects`,
+`validate` with a modular rule registry, `rules`, `layout.py` as the schema.
+Strict mypy, ruff with docstring rules, Apache-2.0.
+
+Next, in order:
+1. **Infrastructure first**: `.gitignore`, `git init`, initial commit, GitHub
+   Actions running pytest + ruff + mypy on 3.11-3.14. None of this exists yet
+   and the work currently lives in one unversioned copy on a desktop.
+2. Align the manifest schema to HealthDCAT-AP (read the spec first).
+3. `build`: pseudonymise a raw corpus into a dataset, emit the manifest.
+4. `risk`: k-anonymity report, shaped toward the Art. 78 label.
+5. Full worked example: raw synthetic input -> validated dataset, in the README.
+
+## Decision log
+
+Append here the same session a decision is taken, with the reason. This file is
+the project's memory; a decision that lives only in a chat transcript is a
+decision that will be re-litigated or silently reversed.
+
+**2026-11-06 — Stack.** Package and CLI `commissura` (verified free on PyPI),
+licence Apache-2.0, Python 3.11 floor, `typer` + `pydantic` v2. Apache over MIT
+for the explicit patent grant, which is what hospital and IRCCS legal offices
+approve without discussion. 3.11 because it is what Debian 12 and RHEL 9 ship;
+3.12 would exclude Debian 12. pydantic defines the schema once and exports JSON
+Schema from it, so validation, documentation and a publishable spec cannot
+diverge. AGPL rejected: network copyleft gets the project screened out of
+clinical settings.
+
+**2026-11-06 — `validate` written before `build`.** Forces the schema to be
+precise. The layout lives in `layout.py` and holds no logic; the validator is
+derived from it, so `build` has a specification to satisfy instead of defining
+one by accident. 39 rules in a registry, enumerable via `commissura rules`.
+
+**2026-11-06 — De-identification invariants are structural, not advisory.** A
+dataset carrying a calendar date is *malformed*, not weakly de-identified. That
+is why the date patterns live in `layout.py` and why `validate` reports a
+surviving date as an error.
+
+**2026-11-06 — Writers refuse reserved delimiters rather than escaping them.**
+The HL7 and DICOM-JSON writers reject a value containing a delimiter instead of
+escaping it. Escaping would rewrite characters after their PHI offsets had been
+recorded, which is the one failure mode that silently corrupts every measurement
+built on a corpus. A reader for real-world input will need the full escape
+table; that belongs with the reader, where unescaping happens before offsets are
+taken.
+
+**2026-11-06 — Synthetic identifiers are impossible by construction, not merely
+random.** Codice fiscale place code `X###` (municipalities are `A`–`M`, foreign
+states `Z`); telephone subscriber part starting `0`, never assignable after an
+Italian area code; `.invalid` email domain per RFC 2606; DICOM UIDs under the
+registration-free `2.25` arc. Institution names and addresses are invented and
+every name carries `SINTETIC`. "Probably nobody" is not good enough, and "it is
+only test data" is the sentence that precedes an incident.
+
+**2026-11-06 — Coverage floor enforced in `pyproject.toml`, not as a flag.**
+Branch coverage, fail under 99%. With no CI yet, a threshold that applies only
+when somebody remembers to pass `--cov` is not a threshold. It is a regression
+floor, not a target: coverage says a line ran, not that it was checked.
+
+**2026-11-06 — The secret key is never a command-line argument.** `commissura
+keygen` writes a key file; `build` reads it from `--key-file` or the
+`COMMISSURA_KEY_FILE` environment variable. A `--key <value>` option is
+deliberately not offered: it would put the key in shell history, in `ps` output
+and in CI logs. On POSIX the key file is created mode 0600; on Windows the
+file-creation mode is largely ignored, so the tool says so rather than implying
+a protection it did not apply.
+
+**2026-11-06 — `date_offset` and `day_offset` are different mechanisms.** The
+dataset carries only `day_offset`: integer days from the subject's own baseline,
+intervals exact, no calendar anchor. `date_offset` — the per-subject ±365-day
+HMAC shift — is for values that must stay a *syntactically valid date* for a
+downstream tool that refuses to run without one, notably DICOM `StudyDate` on
+the way into `dcm2bids`. It never appears in the finished dataset, which is why
+`validate` is right to reject date-shaped strings there. Caveat to remember:
+baseline is the subject's earliest event in the corpus, so offsets are stable
+per (key, corpus) and re-running with additional *earlier* data shifts them.
+
+**2026-11-06 — The `.deident/manifest.json` schema in `layout.py` was flagged as
+an invented schema that HealthDCAT-AP would replace. Superseded 2026-11-07: that
+diagnosis was half wrong.** See the entry below.
+
+**2026-11-07 — There are two artefacts, not one, and only one of them is
+HealthDCAT-AP's business.** Reading the Release 8 obligation table settles this.
+Its 57 properties describe a dataset *for a catalogue*: title, theme, access
+rights, legal basis, purpose, retention period, population coverage, which HDAB
+governs it. That is EHDS Article 77, and its reader is the HDAB. **Nothing in
+the profile records what was done to de-identify the data** — not which fields
+were removed from which modality, not which key produced the pseudonyms, not
+which rule version was applied. So:
+
+| Artefact | Schema | Reader |
+| --- | --- | --- |
+| HealthDCAT-AP dataset description | The profile, Release 8, RDF / JSON-LD | The HDAB, and any catalogue |
+| `.deident/manifest.json` | Ours. Nobody else specifies it. | Whoever audits the de-identification |
+| `dataset_description.json` | BIDS | Tools that read the dataset |
+
+So `MANIFEST_REQUIRED_KEYS` is not wrong for what it is; it was only wrong to
+treat it as the thing HealthDCAT-AP would replace. The work is to **add** the
+dataset description, not to rewrite the manifest. `DS009`, `DI006` and `DI007`
+stand. This brief's own scope line already said it — "HealthDCAT-AP-aligned,
+**plus** schema version, de-identification rule version, per-modality record..."
+— and the word doing the work is *plus*.
+
+**2026-11-07 — The three controlled vocabularies are read in full, and the last
+blocking unknown is closed.** `commissura` now knows the three mandatory
+IRI-valued fields it must emit:
+
+| Property | Value | Label, verbatim |
+| --- | --- | --- |
+| `healthdcatap:healthCategory` | `.../healthcategories/EHRS` | "Electronic health data from EHRs" |
+| `dcat:theme` | `.../data-theme/HEAL` | "Health" |
+| `dct:accessRights` | `.../access-right/NON_PUBLIC` | "non-public" |
+
+`EHRS` is the only one of the seventeen Article 51 categories whose label
+mentions EHRs, so choosing it is a reading rather than a guess. The near miss
+worth ruling out is `PGEH`, "Personal electronic health data automatically
+generated through medical devices" — a different Article 51 category.
+
+**And the access-right definitions settle the tier question that was inference
+yesterday.** Quoted from the authority list: `NON_PUBLIC` is "not publicly
+accessible for privacy, security or other reasons", noting the category "may
+include resources that contain sensitive or personal information". `RESTRICTED`
+is "only available under certain conditions", and its own usage note gives those
+conditions as **payment, non-disclosure agreements, or a publisher who has not
+yet decided** whether the data can be released. Those are commercial and
+editorial conditions, not privacy ones. A pseudonymised clinical dataset is
+withheld for the first reason. So `DEFAULT_TIER = NON_PUBLIC`, which is also
+`SUPERSET_TIER`, so the default is the strictest and moving off it never
+requires gathering more metadata. It stays a default and not a decision taken
+for the user, because the tier is a fact about the release arrangement.
+
+One trap now encoded rather than waiting to be discovered: the health category
+vocabulary is served over **https** and the data-theme vocabulary over **http**.
+Using the wrong base produces an IRI that looks entirely plausible and resolves
+to nothing, so both bases are constants and a test pins the difference.
+
+**2026-11-07 — All three tiers read. The tier is the data holder's declaration,
+not commissura's choice, and `build` gathers the non-public superset.** The three
+shapes pin `dct:accessRights` to `.../access-right/PUBLIC`, `NON_PUBLIC` and
+`RESTRICTED` respectively, each mandatory at exactly one value, so **the tiers
+are mutually exclusive** — no dataset satisfies two. Which one applies is a fact
+about the release arrangement that only the holder knows, so `commissura` must
+not pick it; it takes the access right as input and refuses a value outside the
+three rather than rounding to the nearest tier.
+
+What it *can* do is gather once. The obligation sets are nested even though the
+tiers are not: non-public requires everything the other two require plus
+`dcat:contactPoint`, `dcat:keyword`, `dct:type` and `dct:provenance`. So `build`
+collects the non-public superset — 14 mandatory properties, 15 counting the
+conditional `hasVariables` — and emits whichever access right is declared.
+Switching tier then changes one triple instead of sending somebody back for four
+more fields. Pinned as `healthdcat.SUPERSET_TIER`.
+
+**Counter-intuitive and worth remembering: `RESTRICTED` requires *less* metadata
+than `NON_PUBLIC`**, and exactly as much as `PUBLIC`. The names suggest the
+opposite. A reading that fits — inference, not a finding, because the
+access-right vocabulary's own definitions have not been read — is that a
+non-public dataset is one whose *description* is catalogued while its data is
+not available, so it needs a contact point, keywords, a type and a provenance
+statement precisely so somebody can find it and ask for access.
+
+**2026-11-07 — Correction: a tier is not chosen, it is selected by
+`dct:accessRights`.** Yesterday's entry said "a dataset description must declare
+its tier". Reading the shapes shows it the other way round:
+`public-shapes.ttl` constrains `dct:accessRights` with **`sh:hasValue`**, fixed
+to `.../access-right/PUBLIC`, and that property is mandatory at 1..1 in every
+tier. So the access-rights value *is* the tier. A dataset released under an EHDS
+data permit is not public, which means **the public shapes are the wrong ones to
+validate a clinical dataset against** — and they are the ones anyone would reach
+for first, because they are the file named without a qualifier. The non-public
+and restricted shapes have not been read yet, so the values they pin are
+recorded as unknown in `TIER_ACCESS_RIGHT` rather than guessed. Reading them is
+the next step, and it decides which tier `commissura` targets.
+
+**2026-11-07 — The `healthdcatap:` namespace IRI is provisional, by the
+profile's own admission.** The shapes file declares
+`http://healthdataportal.eu/ns/health#` under the comment "To be changed when
+the Heathdcat-AP namespace is created". Every health-specific term this tool
+emits will therefore need rewriting. Mitigation, which must not be undone: IRIs
+are assembled from `healthdcat.NAMESPACES` in one place and never written into
+templates, so the eventual change is a one-line edit.
+`HEALTHDCATAP_NAMESPACE_IS_PROVISIONAL` exists to make that explicit to whoever
+reads it next.
+
+**2026-11-07 — HealthDCAT-AP imports DCAT-AP 3.0.0, so conformance is to both.**
+`owl:imports <https://semiceu.github.io/DCAT-AP/releases/3.0.0/html/shacl/shapes.ttl>`.
+The health shapes are not the whole constraint set: `Agent_Shape` and
+`PeriodOfTime_Shape` are defined upstream, and the health file states that class
+range constraints live separately again in `ranges/range.ttl`. The target claim
+in this brief — "commissura emits HealthDCAT-AP-conformant dataset
+descriptions" — therefore carries a DCAT-AP 3.0.0 dependency that was not
+visible before. Scope accordingly.
+
+**2026-11-07 — `hasVariables` is a CSVW table group, and the lab branch nearly
+satisfies it already.** The obligation that looked hardest to meet —
+`hasStructuredData` is mandatory, and when true at least one `hasVariables` is
+required — resolves to a CSVW structure: tables, columns, and per column
+`csvw:name`, `dct:description`, `csvw:title`, `csvw:datatype`,
+`csvw:propertyUrl`. A `lab/*.tsv` header plus its JSON sidecar already carries a
+column name, a description, a datatype and a LOINC code. So `build` can generate
+the mandatory variable description from data it has, rather than asking the user
+for it. This is the one place where the profile and the existing dataset layout
+line up for free, and it is worth not squandering by inventing a parallel
+representation.
+
+**2026-11-07 — The Release 8 obligation table is transcribed into
+`healthdcat.py`, not fetched or vendored.** 57 properties × 3 tiers, with
+`SOURCE_URL` recorded so it can be re-checked. Transcribing makes an upstream
+change a reviewable diff instead of a silent behaviour change, and keeps the
+tool from depending on a network fetch. The tests check internal consistency —
+no row lost, no label duplicated, no mandatory property permitting zero values —
+because they cannot check against the network without becoming flaky.
+
+What `build` must therefore satisfy, in the public tier: `dct:accessRights`
+(1..1), `dcatap:applicableLegislation` (1..*), `dct:description`,
+`dcat:distribution`, `healthdcatap:healthCategory`, `dct:identifier`,
+`dcat:theme`, `dct:title` (all 1..*), `healthdcatap:hasStructuredData` (1..1)
+and `healthdcatap:hdab` (1..1). The non-public tier adds `dcat:contactPoint`,
+`dcat:keyword`, `dct:provenance` and `dct:type`. And one obligation no
+cardinality column can express: when `hasStructuredData` is true — which it is
+for any clinical dataset — at least one `healthdcatap:hasVariables` is
+mandatory.
+
+Two consequences worth seeing now. `healthdcatap:hdab` is mandatory at 1..1,
+so a conformant description **cannot be produced without naming a Health Data
+Access Body** — and Italy has not designated one yet, which is due March 2027.
+A local tool must therefore let the user supply it and must not invent it.
+`dcat:distribution` is mandatory at 1..*, so the profile assumes the data is
+*distributable*; a dataset sitting on a hospital disk still needs a distribution
+node describing how it would be accessed.
+
+**2026-11-06 — The HealthDCAT-AP URL in this brief was stale, and both rendered
+sites are dead ends for a script.** `healthdcat-ap.github.io` is decommissioned.
+Its replacement, `data.health.europa.eu/healthdcat-ap/releases/latest/`, is
+client-side rendered and returns zero bytes to a plain fetch. The way in is the
+specification's **source repository** on the Commission's GitLab, whose REST API
+serves plain JSON with no JavaScript — so no rendering browser is needed after
+all. Endpoints and file inventory are in the alignment section above.
+
+**2026-11-07 — commissura targets HealthDCAT-AP Release 8.** The repository
+carries releases 5 through 8; the rendered site still serves 5 as "latest". 8 is
+chosen because releases 6 and up ship a packaged SHACL validator
+(`html/shacl/HealthDCAT-AP_validator/`) that Release 5 does not, which means
+conformance can be checked against the profile's own tool instead of against our
+reading of it. Consequences to honour: the manifest must name the release it was
+built against, and `validate` must be able to report that a dataset claims a
+release it does not satisfy. Risk accepted: 8 may still be moving, so the
+release is pinned in one constant and the reason for the pin is here.
+
+## Conventions
+
+- English for code, comments, docs, commit messages.
+- Every feature ships with tests and a line in the README.
+- Ship something runnable each week rather than a perfect subsystem each month.
+- Do not mark a command "available" in the README before it runs end to end.
+- **Record every new decision in the decision log above, in the session it is
+  taken, with the reason and not just the conclusion.**
+
+## Reference material
+
+- Commission EHDS FAQ, 26 Mar 2026 (CC BY 4.0, quotable):
+  https://health.ec.europa.eu/document/download/4dd47ec2-71dd-49fc-b036-ad7c14f6ed68_en?filename=ehealth_ehds_qa_en.pdf
+- TEHDAS2 guidelines (10 published July 2026); final conference 16 Nov 2026.
+- HealthData@EU Pilot deliverables (above) — WP6 metadata, WP8 quality.
+- BIDS specification — structure to extend, not reinvent.
+- Philter (UCSF, npj Digital Medicine 2020) — PHI category schema worth
+  adapting; note it targets English and HIPAA Safe Harbor, not Italian / GDPR.
