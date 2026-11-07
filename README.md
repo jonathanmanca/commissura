@@ -46,7 +46,7 @@ uv pip install -e ".[dev]"
 | `commissura keygen` | Create a pseudonymisation key | available |
 | `commissura key-info` | Show a key's fingerprint, without revealing the key | available |
 | `commissura build` | Pseudonymise a raw corpus into a dataset, with manifest and HealthDCAT-AP description | available |
-| `commissura risk` | k-anonymity report over participant attributes | planned |
+| `commissura risk` | k-anonymity over participant attributes, flagging k < 5 | available |
 
 Every command that reports anything accepts `--json`, so the tool composes
 inside somebody else's pipeline without being screen-scraped.
@@ -361,6 +361,33 @@ Record numbers are compared with leading zeros stripped, which recovers the
 `imaging.mrn_format_drift` defect: at `--defect-rate 1.0` across twenty
 subjects, no imaging study is lost. That defect is the one that silently halves
 a cohort when somebody joins on the raw identifier.
+
+### `commissura risk`
+
+```bash
+commissura risk ./dataset
+```
+
+```
+  participants           10
+  quasi-identifiers      age, sex
+  minimum k              1
+  below k=5              10 combination(s)
+    k=1  age=22, sex=M
+    k=1  age=36, sex=F
+```
+
+A dataset with no name in it can still identify somebody. If one participant is
+the only 94-year-old woman in the cohort, that row is unique on attributes
+nobody thinks of as identifiers.
+
+`build` writes the report automatically, which is what `validate` looks for.
+Note the honest result above: on ten participants with exact ages, minimum k is
+1. Ten people cannot reach k=5 on age and sex together — a property of small
+cohorts, not a defect, and the command reports the number rather than a verdict.
+
+Not an Article 78 quality and utility label: those criteria are not published
+yet.
 
 ### Synthetic by construction
 

@@ -234,19 +234,16 @@ Next, in order:
    repository now exists locally with one commit; there is no remote and no CI,
    so the 3.11 floor is still guaranteed only by ruff's `target-version` and
    mypy's `python_version`.
-2. `risk`: k-anonymity over the participant attributes, flagging k < 5, shaped
-   toward the Art. 78 quality and utility label. `validate` already warns when
-   `.deident/risk_report.json` is absent, which it currently always is.
-3. Run the emitted `healthdcat-ap.jsonld` through the profile's **own packaged
+2. Run the emitted `healthdcat-ap.jsonld` through the profile's **own packaged
    SHACL validator** (`html/shacl/HealthDCAT-AP_validator/`). That is the real
    conformance check and the reason Release 8 was chosen; until it passes, the
    claim in this brief is unproven.
-4. Read `ranges/range.ttl` and the imported DCAT-AP 3.0.0 shapes, the two
+3. Read `ranges/range.ttl` and the imported DCAT-AP 3.0.0 shapes, the two
    remaining parts of the constraint set.
-5. Full worked example in the README: raw synthetic input -> validated dataset.
+4. Full worked example in the README: raw synthetic input -> validated dataset.
 
 Done since this list was written: git init with a first commit, the HealthDCAT-AP
-alignment (Release 8 transcribed, three authority lists read in full), and
+alignment (Release 8 transcribed, three authority lists read in full), `risk`, and
 `build` end to end — `generate` to `build` to a dataset that `validate` reports
 as conformant.
 
@@ -574,6 +571,24 @@ what each file actually contained. Deriving it per file would be stronger and is
 the obvious next improvement; what makes the current form defensible is that the
 rules are deterministic and the scrubber's own per-document counts are recorded
 alongside. Recorded here so the gap is not rediscovered as a surprise.
+
+**2026-11-07 — `risk` is k-anonymity over `participants.tsv` and nothing more.**
+A `Counter` over the recommended participant columns, flagging combinations
+shared by fewer than five people. It reads the quasi-identifiers from
+`layout.RECOMMENDED_PARTICIPANT_COLUMNS`, so adding a column to the table adds
+it to the assessment. `build` now writes the report, which closes the warning
+`validate` had emitted on every build.
+
+Deliberately **not** shaped toward the Article 78 quality and utility label: the
+criteria are unpublished and QUANTUM is still developing them, so there is
+nothing to build against. Also skipped: the GitHub Actions workflow the list
+below asks for, because with no remote it cannot run and would be dead code
+until somebody pushes.
+
+Honest result on a small cohort: minimum k is 1. Ten participants with exact
+ages cannot reach k=5 on age and sex together. That is a property of small
+cohorts, not a defect in the dataset, and the report says the number rather than
+a verdict.
 
 ## Conventions
 

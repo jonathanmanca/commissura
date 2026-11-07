@@ -19,8 +19,9 @@ from typing import Annotated
 
 import typer
 
-from commissura import __version__
+from commissura import __version__, layout
 from commissura.build.manifest import write_healthdcat_description, write_manifest
+from commissura.build.risk import K_THRESHOLD, assess, write_risk_report
 from commissura.build.writer import BuildSpec, build_dataset
 from commissura.deident.keys import (
     KEY_FILE_ENV_VAR,
@@ -485,6 +486,7 @@ def build(
     summary = build_dataset(corpus, key, spec, out)
     write_manifest(out, corpus=corpus, summary=summary, key=key, spec=spec)
     write_healthdcat_description(out, spec=spec, summary=summary)
+    risk = write_risk_report(out)
 
     report = validate_dataset(out) if validate_output else None
 
@@ -505,6 +507,10 @@ def build(
                         "mandatory_properties_unsatisfied": list(summary.missing_for_conformance),
                     },
                     "residual_risk": list(summary.residual_risks()),
+                    "k_anonymity": {
+                        "minimum_k": risk["minimum_k"],
+                        "below_threshold": len(risk["combinations_below_threshold"]),  # type: ignore[arg-type]
+                    },
                     "validation": None
                     if report is None
                     else {
@@ -526,6 +532,11 @@ def build(
         typer.echo(f"  free-text redactions   {summary.redaction_count}")
         typer.echo(f"  linkage issues         {summary.linkage_issues}")
         typer.echo(
+            f"  minimum k              {risk['minimum_k']}"
+            f"  ({len(risk['combinations_below_threshold'])} combination(s) below "  # type: ignore[arg-type]
+            f"{K_THRESHOLD})"
+        )
+        typer.echo(
             f"  profile                HealthDCAT-AP {HEALTHDCAT_RELEASE}, "
             f"{selected_tier.value} tier"
         )
@@ -538,8 +549,8 @@ def build(
         if summary.residual_risks():
             typer.echo("")
             typer.echo("  Residual risk the method cannot reach:")
-            for risk in summary.residual_risks():
-                typer.echo(f"    {risk}")
+            for entry in summary.residual_risks():
+                typer.echo(f"    {entry}")
         if report is not None:
             typer.echo("")
             counts = report.counts_by_severity()
@@ -553,3 +564,55 @@ def build(
 
     if report is not None and not report.is_conformant:
         raise typer.Exit(1)
+
+
+@app.command()
+def risk(
+    dataset: Annotated[Path, typer.Argument(help="The dataset to assess.")],
+    threshold: Annotated[
+        int,
+        typer.Option("--threshold", "-k", min=1, help="Flag combinations shared by fewer."),
+    ] = K_THRESHOLD,
+    write: Annotated[
+        bool,
+        typer.Option("--write/--no-write", help="Write .deident/risk_report.json."),
+    ] = True,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the report as JSON instead of text.")
+    ] = False,
+) -> None:
+    """Measure k-anonymity over the participant attributes.
+
+    A dataset with no name in it can still identify somebody. If one participant
+    is the only 94-year-old woman in the cohort, that row is unique on attributes
+    nobody thinks of as identifiers.
+
+    Not an Article 78 quality label: those criteria are not published yet.
+    """
+    if not (dataset / layout.PARTICIPANTS_TSV).is_file():
+        typer.echo(f"No {layout.PARTICIPANTS_TSV} under {dataset}.", err=True)
+        raise typer.Exit(1)
+
+    payload = (
+        write_risk_report(dataset, threshold=threshold)
+        if write
+        else assess(dataset, threshold=threshold)
+    )
+
+    if as_json:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    below = payload["combinations_below_threshold"]
+    identifiers = payload["quasi_identifiers"]
+    assert isinstance(below, list)
+    assert isinstance(identifiers, list)
+    typer.echo(f"  participants           {payload['participants']}")
+    typer.echo(f"  quasi-identifiers      {', '.join(identifiers)}")
+    typer.echo(f"  minimum k              {payload['minimum_k']}")
+    typer.echo(f"  below k={threshold}              {len(below)} combination(s)")
+    for entry in below[:10]:
+        values = ", ".join(f"{k}={v}" for k, v in entry["values"].items())
+        typer.echo(f"    k={entry['k']}  {values}")
+    if len(below) > 10:
+        typer.echo(f"    ... and {len(below) - 10} more")

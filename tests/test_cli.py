@@ -501,3 +501,60 @@ def test_build_fails_when_its_output_does_not_conform(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert "DOES NOT CONFORM" in result.stdout
     assert "PT006" in result.stdout
+
+
+def test_build_writes_the_risk_report_so_validate_stops_warning(tmp_path: Path) -> None:
+    """The warning validate emitted on every build until now."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(app, _build_args(tmp_path, raw, key, "--json"))
+
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout)["validation"]["counts"]["warning"] == 0
+    assert (tmp_path / "dataset" / layout.DEIDENT_DIR / layout.RISK_REPORT_JSON).is_file()
+
+
+def test_risk_reports_k_anonymity(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    assert runner.invoke(app, _build_args(tmp_path, raw, key)).exit_code == 0
+
+    result = runner.invoke(app, ["risk", str(tmp_path / "dataset")])
+    assert result.exit_code == 0, result.stdout
+    assert "minimum k" in result.stdout
+    assert "quasi-identifiers" in result.stdout
+
+
+def test_risk_json_output_is_parseable(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    runner.invoke(app, _build_args(tmp_path, raw, key))
+
+    result = runner.invoke(app, ["risk", str(tmp_path / "dataset"), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["quasi_identifiers"] == ["age", "sex"]
+    assert payload["participants"] == 5
+
+
+def test_risk_can_assess_without_writing(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    runner.invoke(app, _build_args(tmp_path, raw, key))
+    report = tmp_path / "dataset" / layout.DEIDENT_DIR / layout.RISK_REPORT_JSON
+    report.unlink()
+
+    result = runner.invoke(app, ["risk", str(tmp_path / "dataset"), "--no-write"])
+    assert result.exit_code == 0
+    assert not report.exists()
+
+
+def test_risk_on_a_directory_that_is_not_a_dataset(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["risk", str(tmp_path)])
+    assert result.exit_code == 1
+
+
+def test_risk_lists_many_combinations_compactly(tmp_path: Path) -> None:
+    """A cohort of unique rows produces one line per participant, then a tail."""
+    raw, key = _raw_corpus(tmp_path, subjects=20), _key(tmp_path)
+    runner.invoke(app, _build_args(tmp_path, raw, key))
+
+    result = runner.invoke(app, ["risk", str(tmp_path / "dataset")])
+    assert result.exit_code == 0
+    assert "more" in result.stdout
