@@ -35,6 +35,177 @@ uv venv
 uv pip install -e ".[dev]"
 ```
 
+## The whole thing, start to finish
+
+Five commands. Every output below was captured from a real run, not written by
+hand.
+
+### 1. Make a key
+
+```bash
+commissura keygen --out ./commissura.key
+```
+
+```
+Wrote a new key to commissura.key
+  fingerprint        02971fa50adf0fcc
+  owner-only access  NO
+
+  This platform does not honour POSIX file modes, so the key file inherits the
+  directory's permissions. Move it somewhere only you can read, or keep it in an
+  encrypted store. Back it up: every dataset built with it becomes permanently
+  unlinkable if it is lost.
+```
+
+Every pseudonym derives from this one secret. The key is never printed and never
+enters the dataset; what gets recorded is the fingerprint. On Linux and macOS the
+file is created mode 0600 and the message says so instead.
+
+### 2. Make something to work on
+
+```bash
+commissura generate --subjects 25 --seed 42 --defect-rate 0.2 --out ./raw
+```
+
+```
+Wrote 190 files to ./raw
+  lab          115  HL7 v2 ORU^R01 messages
+  reports       48  free-text documents
+  imaging       27  DICOM JSON Model sidecars
+
+  subjects      25  seed 42
+  PHI spans   3642  recorded as ground truth
+  defects      321  injected at rate 0.2
+
+  Verified: every recorded PHI offset matches the file on disk.
+```
+
+Three separate exports, as a hospital would hand them over, with 321 injected
+defects and 3,642 identifiers whose exact character positions are on record.
+
+### 3. Build the dataset
+
+```bash
+commissura build ./raw --out ./dataset --key-file ./commissura.key \
+    --hdab "Agenzia Nazionale Sintetica per i Dati Sanitari" \
+    --publisher "IRCCS SINTETICO MAREBIANCO" \
+    --contact-point "dati@irccs-sintetico.invalid" \
+    --access-url "https://portale-hdab-sintetico.invalid/permessi"
+```
+
+```
+Wrote 217 files to ./dataset
+  subjects       25  sessions 93
+  lab            94  tables and sidecars
+  reports        96  documents and sidecars
+  imaging        27  metadata sidecars in derivatives/
+
+  key fingerprint        02971fa50adf0fcc
+  free-text redactions   924
+  linkage issues         0
+  minimum k              1  (21 combination(s) below 5)
+  profile                HealthDCAT-AP 8, non-public tier
+
+  Residual risk the method cannot reach:
+    unrecognised all-capitals tokens remain, which in this corpus is how names
+    are written: OSPE
+    unrecognised all-capitals tokens remain, which in this corpus is how names
+    are written: GIOV
+
+  Validation: conforms - 0 error(s), 0 warning(s)
+```
+
+`linkage issues 0` is the line to read first: all 190 records were attached to
+the right person, including the ones where the imaging export wrote the record
+number without its zero padding. The four `--hdab`, `--publisher`,
+`--contact-point` and `--access-url` values have no defaults, because they are
+facts about your release arrangement and the tool will not invent them. Leave
+them out and it still builds, and tells you what is missing.
+
+### 4. Check it
+
+```bash
+commissura validate ./dataset
+```
+
+```
+CONFORMANT: 0 error(s), 0 warning(s), 0 notice(s) from 39 rules
+```
+
+`build` already ran this and would have failed if it did not conform. Running it
+separately is for datasets you did not build here.
+
+### 5. Read the risk
+
+```bash
+commissura risk ./dataset
+```
+
+```
+  participants           25
+  quasi-identifiers      age, sex
+  minimum k              1
+  below k=5              21 combination(s)
+    k=1  age=22, sex=M
+    k=1  age=26, sex=F
+```
+
+Twenty-one of twenty-five participants are unique on age and sex together. That
+is not a defect — twenty-five people with exact ages cannot reach k=5 on two
+attributes — and it is the number an access body would ask you to fix by banding
+the ages before release. The command reports it rather than passing judgement.
+
+### What came out
+
+```
+dataset/
+  dataset_description.json      BIDS
+  healthdcat-ap.jsonld          EHDS Article 77, for the access body
+  participants.tsv              participant_id, age, sex
+  participants.json
+  sub-83360a70e183/
+    ses-01/ ses-02/
+      lab/      sub-..._ses-02_lab.tsv  + .json
+      reports/  sub-..._ses-02_run-01_report.txt + .json
+  derivatives/imaging-metadata/
+  .deident/
+    manifest.json               what was done, and what it could not reach
+    risk_report.json
+```
+
+And one report, before and after. Same document, same patient:
+
+```
+POLICLINICO UNIVERSITARIO SINTETICO PIETRALTA        [INSTITUTION]
+Viale dei Platani 155 - Roma                         [ADDRESS] - [ADDRESS]
+
+REFERTO DI DIAGNOSTICA PER IMMAGINI                  REFERTO DI DIAGNOSTICA PER IMMAGINI
+===================================                  ===================================
+
+Paziente: GIOVANNI BARBIERI                          Paziente: [NAME]
+Nato/a il: 07/08/2000   Eta: 22 anni                 Nato/a il: [BIRTH-DATE]   Eta: 22 anni
+Codice fiscale: BRBGNN00M07X692O                     Codice fiscale: [NATIONAL-ID]
+Numero nosografico: 5806125                          Numero nosografico: [PATIENT-ID]
+Data del referto: 31/12/2022                         Data del referto: [day_offset:+2]
+
+QUESITO CLINICO                                      QUESITO CLINICO
+Episodio sincopale, esclusione di lesioni            Episodio sincopale, esclusione di lesioni
+strutturali.                                         strutturali.
+```
+
+`reports/5806125_rad_1.txt` became
+`sub-83360a70e183/ses-02/reports/sub-83360a70e183_ses-02_run-01_report.txt`.
+
+Four things to notice. The clinical question survives word for word — a scrubber
+that removed the medicine would protect a useless dataset. The **age stays**,
+because 22 is clinically useful and not identifying on its own, while the
+**birth date is removed rather than offset**, since an offset from the subject's
+own baseline would state it exactly. The report date became an offset, so the
+interval to every other event in this subject's record is still exact. And the
+subject label `sub-83360a70e183` is the same label this person carries in the
+lab branch and in the imaging metadata, which is the only thing tying the three
+together.
+
 ## Commands
 
 | Command | What it does | Status |
@@ -248,25 +419,16 @@ then unshift everybody.
 
 ### `commissura build`
 
+The walkthrough above runs this end to end. In full, with every value the
+profile requires and the tool will not invent:
+
 ```bash
-commissura keygen --out ~/.commissura/key
-commissura generate --subjects 25 --seed 42 --out ./raw
-commissura build ./raw --out ./dataset --key-file ~/.commissura/key     --hdab "<your Health Data Access Body>" --publisher "<your organisation>"
-```
-
-```
-Wrote 68 files to ./dataset
-  subjects       10  sessions 30
-  lab            36  tables and sidecars
-  reports        26  documents and sidecars
-  imaging         6  metadata sidecars in derivatives/
-
-  key fingerprint        5d0d7542b51a1e75
-  free-text redactions   209
-  linkage issues         0
-  profile                HealthDCAT-AP 8, non-public tier
-
-  Validation: conforms - 0 error(s), 1 warning(s)
+commissura build ./raw --out ./dataset --key-file ~/.commissura/key \
+    --hdab "<the access body governing this dataset>" \
+    --publisher "<your organisation>" \
+    --contact-point "<an address somebody can write to>" \
+    --access-url "<where a request for this data would go>" \
+    --dataset-type SYNTHETIC_DATA
 ```
 
 Reads the three exports, links them to the same people, derives every pseudonym
