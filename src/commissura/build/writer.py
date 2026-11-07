@@ -214,9 +214,7 @@ def _known_identifiers(corpus: RawCorpus, subject: Subject) -> KnownIdentifiers:
                 institutions.add(lab.sending_facility)
                 # Individual words too: an institution named in running prose is
                 # usually shortened, while HL7 MSH-4 carries the official form.
-                institutions.update(
-                    part for part in lab.sending_facility.split() if len(part) >= 4
-                )
+                institutions.update(part for part in lab.sending_facility.split() if len(part) >= 4)
     # The clinician who signed a report appears in no laboratory message, so
     # the signature line is the only structured source for that name.
     for report in subject.reports:

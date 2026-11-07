@@ -208,7 +208,6 @@ def write_manifest(
     return payload
 
 
-
 def _non_negative(value: int) -> dict[str, str]:
     """Render a count as an ``xsd:nonNegativeInteger`` literal.
 
@@ -264,11 +263,7 @@ def write_healthdcat_description(
                 "dcatap:applicableLegislation": [
                     {"@id": iri} for iri in spec.applicable_legislation
                 ],
-                **(
-                    {"dcat:accessURL": {"@id": spec.access_url}}
-                    if spec.access_url
-                    else {}
-                ),
+                **({"dcat:accessURL": {"@id": spec.access_url}} if spec.access_url else {}),
             }
         ],
         "dcat:theme": [
@@ -318,9 +313,7 @@ def write_healthdcat_description(
     # Both agent shapes require exactly one cv:contactPoint, which the
     # cardinality table does not mention and only the shapes reveal.
     contact = (
-        {"@type": "cv:ContactPoint", "cv:email": spec.contact_point}
-        if spec.contact_point
-        else None
+        {"@type": "cv:ContactPoint", "cv:email": spec.contact_point} if spec.contact_point else None
     )
     if spec.hdab:
         node["healthdcatap:hdab"] = {

@@ -262,7 +262,6 @@ def scrub_text(
     return scrubbed, report
 
 
-
 def _render_date_forms(value: date | None) -> tuple[str, ...]:
     """Return the ways one date is written in clinical prose.
 
@@ -373,9 +372,7 @@ def _assess_residual_risk(text: str) -> list[str]:
     capitalised = set(re.findall(r"\b[A-Z]{4,}\b", text))
     capitalised -= _PROSE_HEADINGS
     capitalised -= {
-        word
-        for placeholder in _ALL_PLACEHOLDERS
-        for word in re.findall(r"[A-Z]{4,}", placeholder)
+        word for placeholder in _ALL_PLACEHOLDERS for word in re.findall(r"[A-Z]{4,}", placeholder)
     }
     if capitalised:
         risks.append(

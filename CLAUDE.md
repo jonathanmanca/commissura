@@ -629,6 +629,12 @@ Every plain directory name in `.gitignore` is now anchored with a leading slash,
 and the comment there says why. The lesson that generalises: *`git status` being
 clean is not evidence that your work is committed.* `git ls-files <dir>` is.
 
+A second consequence found while fixing it: **ruff respects `.gitignore`**, so
+`ruff format .` and `ruff check .` had been skipping those five files too — they
+were only ever checked when a path was passed explicitly. mypy was unaffected,
+because it reads `files = ["src", "tests"]` from `pyproject.toml` and ignores
+git. Anchoring the patterns fixed the linter blind spot along with the tracking.
+
 Found by `/ponytail-review`, not by the test suite — and the test suite could
 not have found it, because it runs against the working tree. Worth remembering
 when deciding what a green run proves.
