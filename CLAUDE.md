@@ -234,17 +234,11 @@ Next, in order:
    repository now exists locally with one commit; there is no remote and no CI,
    so the 3.11 floor is still guaranteed only by ruff's `target-version` and
    mypy's `python_version`.
-2. Run the emitted `healthdcat-ap.jsonld` through the profile's **own packaged
-   SHACL validator** (`html/shacl/HealthDCAT-AP_validator/`). That is the real
-   conformance check and the reason Release 8 was chosen; until it passes, the
-   claim in this brief is unproven.
-3. Read `ranges/range.ttl` and the imported DCAT-AP 3.0.0 shapes, the two
-   remaining parts of the constraint set.
-4. Full worked example in the README: raw synthetic input -> validated dataset.
+2. Full worked example in the README: raw synthetic input -> validated dataset.
 
 Done since this list was written: git init with a first commit, the HealthDCAT-AP
-alignment (Release 8 transcribed, three authority lists read in full), `risk`, and
-`build` end to end — `generate` to `build` to a dataset that `validate` reports
+alignment (Release 8 transcribed, four authority lists read in full, conformance
+proven against the profile's own SHACL shapes), `risk`, and `build` end to end — `generate` to `build` to a dataset that `validate` reports
 as conformant.
 
 ## Decision log
@@ -589,6 +583,38 @@ Honest result on a small cohort: minimum k is 1. Ten participants with exact
 ages cannot reach k=5 on age and sex together. That is a property of small
 cohorts, not a defect in the dataset, and the report says the number rather than
 a verdict.
+
+**2026-11-07 — The HealthDCAT-AP claim is now proven by the profile's own
+shapes, and proving it found eleven violations.** `pyshacl` loads Release 8's
+SHACL, the DCAT-AP 3.0.0 shapes it imports and `range.ttl`, and judges the
+emitted description. Dev extra only — never a runtime dependency, because
+`pip install commissura` has to stay light.
+
+The eleven were not visible from the cardinality table. Six came from the
+imported DCAT-AP shapes and from `range.ttl`, which the health shapes do not
+contain: every `dcat:Distribution` needs a `dcat:accessURL`; both the HDAB and
+the publisher need a `cv:contactPoint`; `dct:type` must be an IRI from the
+dataset-type authority list, not a string; the record counts must be
+`xsd:nonNegativeInteger`, where a bare JSON number becomes `xsd:integer`; and a
+`healthCategory` reference must be a typed `skos:Concept` carrying its label.
+All fixed, and the labels restated are the authority lists' own.
+
+`--access-url` joins `--hdab`, `--publisher` and `--contact-point` as a field
+the holder must supply and the tool will not invent. `--dataset-type` defaults
+to `SYNTHETIC_DATA`, which is true for this project's own output and must be
+changed when building from real clinical material; the help text says so.
+
+**A finding about the profile, not about us: Release 8's published shapes are not
+valid SHACL.** An `sh:or` sits inside the `sh:property` list with no `sh:path`,
+which no property shape may lack, so a strict engine refuses the whole file. The
+test repairs it on the parsed graph rather than editing the download, and a
+second test fails once upstream fixes it — so the workaround cannot outlive the
+defect. This is presumably why the profile ships a specific validator.
+
+Deliberately not done: installing Java and the ITB RDF validator the profile
+packages. It is a web service, and the authoritative answer comes from the
+shapes, not from the program that loads them. A conformant SHACL engine gives
+the same verdict on the same constraints.
 
 ## Conventions
 

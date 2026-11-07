@@ -389,6 +389,44 @@ cohorts, not a defect, and the command reports the number rather than a verdict.
 Not an Article 78 quality and utility label: those criteria are not published
 yet.
 
+#### Conformance is checked against the profile's own shapes
+
+Not against this project's reading of the specification. `pyshacl` loads
+HealthDCAT-AP Release 8's SHACL shapes, the DCAT-AP 3.0.0 shapes they import,
+and `range.ttl`, and judges the emitted description.
+
+```bash
+mkdir -p reference/healthdcat-ap && cd reference/healthdcat-ap
+API=https://code.europa.eu/api/v4/projects/healthdataeu%2Fhealthdcat-ap/repository/files
+EHDS=public%2Freleases%2Frelease-8%2Fhtml%2Fshacl%2FHealthDCAT-AP_validator%2Fconfig%2Frdf-validator%2Fehds
+for f in shapes%2Fnon-public-shapes.ttl ranges%2Frange.ttl; do
+  curl -sO "$API/$EHDS%2F$f/raw?ref=main"
+done
+curl -sO https://semiceu.github.io/DCAT-AP/releases/3.0.0/html/shacl/shapes.ttl
+```
+
+```bash
+pytest tests/test_shacl_conformance.py
+```
+
+The test skips when the shapes are absent, so a clean checkout stays green.
+
+**The first run found eleven distinct violations** that reading the cardinality
+table had not revealed — six of them came from the imported DCAT-AP 3.0.0 shapes
+and from `range.ttl`, which the health shapes do not contain. Among them: every
+distribution needs a `dcat:accessURL`; both the HDAB and the publisher need a
+`cv:contactPoint`; `dct:type` must be an IRI from an authority list and not a
+string; record counts must be `xsd:nonNegativeInteger` and not the `xsd:integer`
+a bare JSON number becomes; and a `healthCategory` reference must be a typed
+`skos:Concept` carrying its label.
+
+One finding is about the profile rather than about this project: **Release 8's
+published shapes are not valid SHACL.** An `sh:or` sits inside the `sh:property`
+list with no `sh:path`, which no property shape may lack, and a strict engine
+refuses the whole file. The test repairs it on the parsed graph — not by editing
+the download — and a second test fails once upstream fixes it, so the workaround
+cannot outlive the defect.
+
 ### Synthetic by construction
 
 "Probably not real" is not good enough for clinical identifiers, so each one is

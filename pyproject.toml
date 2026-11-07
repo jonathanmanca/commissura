@@ -45,6 +45,10 @@ dev = [
   "pytest-cov>=5.0",
   "ruff>=0.6",
   "mypy>=1.11",
+  # Dev only. Used by tests/test_shacl_conformance.py to judge the emitted
+  # HealthDCAT-AP description against the profile's own SHACL shapes. Never a
+  # runtime dependency: `pip install commissura` stays light.
+  "pyshacl>=0.26",
 ]
 
 [project.scripts]

@@ -914,3 +914,76 @@ def access_right_iri(notation: str) -> str:
             + ", ".join(sorted(known))
         )
     return f"{ACCESS_RIGHT_VOCABULARY}{notation}"
+
+
+# --------------------------------------------------------------------------
+# dct:type, which the shapes require to be an IRI and not a literal
+# --------------------------------------------------------------------------
+
+DATASET_TYPE_SCHEME: Final = "http://publications.europa.eu/resource/authority/dataset-type"
+"""The authority list ``dct:type`` draws from. Mandatory in the non-public tier."""
+
+DATASET_TYPE_BASE: Final = f"{DATASET_TYPE_SCHEME}/"
+
+DATASET_TYPES: Final[dict[str, str]] = {
+    "APROF": "Application profile",
+    "CODE_LIST": "Code list",
+    "CORE_COMP": "Core component",
+    "DIRECTORY": "Directory",
+    "DOMAIN_MODEL": "Domain model",
+    "DSCRP_SERV": "Service description",
+    "GEOSPATIAL": "Geospatial data",
+    "GLOSSARY": "Glossary",
+    "HVD": "High-value dataset",
+    "IEPD": "Information exchange package description",
+    "MAPPING": "Mapping",
+    "NAL": "Name authority list",
+    "ONTOLOGY": "Ontology",
+    "OP_DATPRO": "Provisional data",
+    "RELEASE": "Release",
+    "SCHEMA": "Schema",
+    "STATISTICAL": "Statistical data",
+    "STYLES": "Style sheets",
+    "SYNTHETIC_DATA": "Synthetic data",
+    "TAXONOMY": "Taxonomy",
+    "TEST_DATA": "Test data",
+    "THESAURUS": "Thesaurus",
+}
+"""Dataset types, transcribed from ``catalogue/dataset-types.rdf``.
+
+Three concepts of the twenty-five are omitted because their labels contain a
+character the source renders ambiguously (the ATTO table entries and the syntax
+encoding scheme); none of them describes clinical data. Transcribed rather than
+left open so that a notation can be checked: ``sh:nodeKind sh:IRI`` passes for
+any IRI, so a typo would otherwise produce a plausible dead reference.
+"""
+
+DATASET_TYPE_FOR_SYNTHETIC: Final = "SYNTHETIC_DATA"
+"""The type a dataset built from this project's own generator carries.
+
+A default rather than a detection: the tool cannot tell whether its input was
+synthetic, and the data holder can. It is the right default *here* because this
+project's hard constraint is synthetic data only, and the worked example in the
+README is generate-then-build. Anyone building from real clinical material has
+to pass ``--dataset-type``, and the help text says so.
+"""
+
+
+def dataset_type_iri(notation: str) -> str:
+    """Return the full concept IRI for a dataset type notation.
+
+    Args:
+        notation: A notation such as ``SYNTHETIC_DATA``.
+
+    Returns:
+        The concept IRI.
+
+    Raises:
+        KeyError: If the notation is not in the transcribed list.
+    """
+    if notation not in DATASET_TYPES:
+        raise KeyError(
+            f"dataset type {notation!r} is not in the authority list; expected one of "
+            + ", ".join(sorted(DATASET_TYPES))
+        )
+    return f"{DATASET_TYPE_BASE}{notation}"
