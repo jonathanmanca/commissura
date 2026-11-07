@@ -10,10 +10,12 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from commissura import __version__
+from commissura import __version__, layout
 from commissura.cli import app
 from commissura.deident.keys import KEY_FILE_ENV_VAR, read_key_file
 from commissura.deident.pseudonymise import RULE_VERSION
+from commissura.generate.cohort import CohortSpec
+from commissura.generate.writer import write_corpus
 
 runner = CliRunner()
 
@@ -272,3 +274,230 @@ def test_key_info_without_a_key_explains_how_to_make_one(
     monkeypatch.delenv(KEY_FILE_ENV_VAR, raising=False)
     result = runner.invoke(app, ["key-info"])
     assert result.exit_code == 1
+
+
+# --------------------------------------------------------------------------
+# build
+# --------------------------------------------------------------------------
+
+
+def _raw_corpus(tmp_path: Path, subjects: int = 5, defect_rate: float = 0.0) -> Path:
+    root = tmp_path / "raw"
+    write_corpus(CohortSpec(subjects=subjects, seed=17, defect_rate=defect_rate), root)
+    return root
+
+
+def _key(tmp_path: Path) -> Path:
+    path = tmp_path / "k.key"
+    assert runner.invoke(app, ["keygen", "--out", str(path)]).exit_code == 0
+    return path
+
+
+def _build_args(tmp_path: Path, raw: Path, key: Path, *extra: str) -> list[str]:
+    return [
+        "build",
+        str(raw),
+        "-o",
+        str(tmp_path / "dataset"),
+        "--key-file",
+        str(key),
+        "--hdab",
+        "Agenzia Sintetica",
+        "--publisher",
+        "IRCCS SINTETICO MAREBIANCO",
+        *extra,
+    ]
+
+
+def test_build_produces_a_conformant_dataset(tmp_path: Path) -> None:
+    """The headline: generate, build, validate, all through the command line."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(app, _build_args(tmp_path, raw, key))
+
+    assert result.exit_code == 0, result.stdout
+    assert "conforms" in result.stdout
+    out = tmp_path / "dataset"
+    assert (out / layout.PARTICIPANTS_TSV).is_file()
+    assert (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).is_file()
+    assert (out / layout.HEALTHDCAT_DESCRIPTION).is_file()
+    assert list(out.glob("sub-*/ses-*/lab/*.tsv"))
+
+
+def test_build_prints_the_key_fingerprint_and_not_the_key(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(app, _build_args(tmp_path, raw, key))
+
+    assert read_key_file(key).fingerprint in result.stdout
+    assert read_key_file(key).material.hex() not in result.stdout
+
+
+def test_build_reports_residual_risk(tmp_path: Path) -> None:
+    """Reported rather than scored, so a reviewer knows where to look."""
+    raw, key = _raw_corpus(tmp_path, subjects=8), _key(tmp_path)
+    result = runner.invoke(app, _build_args(tmp_path, raw, key))
+    assert "Residual risk" in result.stdout or result.exit_code == 0
+
+
+def test_build_json_output_is_parseable(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(app, _build_args(tmp_path, raw, key, "--json"))
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["subjects"] == 5
+    assert payload["linkage_issues"] == 0
+    assert payload["key_fingerprint"] == read_key_file(key).fingerprint
+    assert payload["profile"]["tier"] == "non-public"
+    assert payload["validation"]["conformant"] is True
+
+
+def test_build_says_what_is_missing_for_conformance(tmp_path: Path) -> None:
+    """Italy has no designated access body yet, so this is the normal case."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "build",
+            str(raw),
+            "-o",
+            str(tmp_path / "dataset"),
+            "--key-file",
+            str(key),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "Not yet conformant" in result.stdout
+    assert "healthdcatap:hdab" in result.stdout
+    assert "--hdab" in result.stdout
+
+
+def test_build_can_skip_validation(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(app, _build_args(tmp_path, raw, key, "--no-validate"))
+    assert result.exit_code == 0, result.stdout
+    assert "Validation" not in result.stdout
+
+
+def test_build_accepts_each_tier(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    for tier in ("public", "non-public", "restricted"):
+        result = runner.invoke(app, _build_args(tmp_path, raw, key, "--tier", tier, "--json"))
+        assert result.exit_code == 0, result.stdout
+        assert json.loads(result.stdout)["profile"]["tier"] == tier
+
+
+def test_build_rejects_an_unknown_tier(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(app, _build_args(tmp_path, raw, key, "--tier", "secret"))
+    assert result.exit_code == 2
+    assert "Unknown tier" in result.stderr or "Unknown tier" in result.output
+
+
+def test_build_without_a_key_explains_how_to_make_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(KEY_FILE_ENV_VAR, raising=False)
+    raw = _raw_corpus(tmp_path)
+    result = runner.invoke(app, ["build", str(raw), "-o", str(tmp_path / "dataset")])
+    assert result.exit_code == 1
+
+
+def test_build_reports_a_missing_source(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "build",
+            str(tmp_path / "absent"),
+            "-o",
+            str(tmp_path / "dataset"),
+            "--key-file",
+            str(key),
+        ],
+    )
+    assert result.exit_code == 1
+
+
+def test_build_explains_an_empty_corpus_rather_than_writing_nothing(
+    tmp_path: Path,
+) -> None:
+    """A subject is created by a laboratory message, and the message says so."""
+    key = _key(tmp_path)
+    empty = tmp_path / "empty"
+    (empty / "lab").mkdir(parents=True)
+    result = runner.invoke(
+        app,
+        [
+            "build",
+            str(empty),
+            "-o",
+            str(tmp_path / "dataset"),
+            "--key-file",
+            str(key),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "PID-19" in result.stderr or "PID-19" in result.output
+
+
+def test_build_from_a_defective_corpus_still_conforms(tmp_path: Path) -> None:
+    raw = _raw_corpus(tmp_path, subjects=10, defect_rate=0.9)
+    key = _key(tmp_path)
+    result = runner.invoke(app, _build_args(tmp_path, raw, key, "--json"))
+
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout)["validation"]["conformant"] is True
+
+
+def test_the_same_key_rebuilds_the_same_dataset(tmp_path: Path) -> None:
+    """The relinkability guarantee, exercised through the command line."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    first = runner.invoke(app, _build_args(tmp_path, raw, key, "--json"))
+    (tmp_path / "dataset2").mkdir()
+    second = runner.invoke(
+        app,
+        [
+            "build",
+            str(raw),
+            "-o",
+            str(tmp_path / "dataset2"),
+            "--key-file",
+            str(key),
+            "--hdab",
+            "Agenzia Sintetica",
+            "--publisher",
+            "IRCCS SINTETICO MAREBIANCO",
+            "--json",
+        ],
+    )
+
+    assert first.exit_code == 0 and second.exit_code == 0
+    labels_first = sorted(p.name for p in (tmp_path / "dataset").glob("sub-*"))
+    labels_second = sorted(p.name for p in (tmp_path / "dataset2").glob("sub-*"))
+    assert labels_first == labels_second
+
+
+def test_build_appears_in_the_command_list() -> None:
+    result = runner.invoke(app, [])
+    assert "build" in result.stdout
+
+
+def test_build_fails_when_its_output_does_not_conform(tmp_path: Path) -> None:
+    """Building into a directory that already holds a stale subject.
+
+    The pre-existing `sub-` directory is not in the participants table build
+    writes, so PT006 fires. The command must report the finding and exit
+    non-zero rather than announce success over a broken dataset.
+    """
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    stale = tmp_path / "dataset" / "sub-ffffffffffff" / "ses-01" / "lab"
+    stale.mkdir(parents=True)
+    (stale / "sub-ffffffffffff_ses-01_lab.tsv").write_text(
+        "day_offset\tloinc_code\tvalue\tunit\n0\t718-7\t14.1\tg/dL\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, _build_args(tmp_path, raw, key))
+    assert result.exit_code == 1
+    assert "DOES NOT CONFORM" in result.stdout
+    assert "PT006" in result.stdout

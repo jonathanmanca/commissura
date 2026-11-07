@@ -20,6 +20,8 @@ from typing import Annotated
 import typer
 
 from commissura import __version__
+from commissura.build.manifest import write_healthdcat_description, write_manifest
+from commissura.build.writer import BuildSpec, build_dataset
 from commissura.deident.keys import (
     KEY_FILE_ENV_VAR,
     KeyMaterialError,
@@ -31,6 +33,9 @@ from commissura.deident.pseudonymise import RULE_VERSION
 from commissura.generate.cohort import DEFAULT_REFERENCE_DATE, CohortSpec
 from commissura.generate.defects import CATALOGUE, Modality, defects_for
 from commissura.generate.writer import verify_corpus, write_corpus
+from commissura.healthdcat import RELEASE as HEALTHDCAT_RELEASE
+from commissura.healthdcat import Tier as HealthTier
+from commissura.read.corpus import read_corpus
 from commissura.validate import registered_rules, validate_dataset
 
 app = typer.Typer(
@@ -110,7 +115,7 @@ def generate(
 
     The generated material deliberately contains synthetic identifiers: names,
     codici fiscali, absolute dates, addresses and clinicians. That is the point
-    — a de-identifier cannot be tested on data with nothing to remove. Every
+    - a de-identifier cannot be tested on data with nothing to remove. Every
     identifier is recorded in ``_generator/phi_annotations.json`` with its exact
     position, which is what makes de-identification recall measurable.
 
@@ -365,3 +370,186 @@ def key_info(
 
     typer.echo(f"  fingerprint                     {key.fingerprint}")
     typer.echo(f"  de-identification rule version  {RULE_VERSION}")
+
+
+@app.command()
+def build(
+    source: Annotated[
+        Path,
+        typer.Argument(help="The raw corpus to read."),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option("--out", "-o", help="Directory to write the dataset into."),
+    ] = Path("dataset"),
+    key_file: Annotated[
+        Path | None,
+        typer.Option("--key-file", help="The pseudonymisation key."),
+    ] = None,
+    name: Annotated[
+        str,
+        typer.Option("--name", help="Dataset title, written to both descriptions."),
+    ] = "De-identified multimodal clinical dataset",
+    description: Annotated[
+        str,
+        typer.Option("--description", help="Dataset description, required by the profile."),
+    ] = (
+        "Laboratory results, clinical reports and imaging metadata for a cohort of "
+        "subjects, de-identified and linked across modalities."
+    ),
+    hdab: Annotated[
+        str | None,
+        typer.Option(
+            "--hdab",
+            help="The Health Data Access Body governing this dataset. Mandatory for "
+            "HealthDCAT-AP conformance and deliberately not invented.",
+        ),
+    ] = None,
+    publisher: Annotated[
+        str | None,
+        typer.Option("--publisher", help="The organisation releasing the dataset."),
+    ] = None,
+    tier: Annotated[
+        str,
+        typer.Option(
+            "--tier",
+            help="Which HealthDCAT-AP tier applies: public, non-public or restricted. "
+            "This is a fact about the release arrangement, so it is yours to declare.",
+        ),
+    ] = "non-public",
+    validate_output: Annotated[
+        bool,
+        typer.Option(
+            "--validate/--no-validate",
+            help="Validate the dataset after writing it, and fail if it does not conform.",
+        ),
+    ] = True,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the summary as JSON instead of text.")
+    ] = False,
+) -> None:
+    """Pseudonymise a raw corpus into a dataset, with a manifest and a description.
+
+    Reads the three exports under the source directory, links them to the same
+    people, derives every pseudonym from one secret key, expresses dates only as
+    offsets from each subject's own earliest event, scrubs the free text using
+    the identifiers the structured exports declared, and writes a BIDS-shaped
+    dataset.
+
+    Two documents accompany it. `.deident/manifest.json` records what was done
+    and what the method could not reach. `healthdcat-ap.jsonld` describes the
+    dataset against HealthDCAT-AP, which is what a Health Data Access Body
+    reads.
+
+    The command reports rather than refuses when it cannot be fully conformant.
+    `healthdcatap:hdab` is mandatory in the profile and Italy has not designated
+    its access body yet, so a dataset that names none is the normal case until
+    2027 and should still be buildable.
+    """
+    try:
+        selected_tier = HealthTier(tier)
+    except ValueError:
+        typer.echo(
+            f"Unknown tier {tier!r}. Expected one of: " + ", ".join(t.value for t in HealthTier),
+            err=True,
+        )
+        raise typer.Exit(2) from None
+
+    try:
+        key = resolve_key(key_file)
+    except KeyMaterialError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+
+    if not source.is_dir():
+        typer.echo(f"No raw corpus at {source}.", err=True)
+        raise typer.Exit(1)
+
+    corpus = read_corpus(source)
+    if not corpus.subjects:
+        typer.echo(
+            f"No subjects could be established from {source}. A subject is created by a "
+            "laboratory message carrying a national identifier in PID-19; without one "
+            "there is nothing to attribute records to.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    spec = BuildSpec(
+        dataset_name=name,
+        description=description,
+        tier=selected_tier,
+        hdab=hdab,
+        publisher=publisher,
+    )
+    summary = build_dataset(corpus, key, spec, out)
+    write_manifest(out, corpus=corpus, summary=summary, key=key, spec=spec)
+    write_healthdcat_description(out, spec=spec, summary=summary)
+
+    report = validate_dataset(out) if validate_output else None
+
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "dataset_root": str(summary.root),
+                    "subjects": summary.subject_count,
+                    "sessions": summary.session_count,
+                    "files": summary.file_count,
+                    "linkage_issues": summary.linkage_issues,
+                    "free_text_redactions": summary.redaction_count,
+                    "key_fingerprint": key.fingerprint,
+                    "profile": {
+                        "release": HEALTHDCAT_RELEASE,
+                        "tier": selected_tier.value,
+                        "mandatory_properties_unsatisfied": list(summary.missing_for_conformance),
+                    },
+                    "residual_risk": list(summary.residual_risks()),
+                    "validation": None
+                    if report is None
+                    else {
+                        "conformant": report.is_conformant,
+                        "counts": report.counts_by_severity(),
+                    },
+                },
+                indent=2,
+            )
+        )
+    else:
+        typer.echo(f"Wrote {summary.file_count} files to {summary.root}")
+        typer.echo(f"  subjects   {summary.subject_count:6d}  sessions {summary.session_count}")
+        typer.echo(f"  lab        {summary.lab_files:6d}  tables and sidecars")
+        typer.echo(f"  reports    {summary.report_files:6d}  documents and sidecars")
+        typer.echo(f"  imaging    {summary.imaging_files:6d}  metadata sidecars in derivatives/")
+        typer.echo("")
+        typer.echo(f"  key fingerprint        {key.fingerprint}")
+        typer.echo(f"  free-text redactions   {summary.redaction_count}")
+        typer.echo(f"  linkage issues         {summary.linkage_issues}")
+        typer.echo(
+            f"  profile                HealthDCAT-AP {HEALTHDCAT_RELEASE}, "
+            f"{selected_tier.value} tier"
+        )
+        if summary.missing_for_conformance:
+            typer.echo("")
+            typer.echo("  Not yet conformant. Mandatory properties with no value:")
+            for term in summary.missing_for_conformance:
+                typer.echo(f"    {term}")
+            typer.echo("    Supply them with --hdab and --publisher.")
+        if summary.residual_risks():
+            typer.echo("")
+            typer.echo("  Residual risk the method cannot reach:")
+            for risk in summary.residual_risks():
+                typer.echo(f"    {risk}")
+        if report is not None:
+            typer.echo("")
+            counts = report.counts_by_severity()
+            verdict = "conforms" if report.is_conformant else "DOES NOT CONFORM"
+            typer.echo(
+                f"  Validation: {verdict} - {counts['error']} error(s), "
+                f"{counts['warning']} warning(s)"
+            )
+            for finding in report.errors[:5]:
+                typer.echo(f"    {finding.format_line()}")
+
+    if report is not None and not report.is_conformant:
+        raise typer.Exit(1)

@@ -45,7 +45,7 @@ uv pip install -e ".[dev]"
 | `commissura rules` | List every validation rule and what it checks | available |
 | `commissura keygen` | Create a pseudonymisation key | available |
 | `commissura key-info` | Show a key's fingerprint, without revealing the key | available |
-| `commissura build` | Pseudonymise a raw corpus into a dataset, with manifest | planned |
+| `commissura build` | Pseudonymise a raw corpus into a dataset, with manifest and HealthDCAT-AP description | available |
 | `commissura risk` | k-anonymity report over participant attributes | planned |
 
 Every command that reports anything accepts `--json`, so the tool composes
@@ -245,6 +245,122 @@ rather than implying a protection it did not apply.
 The shift differs per subject deliberately: one offset for the whole cohort
 would preserve cross-subject alignment, and a single known date anywhere would
 then unshift everybody.
+
+### `commissura build`
+
+```bash
+commissura keygen --out ~/.commissura/key
+commissura generate --subjects 25 --seed 42 --out ./raw
+commissura build ./raw --out ./dataset --key-file ~/.commissura/key     --hdab "<your Health Data Access Body>" --publisher "<your organisation>"
+```
+
+```
+Wrote 68 files to ./dataset
+  subjects       10  sessions 30
+  lab            36  tables and sidecars
+  reports        26  documents and sidecars
+  imaging         6  metadata sidecars in derivatives/
+
+  key fingerprint        5d0d7542b51a1e75
+  free-text redactions   209
+  linkage issues         0
+  profile                HealthDCAT-AP 8, non-public tier
+
+  Validation: conforms - 0 error(s), 1 warning(s)
+```
+
+Reads the three exports, links them to the same people, derives every pseudonym
+from one key, expresses dates only as offsets from each subject's own earliest
+event, scrubs the free text, and writes a BIDS-shaped dataset with two
+accompanying documents. Then it validates its own output and fails if the result
+does not conform.
+
+#### Free text is de-identified by knowing what to look for
+
+The usual approach to clinical prose is named entity recognition: read the text,
+work out which words are names. This does something different, and it is only
+possible because the corpus was **linked first**.
+
+The laboratory message states this patient's name, national identifier and
+record number. MSH-4 states the sending institution. OBR-16 states the ordering
+clinician. The report's own signature line states who signed it. The imaging
+metadata states the institution's street address. So the problem stops being
+*find the names* and becomes *remove these specific strings* — exact, auditable,
+and reportable.
+
+That is the argument for linking modalities before de-identifying them, and the
+opposite order is the intuitive one.
+
+A report comes out like this:
+
+```
+[INSTITUTION]
+[ADDRESS] - [ADDRESS]
+
+REFERTO DI DIAGNOSTICA PER IMMAGINI
+
+Paziente: [NAME]
+Nato/a il: [BIRTH-DATE]   Eta: 62 anni
+Codice fiscale: [NATIONAL-ID]
+Data del referto: [day_offset:+0]
+
+REPERTI
+Non segni di sanguinamento intra o extra-assiale.
+Si confronta con il precedente esame del [day_offset:-41] eseguito presso [INSTITUTION].
+```
+
+The clinical narrative survives intact. The comparison interval survives as an
+offset, because *41 days earlier* is clinically useful while *12 March 2023* is
+a calendar anchor. **The birth date is removed, not offset**: an offset from the
+subject's own baseline would state the birth date exactly in a dataset that also
+carries the baseline, which protects nothing.
+
+What the method cannot reach is printed, not scored:
+
+```
+  Residual risk the method cannot reach:
+    unrecognised all-capitals tokens remain, which in this corpus is how
+    names are written: GIOV
+```
+
+A score invites a reader to treat de-identification as solved above some
+threshold. A list tells them where to look.
+
+#### Two documents, two readers
+
+| File | Schema | Reader |
+| --- | --- | --- |
+| `.deident/manifest.json` | This project's own. No standard covers it. | Whoever audits the de-identification |
+| `healthdcat-ap.jsonld` | HealthDCAT-AP Release 8, as JSON-LD | A Health Data Access Body, and any catalogue |
+| `dataset_description.json` | BIDS | Tools that read the dataset |
+
+HealthDCAT-AP describes a dataset *for a catalogue* — title, theme, access
+rights, legal basis, retention period. It carries nothing about what was done to
+de-identify the data, so that is a separate document with a separate version.
+
+`--hdab` has no default and is not invented. The profile makes
+`healthdcatap:hdab` mandatory at exactly one value, and Italy has not designated
+its Health Data Access Body yet, so a dataset naming none is the normal case
+until 2027. The command builds anyway and says what is missing:
+
+```
+  Not yet conformant. Mandatory properties with no value:
+    healthdcatap:hdab
+    Supply them with --hdab and --publisher.
+```
+
+#### Linkage is accountable
+
+A subject exists only if a laboratory message established it, because HL7 PID-19
+carries the national identifier and a DICOM header does not. Every record that
+cannot be attached produces an issue naming the file and the reason, and the
+count goes into the manifest — it is the number to look at before trusting a
+dataset.
+
+Record numbers are compared with leading zeros stripped, which recovers the
+`imaging.mrn_format_drift` defect: at `--defect-rate 1.0` across twenty
+subjects, no imaging study is lost. That defect is the one that silently halves
+a cohort when somebody joins on the raw identifier.
 
 ### Synthetic by construction
 

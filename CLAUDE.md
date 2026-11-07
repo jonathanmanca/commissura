@@ -230,13 +230,25 @@ annotations with character offsets, per-subject seed streams), `defects`,
 Strict mypy, ruff with docstring rules, Apache-2.0.
 
 Next, in order:
-1. **Infrastructure first**: `.gitignore`, `git init`, initial commit, GitHub
-   Actions running pytest + ruff + mypy on 3.11-3.14. None of this exists yet
-   and the work currently lives in one unversioned copy on a desktop.
-2. Align the manifest schema to HealthDCAT-AP (read the spec first).
-3. `build`: pseudonymise a raw corpus into a dataset, emit the manifest.
-4. `risk`: k-anonymity report, shaped toward the Art. 78 label.
-5. Full worked example: raw synthetic input -> validated dataset, in the README.
+1. **GitHub Actions** running pytest, ruff and mypy on 3.11 to 3.14. The
+   repository now exists locally with one commit; there is no remote and no CI,
+   so the 3.11 floor is still guaranteed only by ruff's `target-version` and
+   mypy's `python_version`.
+2. `risk`: k-anonymity over the participant attributes, flagging k < 5, shaped
+   toward the Art. 78 quality and utility label. `validate` already warns when
+   `.deident/risk_report.json` is absent, which it currently always is.
+3. Run the emitted `healthdcat-ap.jsonld` through the profile's **own packaged
+   SHACL validator** (`html/shacl/HealthDCAT-AP_validator/`). That is the real
+   conformance check and the reason Release 8 was chosen; until it passes, the
+   claim in this brief is unproven.
+4. Read `ranges/range.ttl` and the imported DCAT-AP 3.0.0 shapes, the two
+   remaining parts of the constraint set.
+5. Full worked example in the README: raw synthetic input -> validated dataset.
+
+Done since this list was written: git init with a first commit, the HealthDCAT-AP
+alignment (Release 8 transcribed, three authority lists read in full), and
+`build` end to end — `generate` to `build` to a dataset that `validate` reports
+as conformant.
 
 ## Decision log
 
@@ -473,6 +485,95 @@ reading of it. Consequences to honour: the manifest must name the release it was
 built against, and `validate` must be able to report that a dataset claims a
 release it does not satisfy. Risk accepted: 8 may still be moving, so the
 release is pinned in one constant and the reason for the pin is here.
+
+**2026-11-07 — Under version control, with LF normalisation declared.** `git
+init` plus a `.gitignore` and a first commit, 59 files. `.gitattributes` forces
+LF in the repository and in every working copy, which matters more here than in
+most projects: the corpus writer exists to put exact bytes on disk, every
+recorded PHI offset is a character position, and HL7 terminates segments with a
+bare carriage return. A newline conversion applied to a fixture would shift
+those offsets and be nearly invisible in a diff. `.gitignore` also excludes
+`*.key` — a key in a repository is a key in every clone and every fork,
+permanently — and the generated `raw/` and `dataset/` trees, which are
+reproducible from a seed and deliberately contain synthetic identifiers. No
+remote: nothing has been pushed anywhere.
+
+**2026-11-07 — The readers are tolerant where the writers are strict, and that
+asymmetry is the design.** `commissura.hl7` refuses a value containing a
+reserved delimiter, because it controls what it emits. `commissura.read.hl7`
+accepts a missing field as an empty string, a missing segment as `None`, a
+timestamp it cannot parse as `None`, and `\n` where HL7 wants `\r`. Every one
+of those is a defect the generator can inject on purpose, so a reader that
+raised on them could not be used to measure how a dataset copes. Unescaping
+happens at parse time, before any offset is taken, so everything downstream
+works in real characters.
+
+**2026-11-07 — Laboratory messages are authoritative for identity; linkage is
+accountable.** A subject exists only if an HL7 message established it, because
+PID-19 carries the national identifier and a DICOM header does not — it has a
+`PatientID`, which is the hospital's own number. Imaging and reports attach to
+subjects already known. Every record that cannot attach produces a
+`LinkageIssue` naming the file and the reason, the count goes into the manifest,
+and that count is the number somebody should look at before trusting a dataset.
+Medical record numbers are compared with leading zeros stripped, which recovers
+the `imaging.mrn_format_drift` defect: at a defect rate of 1.0 across 20
+subjects, zero imaging studies are lost.
+
+**2026-11-07 — Free text is de-identified by targeted redaction, not by named
+entity recognition.** The usual approach looks at prose and tries to work out
+which words are names. This one already knows: the laboratory message states
+this patient's name, national identifier and record number; MSH-4 states the
+sending institution; OBR-16 the ordering clinician; the report's own signature
+line states who signed it; the imaging metadata states the institution's street
+address. So the problem stops being "find the names" and becomes "remove these
+specific strings" — exact, auditable, reportable. **This is the argument for
+linking modalities before de-identifying them, and the opposite order is the
+intuitive one.** What remains is reported rather than hidden: the scrubber emits
+a residual-risk list, and on a ten-subject corpus it reduced to one truncated
+token.
+
+**2026-11-07 — A birth date is removed, never expressed as an offset.** Found on
+the first real build, where a report read `Nato/a il: [day_offset:-22650]`. An
+offset from the subject's own baseline *states the birth date exactly*, in a
+dataset that also carries the baseline, so it protects nothing — and a birth
+date is the most identifying date a record holds. Birth dates are now redacted
+by exact match against the known value, before any date rewriting, and get their
+own placeholder. Event dates still become offsets, because the interval is
+clinically useful and the calendar anchor is what has to go.
+
+**2026-11-07 — Order within the scrubber is load-bearing.** Pattern-based
+removal of emails and telephone numbers runs *before* exact-match substitution.
+Found by a test: an email address contains the patient's own surname, so
+redacting the name first leaves `m.[NAME]@posta.invalid`, the email pattern no
+longer matches, and the domain survives — a leak that looks like a redaction.
+Consecutive identical placeholders are also collapsed, since word-by-word
+redaction of an institution leaks how many words its name had.
+
+**2026-11-07 — Sessions are encounters; imaging metadata goes to
+`derivatives/`.** A session directory per distinct date on which something
+happened to the subject, which is what a clinician means by a visit; one session
+per source file would produce directories that mean nothing. Imaging metadata is
+pseudonymised into `derivatives/imaging-metadata/` rather than `anat/` or
+`pet/`, because no conversion happened — this project orchestrates `dcm2bids`
+rather than reimplementing it, so there is no image to accompany.
+
+**2026-11-07 — Two description documents, and `dcat:distribution` is emitted
+even for a dataset on a disk.** `dataset_description.json` is BIDS, plain JSON,
+read by tools that walk the tree. `healthdcat-ap.jsonld` is the Article 77
+description, RDF, read by a catalogue and an HDAB. Merging them would invent a
+hybrid satisfying neither. The profile makes `dcat:distribution` mandatory at
+1..*, so it assumes the data is distributable; a dataset sitting on a hospital
+disk still gets a distribution node describing the form it would be accessed in.
+The imported DCAT-AP 3.0.0 Distribution requirements are unread, and the emitted
+document says so in its own `profileNote`.
+
+**2026-11-07 — Known limitation: the manifest's per-modality table states intent,
+not observation.** `.deident/manifest.json` lists what was removed, replaced and
+kept per modality from a static table. That describes what the rules do, not
+what each file actually contained. Deriving it per file would be stronger and is
+the obvious next improvement; what makes the current form defensible is that the
+rules are deterministic and the scrubber's own per-document counts are recorded
+alongside. Recorded here so the gap is not rediscovered as a surprise.
 
 ## Conventions
 

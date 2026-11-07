@@ -43,6 +43,16 @@ BIDS_VERSION: Final = "1.9.0"
 # --- Top level -------------------------------------------------------------
 
 DATASET_DESCRIPTION: Final = "dataset_description.json"
+HEALTHDCAT_DESCRIPTION: Final = "healthdcat-ap.jsonld"
+"""The HealthDCAT-AP dataset description, kept separate from the BIDS one.
+
+Two files because they are two different statements to two different readers.
+``dataset_description.json`` is BIDS: plain JSON, read by tools that walk the
+dataset. ``healthdcat-ap.jsonld`` is the Article 77 description: RDF, read by a
+catalogue and by a Health Data Access Body. Merging them would mean inventing a
+hybrid that satisfies neither specification.
+"""
+
 PARTICIPANTS_TSV: Final = "participants.tsv"
 PARTICIPANTS_JSON: Final = "participants.json"
 DEIDENT_DIR: Final = ".deident"
@@ -56,6 +66,7 @@ REQUIRED_TOP_LEVEL: Final = (DATASET_DESCRIPTION, PARTICIPANTS_TSV)
 KNOWN_TOP_LEVEL: Final = frozenset(
     {
         DATASET_DESCRIPTION,
+        HEALTHDCAT_DESCRIPTION,
         PARTICIPANTS_TSV,
         PARTICIPANTS_JSON,
         DEIDENT_DIR,
