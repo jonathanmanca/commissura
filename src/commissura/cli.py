@@ -20,6 +20,7 @@ from typing import Annotated
 import typer
 
 from commissura import __version__, layout
+from commissura import healthdcat as healthdcat_module
 from commissura.build.manifest import write_healthdcat_description, write_manifest
 from commissura.build.risk import K_THRESHOLD, assess, write_risk_report
 from commissura.build.writer import BuildSpec, build_dataset
@@ -410,6 +411,31 @@ def build(
         str | None,
         typer.Option("--publisher", help="The organisation releasing the dataset."),
     ] = None,
+    contact_point: Annotated[
+        str | None,
+        typer.Option(
+            "--contact-point",
+            help="Email address somebody can write to about this dataset. Mandatory "
+            "for conformance: both the access body and the publisher need one.",
+        ),
+    ] = None,
+    access_url: Annotated[
+        str | None,
+        typer.Option(
+            "--access-url",
+            help="Where a request for this data would go, for example the access "
+            "body's permit portal. Mandatory for conformance, and not invented.",
+        ),
+    ] = None,
+    dataset_type: Annotated[
+        str,
+        typer.Option(
+            "--dataset-type",
+            help="Notation from the EU dataset-type authority list. Defaults to "
+            "SYNTHETIC_DATA, which is true for this project's own generator - "
+            "CHANGE IT when building from real clinical material.",
+        ),
+    ] = healthdcat_module.DATASET_TYPE_FOR_SYNTHETIC,
     tier: Annotated[
         str,
         typer.Option(
@@ -476,12 +502,21 @@ def build(
         )
         raise typer.Exit(1)
 
+    try:
+        healthdcat_module.dataset_type_iri(dataset_type)
+    except KeyError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+
     spec = BuildSpec(
         dataset_name=name,
         description=description,
         tier=selected_tier,
         hdab=hdab,
         publisher=publisher,
+        contact_point=contact_point,
+        access_url=access_url,
+        dataset_type=dataset_type,
     )
     summary = build_dataset(corpus, key, spec, out)
     write_manifest(out, corpus=corpus, summary=summary, key=key, spec=spec)

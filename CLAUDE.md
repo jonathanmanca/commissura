@@ -616,6 +616,37 @@ packages. It is a web service, and the authoritative answer comes from the
 shapes, not from the program that loads them. A conformant SHACL engine gives
 the same verdict on the same constraints.
 
+**2026-11-07 — The `.gitignore` silently excluded the whole build subsystem, and
+a review caught it three commits late.** A gitignore pattern with a trailing
+slash and no leading slash matches a directory of that name **at any depth**, so
+`build/` — written for a top-level build-output directory — matched
+`src/commissura/build/`. Five files, the entire de-identification pipeline, were
+untracked. `git status` reported a clean tree the whole time, so three commits in
+a row announced success while `cli.py` in `HEAD` imported modules that were not
+in `HEAD`. A clone could not import the CLI at all.
+
+Every plain directory name in `.gitignore` is now anchored with a leading slash,
+and the comment there says why. The lesson that generalises: *`git status` being
+clean is not evidence that your work is committed.* `git ls-files <dir>` is.
+
+Found by `/ponytail-review`, not by the test suite — and the test suite could
+not have found it, because it runs against the working tree. Worth remembering
+when deciding what a green run proves.
+
+**2026-11-07 — The conformance test proved the library, not the command.** Same
+review. `--contact-point`, `--access-url` and `--dataset-type` existed on
+`BuildSpec` but had no CLI flag, so `commissura build` could never emit a
+conformant description while `tests/test_shacl_conformance.py` passed — it
+constructed `BuildSpec` directly in Python and bypassed the CLI. The flags now
+exist, `--dataset-type` is checked against the authority list, and a second
+conformance test drives the command line exactly as the README does. A test that
+exercises the library instead of the entry point is a test that can be green
+while the product is broken.
+
+Also fixed: `SHAPES_DIR` was relative to the working directory, so the whole
+conformance check skipped silently when `pytest` ran from anywhere else. It is
+now relative to the test file.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

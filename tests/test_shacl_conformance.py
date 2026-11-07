@@ -36,7 +36,9 @@ from commissura.read.corpus import read_corpus
 pyshacl = pytest.importorskip("pyshacl", reason="pyshacl is a dev extra")
 rdflib = pytest.importorskip("rdflib")
 
-SHAPES_DIR = Path("reference/healthdcat-ap")
+# Relative to this file, not to the working directory: a relative path made
+# the whole conformance check skip silently when pytest ran from elsewhere.
+SHAPES_DIR = Path(__file__).resolve().parent.parent / "reference" / "healthdcat-ap"
 SHAPE_FILES = ("non-public-shapes.ttl", "dcat-ap-3.0.0-shapes.ttl", "range.ttl")
 SHACL = "http://www.w3.org/ns/shacl#"
 
@@ -146,3 +148,50 @@ def test_a_description_missing_what_the_holder_must_supply_does_not_conform(
         data, shacl_graph=_load_shapes(), advanced=True, inference="none"
     )
     assert not conforms
+
+
+def test_the_command_line_can_produce_a_conformant_description(tmp_path: Path) -> None:
+    """Drives the CLI, not BuildSpec.
+
+    The test above constructs BuildSpec directly, so it proved the library
+    conformed while the command could not: three mandatory fields had no flag.
+    This one goes through `commissura build` exactly as the README tells a user
+    to, which is the claim that actually matters.
+    """
+    from typer.testing import CliRunner
+
+    from commissura.cli import app
+
+    runner = CliRunner()
+    raw, out, key = tmp_path / "raw", tmp_path / "dataset", tmp_path / "k.key"
+    write_corpus(CohortSpec(subjects=3, seed=31, defect_rate=0.0), raw)
+    assert runner.invoke(app, ["keygen", "--out", str(key)]).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "build",
+            str(raw),
+            "--out",
+            str(out),
+            "--key-file",
+            str(key),
+            "--hdab",
+            "Agenzia Nazionale Sintetica per i Dati Sanitari",
+            "--publisher",
+            "IRCCS SINTETICO MAREBIANCO",
+            "--contact-point",
+            "dati@irccs-sintetico.invalid",
+            "--access-url",
+            "https://portale-hdab-sintetico.invalid/permessi",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Not yet conformant" not in result.stdout
+
+    data = rdflib.Graph()
+    data.parse(out / layout.HEALTHDCAT_DESCRIPTION, format="json-ld")
+    conforms, _, text = pyshacl.validate(
+        data, shacl_graph=_load_shapes(), advanced=True, inference="none"
+    )
+    assert conforms, text

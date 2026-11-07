@@ -25,6 +25,10 @@ from commissura.healthdcat import (
     DATA_THEME_BASE,
     DATA_THEME_FOR_HEALTH,
     DATA_THEMES,
+    DATASET_TYPE_BASE,
+    DATASET_TYPE_FOR_SYNTHETIC,
+    DATASET_TYPE_SCHEME,
+    DATASET_TYPES,
     DATASET_VALUE_CONSTRAINTS,
     DEFAULT_TIER,
     HEALTH_CATEGORIES,
@@ -51,6 +55,7 @@ from commissura.healthdcat import (
     Tier,
     access_right_iri,
     data_theme_iri,
+    dataset_type_iri,
     expand,
     find,
     health_category_iri,
@@ -780,3 +785,42 @@ def test_the_three_mandatory_iri_values_commissura_emits_are_all_resolvable_shap
     assert health_category_iri(HEALTH_CATEGORY_FOR_EHR).startswith("https://")
     assert data_theme_iri(DATA_THEME_FOR_HEALTH).startswith("http://")
     assert access_right_iri(DEFAULT_TIER.name) == TIER_ACCESS_RIGHT[DEFAULT_TIER]
+
+
+# --------------------------------------------------------------------------
+# The dataset-type authority list
+# --------------------------------------------------------------------------
+
+
+def test_the_dataset_type_scheme_holds_the_transcribed_concepts() -> None:
+    """Twenty-two of the source's twenty-five; three omitted, none clinical."""
+    assert len(DATASET_TYPES) == 22
+
+
+def test_the_synthetic_type_is_the_one_read_from_the_file() -> None:
+    assert DATASET_TYPE_FOR_SYNTHETIC == "SYNTHETIC_DATA"
+    assert DATASET_TYPES["SYNTHETIC_DATA"] == "Synthetic data"
+    assert dataset_type_iri("SYNTHETIC_DATA").endswith("/dataset-type/SYNTHETIC_DATA")
+
+
+def test_an_unknown_dataset_type_is_rejected() -> None:
+    """A typo would otherwise build a plausible IRI that resolves to nothing."""
+    with pytest.raises(KeyError, match="not in the authority list"):
+        dataset_type_iri("SYNTETIC_DATA")
+
+
+def test_dataset_type_notations_are_uppercase_tokens() -> None:
+    for notation in DATASET_TYPES:
+        assert re.fullmatch(r"[A-Z][A-Z_]*", notation), notation
+
+
+def test_every_dataset_type_has_a_label_and_builds_an_absolute_iri() -> None:
+    for notation, label in DATASET_TYPES.items():
+        assert label, notation
+        assert dataset_type_iri(notation).startswith("http://")
+
+
+def test_the_dataset_type_base_is_served_over_plain_http() -> None:
+    """Like data-theme and unlike health categories, which use https."""
+    assert f"{DATASET_TYPE_SCHEME}/" == DATASET_TYPE_BASE
+    assert DATASET_TYPE_BASE.startswith("http://")

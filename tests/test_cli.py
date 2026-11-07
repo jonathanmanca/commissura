@@ -558,3 +558,38 @@ def test_risk_lists_many_combinations_compactly(tmp_path: Path) -> None:
     result = runner.invoke(app, ["risk", str(tmp_path / "dataset")])
     assert result.exit_code == 0
     assert "more" in result.stdout
+
+
+def test_build_rejects_a_dataset_type_outside_the_authority_list(tmp_path: Path) -> None:
+    """A typo would otherwise build a plausible IRI that resolves to nothing."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(app, _build_args(tmp_path, raw, key, "--dataset-type", "SYNTETIC_DATA"))
+    assert result.exit_code == 2
+    assert "not in the authority list" in (result.stderr or result.output)
+
+
+def test_build_accepts_another_dataset_type(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(
+        app, _build_args(tmp_path, raw, key, "--dataset-type", "TEST_DATA", "--json")
+    )
+    assert result.exit_code == 0, result.stdout
+
+
+def test_build_with_every_holder_field_reports_nothing_missing(tmp_path: Path) -> None:
+    """The three flags the CLI was missing, which made conformance unreachable."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    result = runner.invoke(
+        app,
+        _build_args(
+            tmp_path,
+            raw,
+            key,
+            "--contact-point",
+            "dati@irccs-sintetico.invalid",
+            "--access-url",
+            "https://portale-hdab-sintetico.invalid/permessi",
+        ),
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Not yet conformant" not in result.stdout

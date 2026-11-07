@@ -12,11 +12,14 @@ __pycache__/
 .coverage
 .coverage.*
 coverage.xml
-htmlcov/
+/htmlcov/
 
-# Build artefacts
-dist/
-build/
+# Build artefacts. Anchored with a leading slash: without it, a trailing-slash
+# pattern matches a directory of that name at any depth, and `build/` silently
+# excluded src/commissura/build/ from version control for three commits.
+# Every plain directory name below is anchored for the same reason.
+/dist/
+/build/
 *.egg-info/
 
 # Pseudonymisation keys. Never commit one: the whole design rests on the key
@@ -29,13 +32,13 @@ build/
 # adds weight without adding information — and a raw corpus deliberately
 # contains synthetic identifiers, which do not belong in version control even
 # when they are fake.
-raw/
-dataset/
-corpus/
+/raw/
+/dataset/
+/corpus/
 
 # Downloaded reference material (specifications, authority lists). Someone
 # else's documents, fetched on demand and recorded by URL in CLAUDE.md.
-reference/
+/reference/
 
 # Editor and OS noise
 .vscode/
