@@ -230,16 +230,22 @@ annotations with character offsets, per-subject seed streams), `defects`,
 Strict mypy, ruff with docstring rules, Apache-2.0.
 
 Next, in order:
-1. **GitHub Actions** running pytest, ruff and mypy on 3.11 to 3.14. The
-   repository now exists locally with one commit; there is no remote and no CI,
-   so the 3.11 floor is still guaranteed only by ruff's `target-version` and
-   mypy's `python_version`.
-2. Full worked example in the README: raw synthetic input -> validated dataset.
+1. **GitHub Actions** running pytest, ruff and mypy on 3.11 to 3.14. There is
+   still no remote, so the 3.11 floor is guaranteed only by ruff's
+   `target-version` and mypy's `python_version`. Deliberately not written yet: a
+   workflow with no remote cannot run.
+2. Derive the manifest's per-modality table from the run rather than from a
+   static table, which is the known limitation recorded below.
+3. Read `ranges/range.ttl` fully and the imported DCAT-AP 3.0.0 shapes. Both are
+   now downloaded under `reference/` and used by the conformance test, but
+   neither has been read for what else it requires.
 
-Done since this list was written: git init with a first commit, the HealthDCAT-AP
-alignment (Release 8 transcribed, four authority lists read in full, conformance
-proven against the profile's own SHACL shapes), `risk`, and `build` end to end — `generate` to `build` to a dataset that `validate` reports
-as conformant.
+Done since this list was written: git init, the HealthDCAT-AP alignment
+(Release 8 transcribed, four authority lists read in full, conformance proven
+against the profile's own SHACL shapes), `risk`, `build` end to end, and the
+worked example in the README — five commands from an empty directory to a
+dataset `validate` reports as conformant, with every output captured from a real
+run.
 
 ## Decision log
 
