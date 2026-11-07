@@ -230,13 +230,9 @@ annotations with character offsets, per-subject seed streams), `defects`,
 Strict mypy, ruff with docstring rules, Apache-2.0.
 
 Next, in order:
-1. **GitHub Actions** running pytest, ruff and mypy on 3.11 to 3.14. There is
-   still no remote, so the 3.11 floor is guaranteed only by ruff's
-   `target-version` and mypy's `python_version`. Deliberately not written yet: a
-   workflow with no remote cannot run.
-2. Derive the manifest's per-modality table from the run rather than from a
+1. Derive the manifest's per-modality table from the run rather than from a
    static table, which is the known limitation recorded below.
-3. Read `ranges/range.ttl` fully and the imported DCAT-AP 3.0.0 shapes. Both are
+2. Read `ranges/range.ttl` fully and the imported DCAT-AP 3.0.0 shapes. Both are
    now downloaded under `reference/` and used by the conformance test, but
    neither has been read for what else it requires.
 
@@ -658,6 +654,34 @@ while the product is broken.
 Also fixed: `SHAPES_DIR` was relative to the working directory, so the whole
 conformance check skipped silently when `pytest` ran from anywhere else. It is
 now relative to the test file.
+
+**2026-11-07 — CI on GitHub Actions, now that a remote exists.** Four Python
+versions on Ubuntu and one on Windows, each running `ruff check`,
+`ruff format --check`, `mypy` and `pytest`. Until now the 3.11 floor was
+guaranteed only by ruff's `target-version` and mypy's `python_version`, which
+catch syntax and standard library APIs but not behaviour, and the whole project
+had only ever run on Windows.
+
+Both platforms are deliberate. **Ubuntu is what makes the cross-platform claim
+true**, since nothing had ever executed there. **Windows stops the opposite
+regression**, where a fix for Linux breaks the platform the author actually
+works on — and this project has real platform-dependent code: the key file's
+POSIX mode, the newline handling the corpus writer exists for, and the
+`Path.read_text(newline=...)` API that only exists from 3.13.
+
+`fail-fast: false`, because on a first run the useful answer is *which*
+versions break, not that one did.
+
+`tests/test_shacl_conformance.py` stays skipped in CI. The shapes live under
+`reference/`, which is gitignored, and fetching them from code.europa.eu on
+every push would make the pipeline depend on a server nobody here controls, and
+fail for reasons that have nothing to do with the commit. Conformance is checked
+locally, deliberately, and the README says where the download commands are.
+
+Action versions are pinned to a major tag (`actions/checkout@v4`,
+`astral-sh/setup-uv@v6`) rather than a commit: a moving major tag picks up
+security fixes, and the trade-off against supply-chain pinning is acceptable for
+a repository with no secrets and nothing to deploy.
 
 ## Conventions
 

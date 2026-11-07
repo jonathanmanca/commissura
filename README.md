@@ -604,6 +604,11 @@ placed where no authority assigns:
 
 ## Development
 
+[![CI](https://github.com/jonathanmanca/commissura/actions/workflows/ci.yml/badge.svg)](https://github.com/jonathanmanca/commissura/actions/workflows/ci.yml)
+
+Every push and pull request to `main` runs `ruff check`, `ruff format --check`,
+`mypy` and `pytest` on Python 3.11 to 3.14 on Ubuntu, and on 3.14 on Windows.
+
 ```bash
 uv venv && uv pip install -e ".[dev]"
 ```
