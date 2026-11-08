@@ -38,6 +38,15 @@ jobs:
       - name: Create the environment
         run: uv venv
 
+      # The repository carries a tracked .python-version holding 3.14, and uv
+      # reads it when choosing an interpreter. If it won over the version
+      # setup-uv installed, all four jobs would run on 3.14 and show four green
+      # ticks that prove nothing about 3.11 — false confidence, which is worse
+      # than no test. setup-uv sets UV_PYTHON, which should take precedence, but
+      # that is exactly the kind of assumption worth turning into a check.
+      - name: Confirm the interpreter really is the matrix version
+        run: uv run python -c "import sys; assert sys.version.startswith('${{ matrix.python-version }}'), sys.version"
+
       - name: Install the project and its dev extras
         run: uv pip install -e ".[dev]"
 
@@ -75,6 +84,9 @@ jobs:
 
       - name: Create the environment
         run: uv venv
+
+      - name: Confirm the interpreter really is 3.14
+        run: uv run python -c "import sys; assert sys.version.startswith('3.14'), sys.version"
 
       - name: Install the project and its dev extras
         run: uv pip install -e ".[dev]"

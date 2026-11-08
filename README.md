@@ -24,14 +24,19 @@ required.
 
 Requires Python 3.11 or newer.
 
+**Not published to PyPI yet**, so install from a checkout:
+
 ```bash
-pip install commissura
+git clone https://github.com/jonathanmanca/commissura.git
 ```
 
-From a checkout, for development:
+```bash
+cd commissura && uv venv && uv pip install -e .
+```
+
+Add the development extras to run the tests and the linters:
 
 ```bash
-uv venv
 uv pip install -e ".[dev]"
 ```
 

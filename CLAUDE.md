@@ -683,6 +683,33 @@ Action versions are pinned to a major tag (`actions/checkout@v4`,
 security fixes, and the trade-off against supply-chain pinning is acceptable for
 a repository with no secrets and nothing to deploy.
 
+**2026-11-08 — The matrix is now proven, not assumed.** `.python-version` is
+tracked and holds `3.14`, and uv reads it when choosing an interpreter. Had it
+won over the version `setup-uv` installs, all four Ubuntu jobs would have run on
+3.14 and shown four green ticks proving nothing about 3.11 — and four green
+ticks are compatible with both outcomes, so the colour cannot tell them apart.
+A step after `uv venv` now asserts `sys.version` starts with the matrix version.
+It passes in silence when the matrix is real and fails loudly when it is not.
+
+Deliberately not done instead: `uv venv --python ${{ matrix.python-version }}`,
+which would make the problem impossible rather than visible. The point was to
+find out whether `UV_PYTHON` wins, and pinning the version would have answered
+nothing. If the assert ever fails, that is the fix.
+
+**2026-11-08 — The README no longer claims an installation that does not
+exist.** It said `pip install commissura`; the package is not on PyPI, and the
+repository is private, so **today nobody but the author can install it at all**.
+That was the only false statement in the repository, and it sat directly under a
+hard constraint reading "Deployable by a stranger: `pip install`". The line is
+now an honest clone-and-install from a checkout, marked "not published to PyPI
+yet".
+
+So that hard constraint is **not met**, and the README stops implying it is.
+Publishing to PyPI would meet it and would also claim the name before somebody
+else does, which is a real argument for doing it early — but it is an
+irreversible public act and therefore the author's call, not a step to take in
+passing. Revisit before going public.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.
