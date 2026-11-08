@@ -696,6 +696,12 @@ which would make the problem impossible rather than visible. The point was to
 find out whether `UV_PYTHON` wins, and pinning the version would have answered
 nothing. If the assert ever fails, that is the fix.
 
+**Answered: it passes.** `UV_PYTHON`, as set by `setup-uv`, takes precedence
+over a tracked `.python-version`, so the matrix is real and the green run that
+preceded this check was genuine too. Keep the assert anyway — it costs one step
+and it is what stops a future edit, or a change in uv's precedence rules, from
+quietly collapsing four jobs into one.
+
 **2026-11-08 — The README no longer claims an installation that does not
 exist.** It said `pip install commissura`; the package is not on PyPI, and the
 repository is private, so **today nobody but the author can install it at all**.
