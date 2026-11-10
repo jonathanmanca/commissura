@@ -1,6 +1,14 @@
 # commissura — project brief
 
 > Context handoff. Read this first in any new session.
+>
+> **How to keep this file true.** Everything above the decision log describes
+> the present and is **rewritten in place**: when a fact changes, edit the
+> sentence that states it and delete what it replaced. Only the decision log is
+> append-only, because it is a log. Appending a correction beside the text it
+> corrects is how this file rotted once already — three paragraphs each
+> claiming a more complete version of the same fact, in increasing order of
+> truth, and only the last one accurate.
 
 ## What this is
 
@@ -110,17 +118,16 @@ restricted, and 14 of the 57 properties genuinely differ between tiers, so
 "conformant" is not one claim but three. A dataset description must declare its
 tier.
 
-**The public tier shapes have been read too** and their value constraints are in
-the same module: node kinds, datatypes, the `sh:hasValue` on `dct:accessRights`,
-and the CSVW structure behind `hasVariables`.
-
-**All three tiers have now been read**, along with the first half of the health
-category vocabulary. Everything found is in that module.
-
-**Read and encoded so far**: the cardinality table, all three tiers' shapes, and
-three authority lists in full — `healthcategories.rdf` (17 concepts),
-`access-right.rdf` (7, with definitions) and `data-theme.rdf` (14). Nothing
-blocking remains before `build` can emit a dataset description.
+**Read and encoded**, all of it in that module: the cardinality table; all three
+tiers' shapes with their value constraints — node kinds, datatypes, the
+`sh:hasValue` on `dct:accessRights`, the CSVW structure behind `hasVariables`;
+and four authority lists. `healthcategories.rdf` (17 concepts) and
+`data-theme.rdf` (14) are transcribed whole. From `access-right.rdf` only the
+three values the tiers pin, with their definitions, because no tier refers to
+the other four. From `dataset-type.rdf`, 22 concepts of 25; the three omitted
+carry a character the source renders ambiguously and none of them describes
+clinical data. Nothing blocking remains before `build` can emit a dataset
+description.
 
 Still unread, now in order of how much they would change things:
 
@@ -133,9 +140,11 @@ Still unread, now in order of how much they would change things:
    `healthdcatap:healthTheme` is only recommended, and its shape says the
    controlled vocabulary does not exist yet, so this is lower value than it
    looks.
-4. The packaged validator in `html/shacl/HealthDCAT-AP_validator/` — the point
-   of choosing Release 8. Running our output through it is the real conformance
-   check, and worth doing before claiming conformance anywhere.
+4. The packaged validator in `html/shacl/HealthDCAT-AP_validator/`, which is why
+   Release 8 was chosen. **No longer blocking**: conformance is proven against
+   the same shapes with `pyshacl`, and the decision log records why the ITB
+   validator itself was not installed. What is left is the question below about
+   which DCAT-AP version its configuration actually loads.
 
 The validator config also ships `catalogue/dcat-ap_2.0.1.rdf`, which is worth a
 glance: the shapes import DCAT-AP **3.0.0** while the catalogue carries 2.0.1,
@@ -224,10 +233,29 @@ dataset/
 
 ## Current state
 
-Done: `generate` (synthetic corpus, injectable defects, ground-truth PHI
-annotations with character offsets, per-subject seed streams), `defects`,
-`validate` with a modular rule registry, `rules`, `layout.py` as the schema.
-Strict mypy, ruff with docstring rules, Apache-2.0.
+Every command runs end to end: `generate`, `defects`, `validate`, `rules`,
+`keygen`, `key-info`, `build`, `risk`. A test pins that list against the CLI's
+own registrations, so it cannot quietly go stale again — which it had. Five of
+them take a corpus from an empty directory to a dataset `validate` reports as
+conformant, and the README's worked example is that run with its real output.
+
+Underneath: `layout.py` as the single schema, an enumerable rule registry
+behind `validate` (`commissura rules` lists it), ground-truth PHI annotations
+with character offsets, HMAC pseudonymisation consistent across the three
+modalities, HealthDCAT-AP Release 8 conformance proven against the profile's
+own SHACL, k-anonymity in `risk`. Strict mypy, ruff with docstring rules,
+branch coverage floored at 99%, Apache-2.0. Under git, with a GitHub remote
+and CI on four Python versions on Ubuntu plus 3.14 on Windows.
+
+No counts in that paragraph on purpose — a rule total and a test total change
+most weeks and no test pins either, so stating them here only schedules the
+next correction. `commissura rules` and `pytest` are the places that know.
+
+**Not met**, and the one hard constraint that is not: *deployable by a
+stranger*. The package is not on PyPI and the repository is private, so today
+only the author can install it. The README says so rather than implying
+otherwise; publishing is an irreversible public act and therefore a decision,
+not a step to take in passing.
 
 Next, in order:
 1. Derive the manifest's per-modality table from the run rather than from a
@@ -235,13 +263,6 @@ Next, in order:
 2. Read `ranges/range.ttl` fully and the imported DCAT-AP 3.0.0 shapes. Both are
    now downloaded under `reference/` and used by the conformance test, but
    neither has been read for what else it requires.
-
-Done since this list was written: git init, the HealthDCAT-AP alignment
-(Release 8 transcribed, four authority lists read in full, conformance proven
-against the profile's own SHACL shapes), `risk`, `build` end to end, and the
-worked example in the README — five commands from an empty directory to a
-dataset `validate` reports as conformant, with every output captured from a real
-run.
 
 ## Decision log
 
@@ -716,6 +737,52 @@ else does, which is a real argument for doing it early — but it is an
 irreversible public act and therefore the author's call, not a step to take in
 passing. Revisit before going public.
 
+**2026-11-10 — The brief rotted at the top while the log at the bottom stayed
+true, and the fix has to be structural because a convention already failed.**
+Three passages were false. `## Current state` named five commands when there
+were eight, so a new session would conclude that `build` did not exist. The
+alignment section said the health category vocabulary was half read when all 17
+concepts were read. And "still unread" item 4 still called the packaged
+validator "the real conformance check, worth doing before claiming conformance
+anywhere" — twenty paragraphs above a log entry recording that conformance *was*
+proven with `pyshacl` against those same shapes, and why the ITB validator was
+deliberately skipped. Two paragraphs even disagreed with each other on how many
+authority lists had been read, three against four; three was the right number
+and four was the newer sentence.
+
+The mechanism is worth naming, because it is invisible while it operates and
+nobody ever wrote anything false. Each time a fact changed, **a correction was
+appended beside the text it corrected** instead of replacing it. So
+`## Current state` came to hold three lists — "Done:", "Next, in order:" and
+"Done since this list was written:" — and the alignment section three paragraphs
+each claiming a more complete version of the same reading, in increasing order
+of truth, only the last accurate. A reader has to take all of them and work out
+which wins. That is not a brief, it is sediment. And it accumulates fastest in
+exactly the sections a new session reads first, because those are the summaries,
+and a summary is the thing that has to be rewritten when the thing it summarises
+moves.
+
+Two fixes, since the convention on its own is what failed. **The rule**, now at
+the top of the file where it is read before anything else: everything above the
+decision log is rewritten in place, and only the log is append-only, because
+only the log is a log. **And a check** — `tests/test_brief.py` compares the
+command list in `## Current state` against the names typer actually registers.
+Exact comparison, not a subset, so a command that is removed fails too. It asks
+typer for the names rather than re-deriving the naming rule, because a test that
+re-implemented that rule could agree with itself while disagreeing with the CLI.
+
+The honest limit: exactly one fact in the file is mechanically checkable and the
+rest still rests on discipline. It happens to be the fact whose going stale was
+the expensive one. Found by reading the file, not by the tests and not by CI —
+the same as the `.gitignore` incident, and the second entry in this log about
+something a green run cannot see.
+
+Noticed in passing and recorded so the next person does not debug it: **typer
+0.28 no longer depends on click.** `import click` raises `ModuleNotFoundError`
+in this environment; the vendored copy is at `typer._click`, and the test
+reaches the command table through the public `typer.main.get_command` rather
+than importing a private module.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.
@@ -724,6 +791,9 @@ passing. Revisit before going public.
 - Do not mark a command "available" in the README before it runs end to end.
 - **Record every new decision in the decision log above, in the session it is
   taken, with the reason and not just the conclusion.**
+- **One fact, one place.** A fact stated in two sections will disagree with
+  itself inside a week. Point at the section that owns it instead of restating
+  it, and rewrite rather than append.
 
 ## Reference material
 
