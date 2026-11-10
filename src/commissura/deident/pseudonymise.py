@@ -77,6 +77,7 @@ _DOMAIN_SUBJECT: Final = "subject|"
 _DOMAIN_OFFSET: Final = "offset|"
 _DOMAIN_UID: Final = "uid|"
 _DOMAIN_ACCESSION: Final = "accession|"
+_DOMAIN_MANIFEST: Final = "manifest|"
 
 
 def _derive(key: SecretKey, domain: str, value: str) -> bytes:
@@ -91,6 +92,31 @@ def _derive(key: SecretKey, domain: str, value: str) -> bytes:
         The 32-byte digest.
     """
     return hmac.new(key.material, (domain + value).encode("utf-8"), sha256).digest()
+
+
+def authenticate(key: SecretKey, payload: str) -> str:
+    """Return a hex HMAC over text, for proving the manifest was not edited.
+
+    Lives here rather than in the module that calls it so that **every** use of
+    the secret stays in one file, and so that the domain separator comes from
+    the same list as the pseudonymisation domains. A manifest tag derived under
+    its own prefix can never collide with a subject label, which is the whole
+    reason the prefixes exist.
+
+    This is authentication, not pseudonymisation, and the two share a key only
+    because there is one key. The trade-off is recorded in the decision log of
+    2026-11-11: an attacker who holds the key can forge the tag, but an attacker
+    who holds the key can also recompute every pseudonym, so the tag protects
+    exactly as much as the rest of the scheme and no less.
+
+    Args:
+        key: The secret.
+        payload: Canonical text to authenticate.
+
+    Returns:
+        The HMAC as a hex string.
+    """
+    return _derive(key, _DOMAIN_MANIFEST, payload).hex()
 
 
 @dataclass(slots=True)

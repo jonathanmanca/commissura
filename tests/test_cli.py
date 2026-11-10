@@ -593,3 +593,103 @@ def test_build_with_every_holder_field_reports_nothing_missing(tmp_path: Path) -
     )
     assert result.exit_code == 0, result.stdout
     assert "Not yet conformant" not in result.stdout
+
+
+# --------------------------------------------------------------------------
+# commissura verify
+# --------------------------------------------------------------------------
+
+
+def _built(tmp_path: Path) -> tuple[Path, Path]:
+    """Build a dataset through the command line and return it with its key."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    assert runner.invoke(app, _build_args(tmp_path, raw, key)).exit_code == 0
+    return tmp_path / "dataset", key
+
+
+def test_verify_reports_a_fresh_dataset_as_intact(tmp_path: Path) -> None:
+    out, _ = _built(tmp_path)
+
+    result = runner.invoke(app, ["verify", str(out)])
+
+    assert result.exit_code == 0, result.stdout
+    assert "INTACT" in result.stdout
+
+
+def test_verify_says_when_it_did_not_check_the_manifest(tmp_path: Path) -> None:
+    """Three states, not two: unchecked must never read like checked-and-fine."""
+    out, key = _built(tmp_path)
+
+    without = runner.invoke(app, ["verify", str(out)])
+    with_key = runner.invoke(app, ["verify", str(out), "--key-file", str(key)])
+
+    assert "not authenticated" in without.stdout
+    assert "authentic" in with_key.stdout
+    assert "not authenticated" not in with_key.stdout
+
+
+def test_verify_fails_on_an_altered_file(tmp_path: Path) -> None:
+    out, _ = _built(tmp_path)
+    document = sorted(out.rglob(f"*{layout.REPORT_TEXT_EXTENSION}"))[0]
+    document.write_text(document.read_text(encoding="utf-8") + "MARIO ROSSI\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["verify", str(out)])
+
+    assert result.exit_code == 1
+    assert "CHANGED" in result.stdout
+    assert "altered" in result.stdout
+
+
+def test_verify_names_the_tampering_separately_from_the_differences(tmp_path: Path) -> None:
+    """Zero files differing and a failed tag is the signature worth naming."""
+    out, key = _built(tmp_path)
+    path = out / layout.DEIDENT_DIR / layout.MANIFEST_JSON
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["source"]["subjects_linked"] = 999
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    result = runner.invoke(app, ["verify", str(out), "--key-file", str(key)])
+
+    assert result.exit_code == 1
+    assert "TAMPERED" in result.stdout
+    assert "CHANGED" not in result.stdout
+
+
+def test_verify_reports_as_json(tmp_path: Path) -> None:
+    out, key = _built(tmp_path)
+
+    result = runner.invoke(app, ["verify", str(out), "--key-file", str(key), "--json"])
+    payload = json.loads(result.stdout)
+
+    assert result.exit_code == 0
+    assert payload["intact"] is True
+    assert payload["manifest_authenticated"] is True
+    assert payload["files_checked"] > 0
+
+
+def test_verify_exits_non_zero_in_json_mode_too(tmp_path: Path) -> None:
+    """A pipeline reading --json still has to be able to tell from the status."""
+    out, _ = _built(tmp_path)
+    (out / "stray.txt").write_text("x\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["verify", str(out), "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["added"] == ["stray.txt"]
+
+
+def test_verify_without_a_dataset_fails_cleanly(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["verify", str(tmp_path / "nowhere")])
+
+    assert result.exit_code == 1
+    assert "no manifest" in (result.stderr or result.output)
+
+
+def test_verify_with_an_unreadable_key_fails_cleanly(tmp_path: Path) -> None:
+    out, _ = _built(tmp_path)
+    bad = tmp_path / "bad.key"
+    bad.write_text("not a key\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["verify", str(out), "--key-file", str(bad)])
+
+    assert result.exit_code == 1

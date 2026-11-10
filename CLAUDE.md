@@ -275,7 +275,7 @@ dataset/
 ## Current state
 
 Every command runs end to end: `generate`, `defects`, `validate`, `rules`,
-`keygen`, `key-info`, `build`, `risk`. A test pins that list against the CLI's
+`keygen`, `key-info`, `build`, `risk`, `verify`. A test pins that list against the CLI's
 own registrations, so it cannot quietly go stale again — which it had. Five of
 them take a corpus from an empty directory to a dataset `validate` reports as
 conformant, and the README's worked example is that run with its real output.
@@ -1199,6 +1199,80 @@ later repetition to the first identifier and reads component five out of the
 second identifier's text. The two separators have to be applied in the right
 order, and PID-3 is the first field in this project that repeats *and* carries
 components that matter.
+
+**2026-11-11 — The manifest now digests the dataset, `commissura verify`
+recomputes it, and the manifest's own digest is the interesting half of the
+question.** The manifest recorded what was done and nothing tied it to the bytes
+it described. Anybody could change a value in a `lab/*.tsv` or paste a name back
+into a report and every statement in the manifest would go on reading as though
+it were still true. A de-identification record that cannot be tied to the data
+is a record of something else.
+
+So `build` writes a SHA-256 per produced file and `verify` recomputes them,
+reporting altered, missing and added. Deliberately the mirror image of
+`generate.writer.verify_corpus`, which re-reads the *input* corpus and confirms
+the recorded PHI offsets still quote the text on disk: a claim about bytes gets
+checked against the bytes, at both ends of the pipeline.
+
+**The manifest cannot contain its own digest, and the three ways out are not
+equally honest.** Excluding it silently leaves a hole anyone can walk through:
+recompute the list after editing a report and `verify` passes. A sidecar file
+holding the manifest's digest only moves the hole one file along. Re-serialising
+the manifest with a zeroed digest field is self-contained but makes verification
+depend on byte-exact round-tripping, which is fragile for no gain.
+
+**What was done instead: an HMAC over the manifest's canonical content, keyed by
+the secret that built the dataset**, in a `manifest_hmac` field excluded from
+its own input. `verify --key-file` checks it. The argument for it is that it
+costs nothing in trust: an attacker holding the key can forge the tag, but an
+attacker holding the key can already recompute every pseudonym in the dataset,
+so the tag is exactly as strong as the rest of the scheme and no weaker. And the
+key lives outside the dataset by design, so in the ordinary case — somebody with
+write access to a share — they can edit the files and cannot forge the tag.
+
+The HMAC lives in `deident.pseudonymise` under its own domain prefix,
+`"manifest|"`, beside `subject|`, `offset|`, `uid|` and `accession|`. Two
+reasons. Every use of the secret stays in one file, so there is one place to
+read to know what the key touches. And the tag can never collide with a subject
+label, which is the whole point of the prefixes. This is authentication rather
+than pseudonymisation and the two share a key only because there is one key;
+that is worth knowing rather than hiding.
+
+**The honest split, which maps onto who holds what:** anyone can check the
+per-file digests, and that detects accident — a TSV opened in a spreadsheet and
+saved back, an incomplete copy, a stray export in the tree. Only the key holder
+can check the manifest itself, and that detects a deliberate edit. An HDAB
+receiving a dataset without the key therefore cannot prove it was not tampered
+with, and the manifest's own `integrity.note` says so in the file rather than
+leaving it to be inferred. A test demonstrates the limit instead of asserting it
+in a comment: a tamperer who recomputes the whole digest list passes
+`verify_dataset` completely, and fails it the moment a key is supplied.
+
+Three smaller decisions that each had a wrong-looking alternative:
+
+- **`verify` reports "not authenticated" when given no key**, not "ok". Three
+  states and not two: unchecked, checked-and-good, checked-and-bad. Collapsing
+  the first two is how a missing `--key-file` comes to read as a clean bill of
+  health.
+- **A failed tag is reported apart from the file differences**, because zero
+  files differing and a failed tag is a *specific* signature — somebody
+  adjusting the manifest to cover their tracks — and it would otherwise print
+  as "CHANGED: 0 file(s) differ", which is nonsense. Found by running it.
+- **The tag covers content, not formatting.** It is computed over sorted-key,
+  minimally-separated JSON with the tag field removed, so pretty-printing the
+  manifest does not break it. A tag that failed on a reformatted file would
+  teach people to ignore the tag, and an ignored tag is worse than none.
+
+**One ordering consequence.** The manifest is now written *last*, after the
+HealthDCAT-AP description and the risk report, because it digests them. Written
+where it used to be it would describe a dataset that did not exist yet, and
+`verify` would report the two documents that followed it as additions on a
+dataset nobody had touched.
+
+**And `tests/test_brief.py` earned itself the same day it was written.** Adding
+`verify` to the CLI made the brief's command list stale, and the test failed
+with the old list before anybody read the file. That is precisely the drift it
+exists to catch, caught inside a day rather than inside three weeks.
 
 ## Conventions
 

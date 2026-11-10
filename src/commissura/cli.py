@@ -21,6 +21,7 @@ import typer
 
 from commissura import __version__, layout
 from commissura import healthdcat as healthdcat_module
+from commissura.build.integrity import verify_dataset
 from commissura.build.manifest import write_healthdcat_description, write_manifest
 from commissura.build.risk import K_THRESHOLD, assess, write_risk_report
 from commissura.build.writer import BuildSpec, build_dataset
@@ -519,9 +520,13 @@ def build(
         dataset_type=dataset_type,
     )
     summary = build_dataset(corpus, key, spec, out)
-    write_manifest(out, corpus=corpus, summary=summary, key=key, spec=spec)
     write_healthdcat_description(out, spec=spec, summary=summary)
     risk = write_risk_report(out)
+    # The manifest goes last, because it digests every other file in the tree.
+    # Written earlier it would describe a dataset that did not exist yet, and
+    # `commissura verify` would report the two documents written after it as
+    # additions on a dataset nobody had touched.
+    write_manifest(out, corpus=corpus, summary=summary, key=key, spec=spec)
 
     report = validate_dataset(out) if validate_output else None
 
@@ -651,3 +656,113 @@ def risk(
         typer.echo(f"    k={entry['k']}  {values}")
     if len(below) > 10:
         typer.echo(f"    ... and {len(below) - 10} more")
+
+
+@app.command()
+def verify(
+    dataset: Annotated[Path, typer.Argument(help="The dataset to check.")],
+    key_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--key-file",
+            help=(
+                "Also authenticate the manifest itself. Without it, only the "
+                "file digests are checked."
+            ),
+        ),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the report as JSON instead of text.")
+    ] = False,
+) -> None:
+    """Check that a dataset is still the one its manifest describes.
+
+    The manifest says what was done to the data. On its own it does not say that
+    the data has not changed since: anybody can edit a value in a lab table or
+    paste a name back into a report, and the manifest goes on reading as though
+    it were still true.
+
+    This recomputes the SHA-256 of every file the build produced and reports
+    what differs. Pass --key-file to also authenticate the manifest's own
+    content, which is the only part of this that detects a deliberate edit
+    rather than an accidental one: whoever can change a report can change the
+    list of digests beside it, but not without the key.
+    """
+    key = None
+    if key_file is not None:
+        try:
+            key = resolve_key(key_file)
+        except KeyMaterialError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from None
+
+    try:
+        report = verify_dataset(dataset, key=key)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "intact": report.is_intact,
+                    "files_checked": report.checked,
+                    "altered": list(report.altered),
+                    "missing": list(report.missing),
+                    "added": list(report.added),
+                    "manifest_authenticated": report.authenticated,
+                },
+                indent=2,
+            )
+        )
+        if not report.is_intact:
+            raise typer.Exit(1)
+        return
+
+    typer.echo(f"  files checked          {report.checked}")
+    typer.echo(f"  altered                {len(report.altered)}")
+    typer.echo(f"  missing                {len(report.missing)}")
+    typer.echo(f"  added                  {len(report.added)}")
+    if report.authenticated is None:
+        typer.echo("  manifest               not authenticated (no --key-file)")
+    else:
+        typer.echo(
+            "  manifest               "
+            + ("authentic" if report.authenticated else "DOES NOT MATCH ITS OWN TAG")
+        )
+
+    for label, paths in (
+        ("altered", report.altered),
+        ("missing", report.missing),
+        ("added", report.added),
+    ):
+        for path in paths[:10]:
+            typer.echo(f"    {label:8} {path}")
+        if len(paths) > 10:
+            typer.echo(f"    ... and {len(paths) - 10} more {label}")
+
+    if report.is_intact:
+        typer.echo("")
+        typer.echo("  INTACT: every recorded file matches its digest.")
+        if report.authenticated is None:
+            typer.echo(
+                "  Note: without the key this detects accident, not tampering. "
+                "The digests live in the manifest."
+            )
+        return
+
+    typer.echo("")
+    if report.difference_count:
+        typer.echo(f"  CHANGED: {report.difference_count} file(s) differ from the manifest.")
+    if report.authenticated is False:
+        # Named separately, because the two failures mean different things. Files
+        # differing from the manifest is what accident looks like. The manifest
+        # not matching its own tag is what somebody adjusting the manifest to
+        # cover their tracks looks like, and it can happen with zero files
+        # differing — that is exactly the case the digests alone cannot see.
+        typer.echo(
+            "  TAMPERED: the manifest does not match its own authentication tag, "
+            "so its contents were edited after the build."
+        )
+    raise typer.Exit(1)

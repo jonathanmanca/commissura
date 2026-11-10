@@ -29,6 +29,12 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from commissura import healthdcat, layout
+from commissura.build.integrity import (
+    DIGEST_ALGORITHM,
+    HMAC_FIELD,
+    digest_tree,
+    tag_manifest,
+)
 from commissura.build.observe import ModalityLedger, observe_corpus
 from commissura.build.scrub import CATEGORY_DISPOSITION, ScrubReport
 from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_now
@@ -258,6 +264,26 @@ def write_manifest(
 
     path = out / layout.DEIDENT_DIR / layout.MANIFEST_JSON
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Last, and after every other file is on disk, because this covers them all.
+    # The manifest is excluded from its own list: a digest cannot cover the bytes
+    # that hold it. `manifest_hmac` closes that gap for whoever has the key.
+    payload["integrity"] = {
+        "algorithm": DIGEST_ALGORITHM,
+        "note": (
+            "A digest per file produced by this build, so a dataset can be shown "
+            "to be the one this manifest describes. The manifest itself is not in "
+            "the list, because a digest cannot cover the bytes holding it; "
+            f"{HMAC_FIELD} authenticates the manifest's own content and checking "
+            "it requires the key. Without the key, these digests detect an "
+            "altered, missing or added file, which is what happens by accident. "
+            "They do not detect an edit made deliberately, because whoever can "
+            "change a report can change this list beside it."
+        ),
+        "files": digest_tree(out, exclude=frozenset({path.relative_to(out).as_posix()})),
+    }
+    payload[HMAC_FIELD] = tag_manifest(payload, key)
+
     _write(path, payload)
     return payload
 

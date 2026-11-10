@@ -221,6 +221,7 @@ together.
 | `commissura key-info` | Show a key's fingerprint, without revealing the key | available |
 | `commissura build` | Pseudonymise a raw corpus into a dataset, with manifest and HealthDCAT-AP description | available |
 | `commissura risk` | k-anonymity over participant attributes, flagging k < 5 | available |
+| `commissura verify` | Recompute every file's digest and report what changed since the build | available |
 
 Every command that reports anything accepts `--json`, so the tool composes
 inside somebody else's pipeline without being screen-scraped.
@@ -601,6 +602,49 @@ Record numbers are compared with leading zeros stripped, which recovers the
 `imaging.mrn_format_drift` defect: at `--defect-rate 1.0` across twenty
 subjects, no imaging study is lost. That defect is the one that silently halves
 a cohort when somebody joins on the raw identifier.
+
+### `commissura verify`
+
+```bash
+commissura verify ./dataset --key-file ./commissura.key
+```
+
+```
+  files checked          52
+  altered                0
+  missing                0
+  added                  0
+  manifest               authentic
+
+  INTACT: every recorded file matches its digest.
+```
+
+The manifest says what was done to the data. On its own it does not say the data
+has not changed since — anybody can edit a value in a lab table or paste a name
+back into a report, and the manifest goes on reading as though it were still
+true. `build` records a SHA-256 per file it produced; this recomputes them and
+reports what is altered, missing or added. It is the mirror of the check
+`generate` already runs on its own output, where the recorded PHI offsets are
+re-read from disk rather than trusted.
+
+**What it proves depends on whether you have the key.** The digest list lives in
+the manifest, so whoever can change a report can change the list beside it. The
+digests catch the things that happen by accident: a TSV opened in a spreadsheet
+and saved back, an incomplete copy, a stray export dropped into the tree. The
+manifest also carries an HMAC over its own content, keyed by the secret, and
+`--key-file` checks it — that is the part that catches a deliberate edit:
+
+```
+  manifest               DOES NOT MATCH ITS OWN TAG
+
+  TAMPERED: the manifest does not match its own authentication tag, so its
+  contents were edited after the build.
+```
+
+Zero files differing *and* a failed tag is the signature of somebody adjusting
+the manifest to cover their tracks, which is why the two are reported apart.
+Without `--key-file` the output says "not authenticated" rather than anything
+reassuring: unchecked and checked-and-fine must never read the same way.
 
 ### `commissura risk`
 
