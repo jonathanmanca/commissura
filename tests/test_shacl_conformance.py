@@ -39,8 +39,18 @@ rdflib = pytest.importorskip("rdflib")
 # Relative to this file, not to the working directory: a relative path made
 # the whole conformance check skip silently when pytest ran from elsewhere.
 SHAPES_DIR = Path(__file__).resolve().parent.parent / "reference" / "healthdcat-ap"
-SHAPE_FILES = ("non-public-shapes.ttl", "dcat-ap-3.0.0-shapes.ttl", "range.ttl")
+SHAPE_FILES = (
+    "non-public-shapes.ttl",
+    "dcat-ap-3.0.0-shapes.ttl",
+    "range.ttl",
+    # DCAT-AP's own class ranges, loaded by hand because HealthDCAT-AP's
+    # range.ttl declares `owl:imports` of its own IRI -- a self-loop, which is a
+    # no-op. Its comment says it imports these; it does not, so 84 class range
+    # constraints were never checked here. Six of them failed when they were.
+    "dcat-ap-3.0.0-range.ttl",
+)
 SHACL = "http://www.w3.org/ns/shacl#"
+DCAT_AP_RANGE_IRI = "https://semiceu.github.io/DCAT-AP/releases/3.0.0/html/shacl/range.ttl"
 
 pytestmark = pytest.mark.skipif(
     not all((SHAPES_DIR / name).is_file() for name in SHAPE_FILES),
@@ -121,6 +131,30 @@ def test_the_published_shapes_still_need_the_repair() -> None:
         if (prop, sh.path, None) not in unpatched
     ]
     assert pathless, "the published shapes now load unmodified; delete the repair in _load_shapes"
+
+
+def test_the_health_range_file_still_imports_itself() -> None:
+    """When upstream fixes the self-import, loading DCAT-AP's ranges by hand can go.
+
+    ``range.ttl`` declares itself as the DCAT-AP range IRI *and* ``owl:imports``
+    that same IRI, so the import resolves to the file itself and brings in
+    nothing. Its own comment says it imports DCAT-AP's range constraints to keep
+    reused and extended constraints apart. Until that is fixed, the only way to
+    check those 84 constraints is to load the file ourselves, which
+    :data:`SHAPE_FILES` does -- and this fails once the fix lands, so the
+    workaround cannot outlive the defect.
+    """
+    owl = rdflib.Namespace("http://www.w3.org/2002/07/owl#")
+    graph = rdflib.Graph()
+    graph.parse(SHAPES_DIR / "range.ttl", format="turtle")
+
+    self_imports = [
+        subject for subject, target in graph.subject_objects(owl.imports) if subject == target
+    ]
+    assert self_imports == [rdflib.URIRef(DCAT_AP_RANGE_IRI)], (
+        "range.ttl no longer imports itself; the DCAT-AP ranges may now arrive "
+        "through the import chain, so check whether loading them by hand is still needed"
+    )
 
 
 def test_a_description_missing_what_the_holder_must_supply_does_not_conform(

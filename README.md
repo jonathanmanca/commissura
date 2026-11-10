@@ -587,18 +587,24 @@ yet.
 #### Conformance is checked against the profile's own shapes
 
 Not against this project's reading of the specification. `pyshacl` loads
-HealthDCAT-AP Release 8's SHACL shapes, the DCAT-AP 3.0.0 shapes they import,
-and `range.ttl`, and judges the emitted description.
+HealthDCAT-AP Release 8's SHACL shapes, its `range.ttl`, and the DCAT-AP 3.0.0
+shapes *and* class ranges, then judges the emitted description.
 
 ```bash
 mkdir -p reference/healthdcat-ap && cd reference/healthdcat-ap
 API=https://code.europa.eu/api/v4/projects/healthdataeu%2Fhealthdcat-ap/repository/files
 EHDS=public%2Freleases%2Frelease-8%2Fhtml%2Fshacl%2FHealthDCAT-AP_validator%2Fconfig%2Frdf-validator%2Fehds
-for f in shapes%2Fnon-public-shapes.ttl ranges%2Frange.ttl; do
-  curl -sO "$API/$EHDS%2F$f/raw?ref=main"
-done
-curl -sO https://semiceu.github.io/DCAT-AP/releases/3.0.0/html/shacl/shapes.ttl
+curl -so non-public-shapes.ttl "$API/$EHDS%2Fshapes%2Fnon-public-shapes.ttl/raw?ref=main"
+curl -so range.ttl "$API/$EHDS%2Franges%2Frange.ttl/raw?ref=main"
+DCATAP=https://semiceu.github.io/DCAT-AP/releases/3.0.0/html/shacl
+curl -so dcat-ap-3.0.0-shapes.ttl "$DCATAP/shapes.ttl"
+curl -so dcat-ap-3.0.0-range.ttl "$DCATAP/range.ttl"
 ```
+
+Four files, each named explicitly with `-o`. The API endpoint ends in `/raw`, so
+`curl -O` would save every one of them as `raw` and each would overwrite the
+last — and the conformance test, which skips when a shape file is missing, would
+report a tidy skip rather than a problem.
 
 ```bash
 pytest tests/test_shacl_conformance.py
@@ -615,12 +621,40 @@ string; record counts must be `xsd:nonNegativeInteger` and not the `xsd:integer`
 a bare JSON number becomes; and a `healthCategory` reference must be a typed
 `skos:Concept` carrying its label.
 
-One finding is about the profile rather than about this project: **Release 8's
-published shapes are not valid SHACL.** An `sh:or` sits inside the `sh:property`
+**The second round found six more**, and finding them needed a defect in the
+profile to be worked around first. HealthDCAT-AP's `range.ttl` says in its own
+comment that it imports DCAT-AP's class ranges "to ensure clear distinction
+between reused and extended constraints". It does not: it declares itself as the
+DCAT-AP range IRI and then `owl:imports` that same IRI, so the import is a
+self-loop and brings in nothing. **84 class range constraints were therefore
+never being checked.** Loading DCAT-AP's `range.ttl` by hand turned up six
+failures, all the same shape of mistake: `sh:class` is satisfied by an
+`rdf:type` triple *in the data graph*, and a validator does not dereference an
+authority list to find one. So `dct:accessRights`, `dct:format`, `dct:type` and
+`dcatap:applicableLegislation` all needed to carry their class inline, and
+`dcat:contactPoint` needed to be a `vcard:Kind`.
+
+That last one is worth keeping straight: DCAT-AP constrains the dataset's
+`dcat:contactPoint` to `vcard:Kind`, while the HealthDCAT-AP shapes constrain an
+agent's `cv:contactPoint` to `cv:ContactPoint`. Two profiles, two contact
+models. Each is used where its own shapes ask for it; picking one and using it
+everywhere is the tempting move and fails half the shapes.
+
+Two findings are about the profiles rather than about this project. **Release 8's
+published shapes are not valid SHACL**: an `sh:or` sits inside the `sh:property`
 list with no `sh:path`, which no property shape may lack, and a strict engine
 refuses the whole file. The test repairs it on the parsed graph — not by editing
 the download — and a second test fails once upstream fixes it, so the workaround
-cannot outlive the defect.
+cannot outlive the defect. The self-import above is pinned the same way.
+
+And **five constraints in the DCAT-AP 3.0.0 shapes are inert**: they use
+`sh:shape`, which belonged to a SHACL draft and is not in the standard, where
+the parameter is `sh:node`. `CatalogRecord_Shape` uses both, two lines apart,
+for the same inner shape. A conformant engine silently ignores the `sh:shape`
+ones, so the date-type checks DCAT-AP intends on `dct:modified`,
+`dcat:startDate` and `dcat:endDate` are not enforced by anything. Nothing here
+depends on them; it is recorded because "conformant" means less than it looks in
+that corner.
 
 ### Synthetic by construction
 

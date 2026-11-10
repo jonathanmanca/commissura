@@ -189,6 +189,31 @@ def _non_negative(value: int) -> dict[str, str]:
     return {"@value": str(value), "@type": "xsd:nonNegativeInteger"}
 
 
+def _typed(iri: str, rdf_type: str, label: str = "") -> dict[str, object]:
+    """Reference an authority-list IRI as a node that carries its own class.
+
+    ``sh:class`` is satisfied by an ``rdf:type`` triple **in the data graph**: a
+    validator does not dereference the authority list to discover that
+    ``.../access-right/NON_PUBLIC`` is a ``dct:RightsStatement``. So a bare
+    ``{"@id": ...}`` reference fails every class range, and the IRI being correct
+    makes no difference. Six properties here learned that the same way.
+
+    Args:
+        iri: The concept or resource IRI.
+        rdf_type: The prefixed class the shapes require of it.
+        label: The authority list's own label, for a ``skos:Concept``. Restated
+            verbatim rather than invented, and omitted for the classes that are
+            not concepts and so owe no label.
+
+    Returns:
+        The JSON-LD node.
+    """
+    node: dict[str, object] = {"@id": iri, "@type": rdf_type}
+    if label:
+        node["skos:prefLabel"] = label
+    return node
+
+
 def write_healthdcat_description(
     out: Path, *, spec: BuildSpec, summary: BuildSummary
 ) -> dict[str, object]:
@@ -212,7 +237,7 @@ def write_healthdcat_description(
         "@type": "dcat:Dataset",
         "dct:title": spec.dataset_name,
         "dct:description": spec.description,
-        "dct:accessRights": {"@id": healthdcat.TIER_ACCESS_RIGHT[spec.tier]},
+        "dct:accessRights": _typed(healthdcat.TIER_ACCESS_RIGHT[spec.tier], "dct:RightsStatement"),
         "dct:identifier": f"urn:commissura:{summary.root.name}",
         # Mandatory at 1..*, and a dataset on a hospital disk still needs one:
         # the profile assumes the data is distributable, so a description has to
@@ -227,40 +252,46 @@ def write_healthdcat_description(
                     "values with JSON sidecars; reports as UTF-8 text with JSON "
                     "sidecars; imaging metadata under derivatives/."
                 ),
-                "dct:format": {
-                    "@id": "http://publications.europa.eu/resource/authority/file-type/TSV"
-                },
-                "dct:accessRights": {"@id": healthdcat.TIER_ACCESS_RIGHT[spec.tier]},
+                "dct:format": _typed(
+                    "http://publications.europa.eu/resource/authority/file-type/TSV",
+                    "dct:MediaTypeOrExtent",
+                ),
+                "dct:accessRights": _typed(
+                    healthdcat.TIER_ACCESS_RIGHT[spec.tier], "dct:RightsStatement"
+                ),
                 "dcatap:applicableLegislation": [
-                    {"@id": iri} for iri in spec.applicable_legislation
+                    _typed(iri, "eli:LegalResource") for iri in spec.applicable_legislation
                 ],
                 **({"dcat:accessURL": {"@id": spec.access_url}} if spec.access_url else {}),
             }
         ],
         "dcat:theme": [
-            {
-                "@id": healthdcat.data_theme_iri(healthdcat.DATA_THEME_FOR_HEALTH),
-                "@type": "skos:Concept",
-                "skos:prefLabel": healthdcat.DATA_THEMES[healthdcat.DATA_THEME_FOR_HEALTH],
-            }
+            _typed(
+                healthdcat.data_theme_iri(healthdcat.DATA_THEME_FOR_HEALTH),
+                "skos:Concept",
+                healthdcat.DATA_THEMES[healthdcat.DATA_THEME_FOR_HEALTH],
+            )
         ],
-        "dcatap:applicableLegislation": [{"@id": iri} for iri in spec.applicable_legislation],
-        # Typed as skos:Concept because range.ttl requires it, and labelled
-        # because a typed concept then owes a skos:prefLabel. The labels are
-        # the authority list's own, restated rather than invented.
+        "dcatap:applicableLegislation": [
+            _typed(iri, "eli:LegalResource") for iri in spec.applicable_legislation
+        ],
         "healthdcatap:healthCategory": [
-            {
-                "@id": healthdcat.health_category_iri(code),
-                "@type": "skos:Concept",
-                "skos:prefLabel": healthdcat.HEALTH_CATEGORIES[code],
-            }
+            _typed(
+                healthdcat.health_category_iri(code),
+                "skos:Concept",
+                healthdcat.HEALTH_CATEGORIES[code],
+            )
             for code in spec.health_categories
         ],
         "healthdcatap:hasStructuredData": True,
         "healthdcatap:numberOfUniqueIndividuals": _non_negative(summary.subject_count),
         "healthdcatap:numberOfRecords": _non_negative(summary.file_count),
         "dcat:keyword": list(spec.keywords),
-        "dct:type": {"@id": healthdcat.dataset_type_iri(spec.dataset_type)},
+        "dct:type": _typed(
+            healthdcat.dataset_type_iri(spec.dataset_type),
+            "skos:Concept",
+            healthdcat.DATASET_TYPES[spec.dataset_type],
+        ),
         # Provenance is a statement the tool can make for itself, and the
         # non-public tier requires one. It says how the dataset came to exist,
         # which is exactly what a reader of an Article 77 description wants.
@@ -277,9 +308,15 @@ def write_healthdcat_description(
     }
 
     if spec.contact_point:
+        # vcard:Kind here, cv:ContactPoint on the agents below, and the
+        # difference is not ours to tidy away. DCAT-AP's range.ttl constrains
+        # dcat:contactPoint to vcard:Kind; the HealthDCAT-AP shapes constrain an
+        # agent's cv:contactPoint to cv:ContactPoint. Two profiles, two contact
+        # models, each used where its own shapes ask for it. Picking one and
+        # using it everywhere is the tempting move and fails half the shapes.
         node["dcat:contactPoint"] = {
-            "@type": "cv:ContactPoint",
-            "cv:email": spec.contact_point,
+            "@type": "vcard:Kind",
+            "vcard:hasEmail": {"@id": f"mailto:{spec.contact_point}"},
         }
     # Both agent shapes require exactly one cv:contactPoint, which the
     # cardinality table does not mention and only the shapes reveal.

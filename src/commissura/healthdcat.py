@@ -366,6 +366,7 @@ NAMESPACES: Final[dict[str, str]] = {
     "dct": "http://purl.org/dc/terms/",
     "dpv": "https://w3id.org/dpv#",
     "dqv": "http://www.w3.org/ns/dqv#",
+    "eli": "http://data.europa.eu/eli/ontology#",
     "foaf": "http://xmlns.com/foaf/0.1/",
     "geodcatap": "http://data.europa.eu/930/",
     "healthdcatap": "http://healthdataportal.eu/ns/health#",

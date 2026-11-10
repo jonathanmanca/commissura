@@ -129,18 +129,19 @@ carry a character the source renders ambiguously and none of them describes
 clinical data. Nothing blocking remains before `build` can emit a dataset
 description.
 
+**The constraint set is now read in full**: HealthDCAT-AP's `ranges/range.ttl`
+(14 class ranges on `dcat:Dataset`, 2 on the CSVW structures), the DCAT-AP
+3.0.0 shapes including `Agent_Shape` and `PeriodOfTime_Shape`, and DCAT-AP's
+own `range.ttl` — 84 class ranges that the profile intends to import and, by a
+defect, does not. All four files are loaded by the conformance test.
+
 Still unread, now in order of how much they would change things:
 
-1. `ranges/range.ttl` — the class range constraints the shapes file explicitly
-   excludes from itself. The largest remaining gap in the constraint set.
-2. The imported DCAT-AP 3.0.0 shapes, for `Agent_Shape` and
-   `PeriodOfTime_Shape`, both referenced by the health shapes and defined
-   upstream.
-3. `catalogue/health-theme.rdf` and `publisher-type.rdf` —
+1. `catalogue/health-theme.rdf` and `publisher-type.rdf` —
    `healthdcatap:healthTheme` is only recommended, and its shape says the
    controlled vocabulary does not exist yet, so this is lower value than it
    looks.
-4. The packaged validator in `html/shacl/HealthDCAT-AP_validator/`, which is why
+2. The packaged validator in `html/shacl/HealthDCAT-AP_validator/`, which is why
    Release 8 was chosen. **No longer blocking**: conformance is proven against
    the same shapes with `pyshacl`, and the decision log records why the ITB
    validator itself was not installed. What is left is the question below about
@@ -258,12 +259,9 @@ otherwise; publishing is an irreversible public act and therefore a decision,
 not a step to take in passing.
 
 Next, in order:
-1. Read `ranges/range.ttl` fully and the imported DCAT-AP 3.0.0 shapes. Both are
-   now downloaded under `reference/` and used by the conformance test, but
-   neither has been read for what else it requires.
-2. Answer the open question above: FAQ Q49, who performs pseudonymisation. It
+1. Answer the open question above: FAQ Q49, who performs pseudonymisation. It
    decides which side of the chain this tool sits on.
-3. Name the free-text redaction categories in the manifest's field table the
+2. Name the free-text redaction categories in the manifest's field table the
    way the structured modalities are now named. A report body is not a field,
    so the scrubber's per-category counts sit beside the table rather than in
    it, and the two have to be read together to see what happened to a report.
@@ -871,6 +869,74 @@ Also centralised while here: the three corpus globs (`lab/*.hl7`,
 modules walk the same corpus — one to link it, one to account for its fields —
 and a glob that disagreed between them would make the manifest describe files
 the dataset was not built from.
+
+**2026-11-10 — The constraint set is read in full, and the conformance claim
+was narrower than it read. HealthDCAT-AP's `range.ttl` imports itself.** The
+file declares its own subject IRI as DCAT-AP's range IRI and then
+`owl:imports` that same IRI. A self-loop imports nothing, so the comment three
+lines above it — "By importing DCAT-AP range constraints via `owl:imports`, this
+file ensures clear distinction between reused and extended constraints" — is not
+true of the file that contains it. The file also identifies itself by two
+different IRIs: `code.europa.eu/.../healthdcat-ap/range.ttl` for its `dct:format`
+metadata, and the DCAT-AP IRI for the ontology declaration.
+
+**Consequence: 84 class range constraints were never being checked here**, and
+they are the ones that matter most for a document assembled from authority-list
+IRIs. Loading DCAT-AP's `range.ttl` by hand found six failures, every one the
+same mistake: **`sh:class` is satisfied by an `rdf:type` triple in the data
+graph, and a validator does not dereference an authority list to find one.** The
+IRI being correct buys nothing. So `dct:accessRights` must carry
+`dct:RightsStatement`, `dct:format` must carry `dct:MediaTypeOrExtent`,
+`dct:type` must carry `skos:Concept`, and `dcatap:applicableLegislation` must
+carry `eli:LegalResource` — inline, on each reference. That lesson had already
+been learned once, for `healthCategory`, and was not generalised; the fix is now
+a single `_typed()` helper so the next property cannot miss it.
+
+**`dcat:contactPoint` is the one that is not a mistake but a genuine divergence,
+and it must not be tidied away.** DCAT-AP's range constrains the dataset's
+`dcat:contactPoint` to `vcard:Kind`. The HealthDCAT-AP shapes constrain an
+agent's `cv:contactPoint` to `cv:ContactPoint`, with `cv:email` a literal. Two
+profiles, two contact models, both mandatory, in the same document. Each is now
+used where its own shapes ask for it. Using one model throughout is the obvious
+move and fails half the shapes, which is why this is written down.
+
+What the two shapes the brief was actually looking for turned out to say, both
+smaller than their billing: **`Agent_Shape`** requires `foaf:name` at minCount 1
+as a literal and allows at most one `dct:type` — already satisfied.
+**`PeriodOfTime_Shape`** caps `dcat:startDate`, `dcat:endDate`,
+`time:hasBeginning` and `time:hasEnd` at one each and requires none of them, so
+an empty period is valid. It applies to `healthdcatap:retentionPeriod`, which is
+recommended and which `build` does not emit, so it constrains nothing here yet.
+
+**Two further defects in the profiles, recorded because they change what
+"conformant" means rather than what we emit.**
+
+`healthdcatap:hasCodeValues` has its `sh:class` commented out, with the note
+"Change healthdcatap:hasCodeValues from skos:Concept to rdfs:Literal". The
+replacement was never written, so the property shape carries only a path and a
+severity and constrains nothing at all.
+
+And **five constraints in the DCAT-AP 3.0.0 shapes are inert**: they use
+`sh:shape`, which belonged to a SHACL draft and is not in the standard, where the
+parameter is `sh:node`. `CatalogRecord_Shape` uses `sh:shape` for `dct:modified`
+and `sh:node` for `dct:issued`, two lines apart, pointing at the same inner
+shape. Confirmed empirically rather than from memory: a minimal graph violating
+the inner shape is reported through `sh:node` and passes silently through
+`sh:shape`. So the date-type checks DCAT-AP intends on `dct:modified`,
+`dcat:startDate` and `dcat:endDate` are enforced by nothing. No workaround is
+recorded for this one, and deliberately no test: a test with no workaround
+attached is documentation pretending to be a check.
+
+**Also found, and worse than any of the above for a stranger: the README's own
+download commands could not work.** They used `curl -O` against an API endpoint
+whose path ends in `/raw`, so every shape file was saved as `raw` and each
+overwrote the last, and the DCAT-AP file landed as `shapes.ttl` rather than the
+name the test looks for. Nobody following the README could run the conformance
+test — and because the test skips when a shape file is absent, they would have
+seen a tidy skip rather than a problem. Now four explicit `-o` names, verified
+by running the block and diffing all four files against the ones in use. The
+general lesson: **a skip is a silent failure mode, and a command in a README is
+untested code.**
 
 ## Conventions
 
