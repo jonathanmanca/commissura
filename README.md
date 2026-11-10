@@ -818,17 +818,40 @@ placed where no authority assigns:
 ## Development
 
 [![CI](https://github.com/jonathanmanca/commissura/actions/workflows/ci.yml/badge.svg)](https://github.com/jonathanmanca/commissura/actions/workflows/ci.yml)
+[![Upstream dependencies](https://github.com/jonathanmanca/commissura/actions/workflows/upstream.yml/badge.svg)](https://github.com/jonathanmanca/commissura/actions/workflows/upstream.yml)
 
 Every push and pull request to `main` runs `ruff check`, `ruff format --check`,
-`mypy` and `pytest` on Python 3.11 to 3.14 on Ubuntu, and on 3.14 on Windows.
+`mypy` and `pytest` on Python 3.11 to 3.14 on Ubuntu, and on 3.14 on Windows,
+**installing from the lockfile**.
+
+The two badges mean different things on purpose. **CI** is the gate: it installs
+the locked dependency set, so a red tick means the commit in front of it broke
+something and not that the world moved. **Upstream dependencies** is a weekly
+canary that ignores the lock and resolves freely on 3.11 and 3.14; a red tick
+there means a newly published version of `typer`, `pydantic`, `ruff`, `mypy` or
+`pyshacl` no longer works with this code. That is worth knowing and worth
+blocking nobody's merge, which is why it is a separate workflow: a failure in it
+would otherwise turn the CI badge red and the badge would stop meaning "this
+code is good".
 
 ```bash
-uv venv && uv pip install -e ".[dev]"
+uv sync --locked --extra dev
 ```
 
 ```bash
 pytest && ruff check . && ruff format --check . && mypy
 ```
+
+`uv.lock` is committed and pins all 36 packages, so two people installing a
+month apart get the same dependency set. `--locked` fails rather than silently
+re-resolving when `pyproject.toml` and the lock disagree, which is what you want
+in a checkout and in CI: a lock that quietly updates itself is not a lock. After
+changing a dependency, refresh it with `uv lock` and commit the result.
+
+This is not theoretical. The first `uv sync --locked` in this repository replaced
+the already-installed `typer` 0.28.0 with 0.29.0 — two installs of the same
+unchanged project, days apart, resolving differently, which is exactly the thing
+a lockfile exists to stop happening silently.
 
 `pytest` measures branch coverage on every run and fails below 99%. The
 threshold is enforced in configuration rather than offered as a flag, because a

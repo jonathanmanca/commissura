@@ -1306,6 +1306,54 @@ anonymises. It is in the `risk` section already, and the convention added
 yesterday says to point at the section that owns a fact instead of repeating it.
 The new section links there rather than paraphrasing.
 
+**2026-11-11 — `uv.lock` is committed, CI installs from it, and free resolution
+moved to a weekly canary with its own badge.** Nothing pinned the dependency
+set: `uv pip install -e ".[dev]"` resolved afresh every time, so two people
+installing a month apart could get different versions of `typer` or `pydantic`
+and only one of them would see a bug.
+
+**That is not hypothetical and it did not take a month.** The very first
+`uv sync --locked` in this repository replaced the already-installed `typer`
+0.28.0 with 0.29.0 — the same unchanged project, resolved days apart, landing on
+different versions. It happens to matter here: `tests/test_brief.py` reaches
+into typer through `typer.main.get_command`, and the log entry of 2026-11-10
+records that typer 0.28 dropped its dependency on click. Everything passes on
+0.29.0, which is a relief rather than a plan.
+
+**The CI question has two answers because it is two questions**, and running one
+job cannot answer both.
+
+*Does this commit work?* That is a gate, and a gate has to fail for the change
+in front of it and nothing else. A gate that resolves dependencies freely goes
+red on a morning when somebody published a release, the failure has nothing to
+do with the commit, and the third time it happens people start merging through
+red ticks — which costs more than the drift it was supposed to catch. So the
+matrix jobs now run `uv sync --locked --extra dev`. `--locked` also fails when
+`pyproject.toml` and the lock disagree, which catches a dependency changed
+without refreshing the lock; that failure *is* about the commit.
+
+*Do today's dependencies still work?* That is a canary, and it is a real
+question — a lockfile answers "it worked" and never "it still works", so a
+project that only installs from its lock finds out about an upstream break from
+a user. `.github/workflows/upstream.yml` resolves freely with `--upgrade` every
+Monday on 3.11 and 3.14 — the floor and the ceiling, because an upstream package
+dropping 3.11 is among the likelier breakages and would show there alone. It
+prints `uv pip list` before testing, so a failure can be read without re-running
+it.
+
+**A separate workflow rather than another job in `ci.yml`, and that is the part
+worth defending.** A canary failure in `ci.yml` would turn the CI badge red, and
+the badge would stop meaning "this code is good" and start meaning "something,
+somewhere, moved". Two badges that each mean one thing are worth more than one
+badge that means either. Caching is off in the canary for the same reason: a
+cached resolution is the opposite of the point.
+
+Known and accepted: GitHub disables scheduled workflows after 60 days of
+repository inactivity, so a long quiet spell switches the canary off silently.
+`workflow_dispatch` is declared so it can always be run by hand, and this
+paragraph exists so the next person does not conclude from a stale badge that
+upstream has been fine for a year.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

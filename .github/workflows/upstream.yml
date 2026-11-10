@@ -1,0 +1,66 @@
+name: Upstream dependencies
+
+# A canary, not a gate. `ci.yml` installs from uv.lock so that a red tick means
+# the commit in front of it broke something. This job deliberately ignores the
+# lock and resolves freely, which answers the other question: do today's
+# published versions of typer, pydantic, ruff, mypy and pyshacl still work with
+# this code? That question is worth an answer and is worth nobody's merge being
+# blocked by it, so it lives in its own workflow with its own badge.
+#
+# Separate file rather than another job in ci.yml on purpose: a failure here
+# would otherwise turn the CI badge red, and the badge would stop meaning "this
+# code is good" and start meaning "something somewhere moved".
+
+on:
+  schedule:
+    # Monday, 06:00 UTC. GitHub disables scheduled workflows after 60 days with
+    # no repository activity, so a long quiet spell switches this off silently;
+    # workflow_dispatch is here so it can always be run by hand.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  unlocked:
+    name: Freely resolved on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      # The floor and the ceiling. An upstream package dropping 3.11 support is
+      # one of the likelier ways this breaks, and it would show on 3.11 alone.
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          # No cache: a cached resolution is the opposite of the point.
+          enable-cache: false
+
+      - name: Create the environment
+        run: uv venv
+
+      - name: Confirm the interpreter really is the matrix version
+        run: uv run python -c "import sys; assert sys.version.startswith('${{ matrix.python-version }}'), sys.version"
+
+      - name: Install the newest versions the constraints allow
+        run: uv pip install -e ".[dev]" --upgrade
+
+      - name: Record what was resolved
+        # So that a failure can be read without re-running it: the log says
+        # which versions were in play.
+        run: uv pip list
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Test
+        run: uv run pytest

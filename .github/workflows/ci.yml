@@ -47,8 +47,14 @@ jobs:
       - name: Confirm the interpreter really is the matrix version
         run: uv run python -c "import sys; assert sys.version.startswith('${{ matrix.python-version }}'), sys.version"
 
-      - name: Install the project and its dev extras
-        run: uv pip install -e ".[dev]"
+      # From the lock, not resolved freely. These jobs are the gate on merging,
+      # and a gate has to fail for the commit in front of it and nothing else.
+      # `--locked` also fails when pyproject.toml and uv.lock disagree, which
+      # catches a dependency changed without refreshing the lock. The question
+      # "do today's dependencies still work" is a real one and is answered by
+      # the scheduled job below, where a failure blocks nobody.
+      - name: Install the project and its dev extras, from the lock
+        run: uv sync --locked --extra dev
 
       - name: Lint
         run: uv run ruff check .
@@ -88,8 +94,8 @@ jobs:
       - name: Confirm the interpreter really is 3.14
         run: uv run python -c "import sys; assert sys.version.startswith('3.14'), sys.version"
 
-      - name: Install the project and its dev extras
-        run: uv pip install -e ".[dev]"
+      - name: Install the project and its dev extras, from the lock
+        run: uv sync --locked --extra dev
 
       - name: Lint
         run: uv run ruff check .
