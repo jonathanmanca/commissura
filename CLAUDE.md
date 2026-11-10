@@ -299,16 +299,14 @@ otherwise; publishing is an irreversible public act and therefore a decision,
 not a step to take in passing.
 
 Next, in order:
-1. Put a contact detail into the generated reports. The body table's first run
-   showed the `contact` rule firing in zero of nineteen documents, because the
-   generator never writes an email or telephone number into a report body. The
-   rule and its load-bearing ordering fix are therefore exercised by a unit
-   test and by no corpus this tool produces. Needs ground-truth PHI
-   annotations with offsets, so it is a real change and not a one-liner.
-2. Decide whether to publish to PyPI, which is the only thing standing between
+1. Decide whether to publish to PyPI, which is the only thing standing between
    this repository and the "deployable by a stranger" constraint. An
    irreversible public act, so the author's call and not a step to take in
    passing.
+2. Nothing else is queued. The three remaining reading jobs are all low value:
+   `health-theme.rdf` and `publisher-type.rdf` for a vocabulary the profile
+   says does not exist yet, and which DCAT-AP version the packaged validator's
+   configuration loads. Pick new work rather than working down this list.
 
 ## Decision log
 
@@ -1093,6 +1091,61 @@ so a scrubber category added without a declared disposition raises `KeyError`
 and stops the build. A manifest that guessed whether an unknown category was
 removed or replaced would be worse than a build that stopped, and a test pins
 that behaviour.
+
+**2026-11-10 — A generated discharge letter now carries the patient's contact
+details, in prose, which closes the one path through the scrubber that no corpus
+exercised.** The body table reported `contact` firing in 0 of 19 documents
+yesterday and `grep` confirmed why: the generator never wrote an email or a
+telephone number into a report body. So the contact rule, and with it the
+ordering fix of 2026-11-07 — where redacting the name first left
+`m.[NAME]@posta.invalid`, stopped the email pattern matching and let the domain
+survive as a leak that looks like a redaction — rested on a single hand-built
+test string.
+
+Three choices in how it was added, each of which could have been made the easy
+way and would have measured nothing:
+
+- **In prose, not as a `Recapiti:` header.** A labelled field would be caught by
+  the scrubber's exact-match pass, which already knows the email from HL7
+  PID-13, so the pattern path would still never run. A test asserts the sentence
+  contains no `": "`, because turning it into a labelled line later would
+  silently undo the whole point — and would also grow a header row in the
+  manifest, which is how it would be noticed.
+- **Discharge letters only.** A discharge letter carries a follow-up contact; a
+  radiology report has no reason to. Coverage is therefore 6 of 19 rather than
+  19 of 19, which is the first row in that table where counting documents
+  separately from occurrences earns its keep.
+- **Normal content, not an injected defect.** A discharge letter legitimately
+  holds a follow-up contact. It is PHI to be removed, not damaged data, so
+  counting it as a defect would make `--defect-rate 0` report defects on a
+  corpus that claims to be clean — the same reasoning already recorded for a
+  radiologist citing a previous study's date.
+
+The regression guard is now end to end: a test builds from a generated corpus
+and asserts that no report holds an `@`, a `.invalid` domain, or the
+half-redacted `[NAME]@` — **and first asserts that the contact category actually
+fired**, because without that the other three assertions would pass happily on a
+corpus containing no contacts at all, which is exactly the hole being closed.
+
+Two ripples worth recording, because both were found by looking rather than
+assumed:
+
+**The README's captured output went stale, including a line nobody would have
+predicted.** PHI spans moved 3642 to 3685 and free-text redactions 924 to 975,
+which are the obvious consequences. But the residual-risk list lost an entry:
+`OSPE` disappeared, leaving only `GIOV`. The reason is the truncation defect —
+`reports.truncated` cuts at a position drawn from the document's own length, and
+discharge letters are now longer, so the cut lands elsewhere and the truncated
+institution fragment that used to survive no longer does. A change to the
+generator's *content* moved the output of a *defect*, through the length of the
+text. Worth knowing that the two are coupled at all.
+
+**And the fingerprint in the README is still the old one, deliberately.** Subject
+labels derive from the key, so re-capturing with a fresh key would have changed
+every `sub-...` label in the worked example for no reason. Checked rather than
+assumed: building the same corpus under two different keys produces an identical
+residual-risk list, so those numbers are corpus-dependent and key-independent,
+and the old fingerprint stays consistent with the labels printed beside it.
 
 ## Conventions
 

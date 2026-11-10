@@ -79,7 +79,7 @@ Wrote 190 files to ./raw
   imaging       27  DICOM JSON Model sidecars
 
   subjects      25  seed 42
-  PHI spans   3642  recorded as ground truth
+  PHI spans   3685  recorded as ground truth
   defects      321  injected at rate 0.2
 
   Verified: every recorded PHI offset matches the file on disk.
@@ -106,14 +106,12 @@ Wrote 217 files to ./dataset
   imaging        27  metadata sidecars in derivatives/
 
   key fingerprint        02971fa50adf0fcc
-  free-text redactions   924
+  free-text redactions   975
   linkage issues         0
   minimum k              1  (21 combination(s) below 5)
   profile                HealthDCAT-AP 8, non-public tier
 
   Residual risk the method cannot reach:
-    unrecognised all-capitals tokens remain, which in this corpus is how names
-    are written: OSPE
     unrecognised all-capitals tokens remain, which in this corpus is how names
     are written: GIOV
 
@@ -553,8 +551,8 @@ institution        removed              19           170   [INSTITUTION]
 date               replaced             19            34   [day_offset:N]
 date_of_birth      removed              19            19   [BIRTH-DATE]
 provider_name      removed              14            29   [PROVIDER]
+contact            removed               6            12   [CONTACT]
 age                replaced              0             0
-contact            removed               0             0
 ```
 
 Both counts are there because for prose they answer different questions:
@@ -563,12 +561,18 @@ actually found. `date_of_birth` sits with the removed and not with the dates on
 purpose — an offset from the subject's own baseline would state the birth date
 exactly in a dataset that also carries the baseline.
 
-The two rows at zero are rules that did not fire in this corpus, reported rather
-than omitted, because an omitted row reads as "no such rule". One of them is a
-finding: **the generator never writes an email or telephone number into a report
-body**, so the contact rule — and the ordering fix that stops a redacted name
-from breaking the email pattern — is exercised only by a unit test and by no
-corpus this tool produces.
+`contact` covers 6 of the 19 documents, because a discharge letter carries a
+follow-up contact and a radiology report has no reason to. That partial coverage
+is the point of counting documents separately from occurrences.
+
+The row at zero is a rule that did not fire in this corpus — twenty-five people
+produced nobody above the age ceiling — reported rather than omitted, because an
+omitted row reads as "no such rule". The first run of this table had `contact`
+at zero too, and that *was* a finding: the generator never wrote an email or a
+telephone number into a report body, so the contact rule and the ordering fix
+behind it were exercised by one unit test and by no corpus the tool produced.
+A generated discharge letter now carries one, in prose rather than in a labelled
+field, so only the patterns can find it.
 
 #### Linkage is accountable
 

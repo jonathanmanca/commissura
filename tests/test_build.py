@@ -957,3 +957,34 @@ def test_the_redaction_counts_no_longer_sit_outside_the_modality(tmp_path: Path)
 
     assert "free_text_redactions" not in manifest
     assert manifest["schema_version"] == "2.0.0", "reshaping the document moves this number"
+
+
+def test_no_contact_detail_survives_into_a_built_dataset(tmp_path: Path) -> None:
+    """The regression guard the unit test could not be: a real corpus, end to end.
+
+    The scrubber runs its email and telephone patterns *before* substituting
+    names by exact match, because a patient's email is built from their own
+    surname: redacting the name first leaves "m.[NAME]@posta.invalid", the email
+    pattern stops matching, and the domain survives as a leak that looks like a
+    redaction. Until the generator put a contact into a discharge letter, only a
+    hand-built string exercised that path. Now `generate` does.
+    """
+    out, _ = _build(tmp_path, defect_rate=0.0)
+    manifest = json.loads(
+        (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+    )
+    reports = next(e for e in manifest["modalities"] if e["modality"] == "reports")
+    contact = next(r for r in reports["body"] if r["category"] == "contact")
+
+    # Without this the assertions below would pass on a corpus holding no
+    # contacts at all, which is exactly the hole this test exists to close.
+    assert contact["occurrences"] > 0, "the corpus no longer exercises the contact patterns"
+    assert 0 < contact["documents_affected"] < reports["files_read"], "some documents, not all"
+
+    for document in out.rglob(f"*{layout.REPORT_TEXT_EXTENSION}"):
+        text = document.read_text(encoding="utf-8")
+        assert "@" not in text, document
+        assert ".invalid" not in text, document
+        # The half-redaction is worth naming separately: it is what the ordering
+        # prevents, and it would otherwise read as a successful redaction.
+        assert f"{PLACEHOLDER_NAME}@" not in text, document

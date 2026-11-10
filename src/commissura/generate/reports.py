@@ -274,6 +274,34 @@ def render_report(
     text.line(report.conclusion)
     text.line()
 
+    # --- Contact details, in prose, and only in a discharge letter. ---
+    #
+    # A discharge letter carries a follow-up contact; a radiology report has no
+    # reason to. So this fires on some documents and not others, which is what
+    # makes the manifest's per-category coverage count mean something.
+    #
+    # Deliberately written as a sentence rather than a "Recapiti:" header. A
+    # labelled field would be found by the scrubber's exact-match pass, which
+    # already knows the patient's email from HL7 PID-13. In prose there is no
+    # label, so only the email and telephone *patterns* can find it — and that
+    # is the one path through the scrubber that no generated corpus exercised.
+    #
+    # The email is the interesting half: it is built from the patient's own
+    # surname, so it is the case where redacting the name first would leave
+    # "m.[NAME]@posta.invalid", stop the email pattern matching, and let the
+    # domain survive as a leak that looks like a redaction. That ordering bug
+    # was found by a unit test on 2026-11-07; from here a plain `generate` can
+    # reproduce it.
+    if report.kind is ReportKind.DISCHARGE:
+        text.line(
+            "Per comunicazioni contattare il paziente a ",
+            Phi(person.email, PhiCategory.CONTACT, "patient email in running prose"),
+            " oppure al numero ",
+            Phi(person.phone, PhiCategory.CONTACT, "patient telephone in running prose"),
+            ".",
+        )
+        text.line()
+
     # --- Signature: a second occurrence of the author. ---
     if injector.apply("reports.missing_author", path, "signature block omitted: report unsigned"):
         text.line("(referto non firmato)")
