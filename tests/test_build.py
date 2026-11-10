@@ -492,9 +492,38 @@ def test_the_manifest_records_what_was_done(tmp_path: Path) -> None:
 
     assert manifest["schema_version"] == MANIFEST_SCHEMA_VERSION
     assert manifest["key_fingerprint"] == KEY.fingerprint
-    assert set(manifest["modalities"]) == {"lab", "reports", "imaging"}
-    for disposition in manifest["modalities"].values():
-        assert set(disposition) == {"removed", "replaced", "kept"}
+    ledgers = {entry["modality"]: entry for entry in manifest["modalities"]}
+    assert set(ledgers) == {"lab", "reports", "imaging"}
+
+    for ledger in ledgers.values():
+        assert ledger["files_read"] > 0
+        assert ledger["unreadable"] == []
+        for item in ledger["fields"]:
+            # A count above the number of files read would mean occurrences were
+            # being counted, not files.
+            assert 0 <= item["files_present"] <= ledger["files_read"]
+            # A removed field landed nowhere, so there is nothing to note.
+            assert ("note" in item) == (item["disposition"] != "removed")
+
+    lab = {item["field"]: item for item in ledgers["lab"]["fields"]}
+    # Observed, not declared: nothing lists PID-5, and it is reported anyway
+    # because every message carried one.
+    assert lab["PID-5"]["disposition"] == "removed"
+    assert lab["PID-5"]["files_present"] == ledgers["lab"]["files_read"]
+    # The two the static table got backwards. PID-3 is read to link imaging to a
+    # person and then dropped; the subject label comes from PID-19.
+    assert lab["PID-3"]["disposition"] == "removed"
+    assert lab["PID-19"]["disposition"] == "replaced"
+    # And the laboratory accession never reaches the dataset, though the old
+    # table said it was pseudonymised.
+    assert lab["OBR-2"]["disposition"] == "removed"
+
+    imaging = {item["field"]: item for item in ledgers["imaging"]["fields"]}
+    # PatientBirthDate and PatientAge are PHI that the static table never named,
+    # so a reader could not tell what had become of them.
+    assert imaging["00100030"]["disposition"] == "removed"
+    assert imaging["00101010"]["disposition"] == "removed"
+    assert imaging["00100020"]["disposition"] == "removed"
     assert manifest["tool_versions"]["commissura"]
     assert manifest["profile"]["release"] == healthdcat.RELEASE
 

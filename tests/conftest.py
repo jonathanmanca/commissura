@@ -228,11 +228,34 @@ def build_dataset(
             "deidentification_rule_version": "1.0.0",
             "key_fingerprint": "9f2c41ab77de0315",
             "tool_versions": {"commissura": "0.1.0", "python": "3.11.16"},
-            "modalities": {
-                "lab": {"removed": ["PID-5", "PID-19"], "replaced": ["PID-3"], "kept": ["OBX-3"]},
-                "reports": {"removed": ["patient name"], "replaced": ["dates"], "kept": []},
-                "imaging": {"removed": ["0010,0010"], "replaced": ["0020,000D"], "kept": []},
-            },
+            # The shape build emits: one observed ledger per modality, each
+            # field counted against the files that carried it. Kept in step with
+            # commissura.build.observe so that a fixture cannot describe a
+            # manifest the tool no longer writes.
+            "modalities": [
+                {
+                    "modality": "lab",
+                    "key_kind": "HL7 v2 field",
+                    "files_read": 2,
+                    "unreadable": [],
+                    "fields_observed": {"removed": 1, "replaced": 1, "kept": 1},
+                    "fields": [
+                        {
+                            "field": "OBX-5",
+                            "disposition": "kept",
+                            "files_present": 2,
+                            "note": "value",
+                        },
+                        {"field": "PID-5", "disposition": "removed", "files_present": 2},
+                        {
+                            "field": "PID-19",
+                            "disposition": "replaced",
+                            "files_present": 2,
+                            "note": "subject label",
+                        },
+                    ],
+                }
+            ],
         },
     )
     write_json(

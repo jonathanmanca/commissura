@@ -34,9 +34,27 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+from typing import Final
 
 from commissura.models import Sex
 from commissura.read.hl7 import parse_day, parse_message, parse_timestamp
+
+RAW_SOURCES: Final[dict[str, str]] = {
+    "lab": "lab/*.hl7",
+    "reports": "reports/*.txt",
+    "imaging": "imaging/*.json",
+}
+"""Where each modality's export lives in a raw corpus, relative to its root.
+
+Laboratory first, because a laboratory message is what creates a subject and
+the other two can only attach to one that exists. The dictionary order carries
+that, and :func:`read_corpus` depends on it.
+
+Declared here rather than written at each call site because two modules now walk
+the same corpus -- this one to link it, :mod:`commissura.build.observe` to
+account for its fields -- and a glob that disagreed between them would make the
+manifest describe files the dataset was not built from.
+"""
 
 
 def read_exact(path: Path) -> str:
@@ -392,7 +410,7 @@ def read_corpus(root: Path) -> RawCorpus:
     issues: list[LinkageIssue] = []
 
     # --- Laboratory first: it is what establishes a subject. ---
-    for path in sorted((root / "lab").glob("*.hl7")):
+    for path in sorted(root.glob(RAW_SOURCES["lab"])):
         relative = path.relative_to(root).as_posix()
         try:
             record = read_lab(path, relative)
@@ -410,7 +428,7 @@ def read_corpus(root: Path) -> RawCorpus:
             by_mrn[normalise_identifier(record.identity.mrn)] = national_id
 
     # --- Reports: the national identifier is in the header, so prefer it. ---
-    for path in sorted((root / "reports").glob("*.txt")):
+    for path in sorted(root.glob(RAW_SOURCES["reports"])):
         relative = path.relative_to(root).as_posix()
         try:
             report = read_report(path, relative)
@@ -434,7 +452,7 @@ def read_corpus(root: Path) -> RawCorpus:
         subjects[subject_key].reports.append(report)
 
     # --- Imaging: no national identifier in a DICOM header, so match on MRN. ---
-    for path in sorted((root / "imaging").glob("*.json")):
+    for path in sorted(root.glob(RAW_SOURCES["imaging"])):
         relative = path.relative_to(root).as_posix()
         try:
             study = read_imaging(path, relative)

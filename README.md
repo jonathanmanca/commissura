@@ -516,6 +516,34 @@ until 2027. The command builds anyway and says what is missing:
     Supply them with --hdab and --publisher.
 ```
 
+#### The field table is observed, not declared
+
+The manifest's per-modality table is derived from the run. Every field the input
+actually carried is listed with the number of files that held it, so a field
+nobody anticipated is accounted for rather than going unmentioned:
+
+```json
+{ "field": "00100030", "name": "PatientBirthDate",
+  "disposition": "removed", "files_present": 13 },
+{ "field": "0020000D", "name": "StudyInstanceUID",
+  "disposition": "replaced", "files_present": 13,
+  "note": "as an HMAC-derived UID under the 2.25 arc" },
+{ "field": "00290010", "disposition": "removed", "files_present": 3 }
+```
+
+That last row is a private vendor tag, present in three of thirteen files
+because a defect put it there. Nothing declares it; it is in the table because
+it was in the data, and an odd DICOM group number means its meaning belongs to
+the vendor and is in no dictionary.
+
+This works because **the build carries a whitelist, not a blacklist**: the lab
+branch writes nine columns and the imaging branch seven keys, and everything
+else is dropped by never being copied. So removal needs no list — only the
+carried fields are declared, and whether each one passes through the
+pseudonymiser, which is a fact about the code rather than about the data. A
+`replaced` value is still relinkable by whoever holds the key; a `kept` value is
+the original.
+
 #### Linkage is accountable
 
 A subject exists only if a laboratory message established it, because HL7 PID-19

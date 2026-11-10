@@ -258,11 +258,15 @@ otherwise; publishing is an irreversible public act and therefore a decision,
 not a step to take in passing.
 
 Next, in order:
-1. Derive the manifest's per-modality table from the run rather than from a
-   static table, which is the known limitation recorded below.
-2. Read `ranges/range.ttl` fully and the imported DCAT-AP 3.0.0 shapes. Both are
+1. Read `ranges/range.ttl` fully and the imported DCAT-AP 3.0.0 shapes. Both are
    now downloaded under `reference/` and used by the conformance test, but
    neither has been read for what else it requires.
+2. Answer the open question above: FAQ Q49, who performs pseudonymisation. It
+   decides which side of the chain this tool sits on.
+3. Name the free-text redaction categories in the manifest's field table the
+   way the structured modalities are now named. A report body is not a field,
+   so the scrubber's per-category counts sit beside the table rather than in
+   it, and the two have to be read together to see what happened to a report.
 
 ## Decision log
 
@@ -582,7 +586,8 @@ The imported DCAT-AP 3.0.0 Distribution requirements are unread, and the emitted
 document says so in its own `profileNote`.
 
 **2026-11-07 — Known limitation: the manifest's per-modality table states intent,
-not observation.** `.deident/manifest.json` lists what was removed, replaced and
+not observation. Closed 2026-11-10 — and the table turned out to be wrong, not
+merely weak.** See the entry at the end of this log. `.deident/manifest.json` lists what was removed, replaced and
 kept per modality from a static table. That describes what the rules do, not
 what each file actually contained. Deriving it per file would be stronger and is
 the obvious next improvement; what makes the current form defensible is that the
@@ -782,6 +787,90 @@ Noticed in passing and recorded so the next person does not debug it: **typer
 in this environment; the vendored copy is at `typer._click`, and the test
 reaches the command table through the public `typer.main.get_command` rather
 than importing a private module.
+
+**2026-11-10 — The manifest's field table is derived from the run, and
+deriving it found the static table had been wrong, not merely weak.** The known
+limitation recorded above said the table stated *intent* rather than
+observation: it claimed PID-5 was removed whether or not any message carried a
+PID-5, and could not say how many did. Replacing it showed the problem was worse
+than that framing.
+
+**Two entries were simply false.** The table said `PID-3` was *replaced* by the
+subject label and that the laboratory accession was *pseudonymised*. Neither
+happens. The medical record number is read to link an imaging study to a person
+and then dropped, and the laboratory accession never reaches the dataset at all.
+Both are *removed*. The difference matters to the only person who reads this
+document: "replaced" tells an auditor that a medical record number is in the
+dataset and recoverable with the key, which would have been a false statement
+about a privacy property, in the file whose whole purpose is to be believed.
+
+**And it was incomplete in a way no review of it could have caught.** It named
+nine removed DICOM tags. A corpus has twenty-two, including `(0010,0030)`
+PatientBirthDate and `(0010,1010)` PatientAge — both PHI, both dropped
+correctly, neither mentioned. A reader could not tell from the manifest what had
+become of the DICOM birth date. A static table can only account for what
+somebody remembered to write down, and nobody remembers twenty-two things.
+
+**What makes derivation possible is the shape of the pipeline, and it is worth
+naming because it is not obvious: the build carries a whitelist, not a
+blacklist.** The lab branch writes nine columns, the imaging branch seven keys,
+and everything else in the input is dropped by never being copied. So removal
+does not have to be enumerated at all. Only two things need declaring — which
+input fields are carried, and whether each passes through the pseudonymiser —
+and the second is the reason the declaration cannot be eliminated entirely:
+whether a value is relinkable is a fact about the code, not about the data. Two
+values can look equally unlike their originals and only one of them be
+recoverable with the key. Everything else is observed:
+
+| | |
+| --- | --- |
+| observed, not carried | removed |
+| carried through the pseudonymiser | replaced |
+| carried verbatim | kept |
+
+So `CARRIED_FIELDS` in `commissura.build.observe` has eighteen entries where the
+old table had thirty-nine prose entries, and reports strictly more.
+
+**The payoff, on a real run**: the vendor private tags `(0029,0010)` and
+`(0029,1010)` appear in the manifest as removed, present in 3 of 13 files —
+because the `imaging.phi_in_private_tag` defect put them there. Nothing declares
+them. They are in the table because they were in the data, which is the whole
+point: an unexpected field in a hospital's export is exactly what an auditor is
+looking for, and it is now impossible for one to pass through unmentioned.
+
+Four decisions worth keeping:
+
+- **Counts are per file, not per occurrence.** A message with twelve OBX
+  segments contributes `OBX-5` once. "Present in 34 of 43 files" is a fact about
+  coverage, which is what tells you a field is conditional; an occurrence count
+  would mostly measure how long the messages were.
+- **A declared field the corpus never carried is reported at zero, not dropped.**
+  This immediately earned itself: `Eta` came back as carried in zero of nineteen
+  reports, which was not a wrong declaration but a blind spot in the header
+  pattern — it anchored on line starts, and the generated reports write
+  `Nato/a il:` and `Eta:` on the same line. A table that hid absent fields would
+  have hidden the bug.
+- **An unreadable file is named, not skipped.** A file whose fields were never
+  seen is a file this table cannot vouch for, and silence would read as a clean
+  bill of health.
+- **Known DICOM tags are named, unknown ones are not.** A bare tag number would
+  have made the new table less readable than the old one, and a full data
+  dictionary would defeat the purpose, since the tags worth catching are the ones
+  nobody anticipated. So twenty-six keywords are transcribed and anything else is
+  reported by number.
+
+One rename, forced by an existing guard and worth recording because it looks
+arbitrary: the field identifier is emitted as `field`, not `key`.
+`layout.FORBIDDEN_MANIFEST_KEYS` reserves `key`, because a manifest property of
+that name is what a leaked secret would look like, and nobody should have to
+read the value to find out. The guard failed the build immediately, which is
+what it is for.
+
+Also centralised while here: the three corpus globs (`lab/*.hl7`,
+`reports/*.txt`, `imaging/*.json`) now live in `read.corpus.RAW_SOURCES`. Two
+modules walk the same corpus — one to link it, one to account for its fields —
+and a glob that disagreed between them would make the manifest describe files
+the dataset was not built from.
 
 ## Conventions
 

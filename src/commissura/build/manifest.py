@@ -27,6 +27,7 @@ import json
 from pathlib import Path
 
 from commissura import healthdcat, layout
+from commissura.build.observe import ModalityLedger, observe_corpus
 from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_now
 from commissura.deident.keys import SecretKey
 from commissura.read.corpus import RawCorpus
@@ -38,81 +39,42 @@ Separate from the layout schema version, because the manifest will change on a
 different clock from the dataset layout.
 """
 
-_MODALITY_DISPOSITION: dict[str, dict[str, list[str]]] = {
-    "lab": {
-        "removed": [
-            "PID-5 patient name",
-            "PID-7 date of birth",
-            "PID-11 address",
-            "PID-13 telephone and email",
-            "PID-19 national identifier",
-            "OBR-16 ordering provider",
-            "MSH-4 sending facility",
-        ],
-        "replaced": [
-            "PID-3 patient identifier, by HMAC-derived subject label",
-            "OBR-2 and OBR-3 accession, by HMAC-derived value",
-            "all timestamps, by day_offset from the subject's baseline",
-        ],
-        "kept": [
-            "OBX-3 observation identifier (LOINC)",
-            "OBX-5 value",
-            "OBX-6 units",
-            "OBX-7 reference range",
-            "OBX-8 abnormal flag",
-            "PID-8 administrative sex",
-        ],
-    },
-    "reports": {
-        "removed": [
-            "patient name, by exact match against the laboratory export",
-            "national identifier",
-            "medical record number",
-            "ordering and signing clinician names declared in structured fields",
-            "email addresses and telephone numbers, by pattern",
-        ],
-        "replaced": [
-            "every date-shaped string, by day_offset from the subject's baseline",
-            f"ages above {layout.AGE_CEILING}, by {layout.AGE_ABOVE_CEILING!r}",
-        ],
-        "kept": [
-            "clinical narrative: indication, technique, findings, conclusions",
-        ],
-    },
-    "imaging": {
-        "removed": [
-            "(0010,0010) PatientName",
-            "(0008,0080) InstitutionName",
-            "(0008,0081) InstitutionAddress",
-            "(0008,0090) ReferringPhysicianName",
-            "(0008,1050) PerformingPhysicianName",
-            "(0008,1010) StationName",
-            "(0018,1000) DeviceSerialNumber",
-            "(0029,xxxx) vendor private block",
-            "(0008,103E) SeriesDescription, which may carry a typed-in name",
-        ],
-        "replaced": [
-            "(0010,0020) PatientID, by HMAC-derived subject label",
-            "(0020,000D) StudyInstanceUID and (0020,000E) SeriesInstanceUID, "
-            "by HMAC-derived UIDs under the 2.25 arc",
-            "(0008,0050) AccessionNumber, by HMAC-derived value",
-            "(0008,0020) StudyDate, by day_offset from the subject's baseline",
-        ],
-        "kept": [
-            "(0008,0060) Modality",
-            "(0028,0301) BurnedInAnnotation, so a reader knows pixels were not inspected",
-        ],
-    },
-}
-"""Per-modality record of what was removed, replaced and kept.
 
-A static table rather than something derived from the run, and that is a real
-limitation worth naming: it states the *intent* of the rules, not an observation
-of what each file contained. Deriving it per file would be stronger, and is the
-obvious next improvement. What makes the current form defensible is that the
-rules are deterministic and the scrubber's own per-document counts are recorded
-alongside it.
-"""
+def _ledger_payload(ledger: ModalityLedger) -> dict[str, object]:
+    """Render one modality's observed field ledger for the manifest.
+
+    Args:
+        ledger: What was observed in that modality's input.
+
+    Returns:
+        The manifest section, with the counts first so that a reader sees the
+        shape of the modality before the field-by-field table.
+
+    The field identifier is emitted as ``field`` and not ``key``:
+    :data:`commissura.layout.FORBIDDEN_MANIFEST_KEYS` reserves ``key``, because
+    a manifest property of that name is how the secret would look if it ever
+    leaked into one, and nobody should have to read the value to find out.
+    """
+    return {
+        "modality": ledger.modality,
+        "key_kind": ledger.key_kind,
+        "files_read": ledger.files_read,
+        "unreadable": list(ledger.unreadable),
+        "fields_observed": {
+            disposition: ledger.count(disposition)
+            for disposition in ("removed", "replaced", "kept")
+        },
+        "fields": [
+            {
+                "field": item.key,
+                **({"name": item.name} if item.name else {}),
+                "disposition": item.disposition,
+                "files_present": item.files_present,
+                **({"note": item.note} if item.note else {}),
+            }
+            for item in ledger.fields
+        ],
+    }
 
 
 def write_manifest(
@@ -173,7 +135,16 @@ def write_manifest(
             "report_files": summary.report_files,
             "imaging_metadata_files": summary.imaging_files,
         },
-        "modalities": _MODALITY_DISPOSITION,
+        "modalities_note": (
+            "Derived from this run, not declared. Every field the input actually "
+            "carried is listed with the number of files that held it, so a field "
+            "nobody anticipated is reported as removed rather than going "
+            "unmentioned. The build carries a whitelist: a field absent from the "
+            "output is absent because nothing copies it, which is why removal does "
+            "not have to be enumerated in advance. Free-text bodies are not fields "
+            "and are accounted for under free_text_redactions."
+        ),
+        "modalities": [_ledger_payload(ledger) for ledger in observe_corpus(corpus.root)],
         "free_text_redactions": redaction_totals,
         "residual_risk": {
             "note": (
