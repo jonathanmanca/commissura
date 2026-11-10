@@ -1354,6 +1354,112 @@ repository inactivity, so a long quiet spell switches the canary off silently.
 paragraph exists so the next person does not conclude from a stale badge that
 upstream has been fine for a year.
 
+**2026-11-11 — Chained re-pseudonymisation is designed and deliberately not
+implemented.** The scheme, for whenever somebody asks:
+
+```
+released_id = HMAC-SHA256(release_key, "relabel|" + subject_id)[:12]
+```
+
+The input is the **subject label already in the dataset**, not the national
+identifier. That is the whole point and it is what makes the thing worth
+designing: the party applying the second layer never needs, never sees and
+never stores an original identifier. They take `sub-a3f9c21b4e07`, apply a key
+of their own, and get a different label.
+
+**This is the executable form of the double pseudonymisation the regulation
+foresees.** The FAQ reading of 2026-11-10 settled that both the health data
+holder and the HDAB may pseudonymise, that the holder should do it as early as
+possible, and that ultimate responsibility rests on the HDAB. A second layer
+applied on top of ours is exactly that arrangement expressed as a function: the
+holder pseudonymises first, the HDAB re-does it over the result, and neither
+needs what the other holds.
+
+**The threat it actually addresses is less obvious than it looks, and it is not
+the data user.** A single layer already hides identities from the user. What it
+does not do is stop *the holder* recognising its own released data: the holder
+derived those labels and can re-derive them for anybody it can name. So a
+hospital receiving an analysis of a dataset it contributed can map rows back to
+patients. The second layer breaks that link, because the holder does not have
+the release key — and that is a protection against the party doing the
+releasing, which is the one a holder-side tool cannot give itself.
+
+Four properties worth having written down before anybody builds it:
+
+- **A distinct domain prefix per stage.** `"relabel|"` rather than reusing
+  `"subject|"`. The keys differ so there is no collision to prevent, but the
+  prefix records which layer produced a label, and a scheme whose stages are
+  indistinguishable is one nobody can audit later.
+- **Determinism survives the chain**, so two datasets carrying the same
+  first-stage labels still relabel to the same second-stage labels. That is what
+  makes cross-holder linkage work at the HDAB, which is the case the FAQ's own
+  worked example describes.
+- **Collisions propagate and the input is 48 bits.** The first stage keeps 12
+  hex characters, so the second stage draws from a space of 2^48 and inherits
+  every collision the first produced. The birthday bound is around 16.7 million
+  subjects, which is far outside any realistic cohort, and `Pseudonymiser`
+  already checks what it issues. Recorded because a reader of the formula would
+  otherwise have to work it out.
+- **It relabels subjects and nothing else, which is the limit.** `day_offset`
+  values are unchanged, and offsets are stable per (key, corpus), so a holder
+  can still align two timelines by their shape even after relabelling. Closing
+  that would mean re-shifting dates, which would destroy the interval alignment
+  the offsets exist to provide. A second layer therefore buys less than it
+  appears to, and saying so is more useful than shipping it quietly.
+
+**Why it is not implemented: nobody asked, and it belongs on the other side of
+the chain.** commissura is a holder's tool. The party that would run this is the
+HDAB, which does not exist in Italy yet — designation is due March 2027 — and
+whose requirements arrive with the Article 77 and 78 implementing acts in the
+same month. Building it now means building for a user nobody has met against a
+specification nobody has written, and the most likely outcome is a mechanism
+that has to be thrown away. The formula costs four lines when it is wanted; the
+reasoning above is the part that would have been lost.
+
+**2026-11-11 — HealthDCAT-AP issues #55 and #61 can both change what we emit in
+`hasVariables`, and the CSVW construction stays behind one function because of
+them.** Read rather than recalled: both are open on the profile's own tracker.
+
+**#55, "Support full W3C CSVW structure for variable descriptions."** Release 8
+nests `csvw:TableGroup → csvw:Table → csvw:Column`. The W3C CSVW metadata
+specification nests `csvw:TableGroup → csvw:Table → csvw:TableSchema →
+csvw:Column`, attaching columns through `csvw:tableSchema` and then
+`csvw:column` rather than directly to the table. The issue's own argument is
+interoperability: W3C-compliant CSVW metadata cannot be reused in a
+HealthDCAT-AP description as it stands. If upstream adopts the W3C shape, every
+description we have emitted gains a level in the middle.
+
+**#61, "Clarify allowed CSVW Column datatypes (base types vs derived / XSD
+IRIs)."** Release 8's SHACL requires exactly one `csvw:datatype` per column, as
+a **literal** carrying a CSVW built-in name — `"string"`, `"integer"`. CSVW and
+XML Schema also permit types derived from base types, and implementations
+mapping from richer source models naturally emit XSD datatype IRIs such as
+`xsd:decimal` or `xsd:dateTime`. The issue asks whether rejecting those is
+intentional or an oversight. We currently emit the built-in literals, which is
+what the published shapes require, so **we are conformant today and would stop
+being so if the answer is "IRIs"** — an unusual shape of risk, where doing the
+correct thing now is what the change would break.
+
+So: one is a structural change to the nesting, the other a change to the leaf
+values, and between them they could rewrite every `hasVariables` node.
+
+**Which is why `_csvw_table_group()` is the only place that builds it.** One
+function, called once, constructing the whole `TableGroup → Table → Column`
+nesting and each column's five properties. Inserting a `TableSchema` level or
+swapping the datatype literals for IRIs is an edit inside that function and
+touches nothing else. The alternative — assembling the structure inline where
+the description is written, or spreading it across the column loop and the
+caller — would make each of these a change in several places, with the usual
+result that one of them is missed and the document is half-migrated.
+
+This is the same mitigation already recorded for the provisional
+`healthdcatap:` namespace, which the profile admits will be renamed: IRIs are
+assembled from `healthdcat.NAMESPACES` in one place and never written into
+templates. Two known-pending upstream changes, two single points of edit. The
+pattern is worth naming as a pattern, because the next one will arrive the same
+way: **when a specification tells you a part of it is unsettled, put that part
+behind one function and write down which issue will move it.**
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.
