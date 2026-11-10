@@ -581,6 +581,14 @@ Note the honest result above: on ten participants with exact ages, minimum k is
 1. Ten people cannot reach k=5 on age and sex together — a property of small
 cohorts, not a defect, and the command reports the number rather than a verdict.
 
+**k-anonymity is a measurement, not a certificate, and this tool pseudonymises
+rather than anonymises.** The distinction carries the whole legal weight:
+pseudonymised data is still personal data under the GDPR, anonymised data is not.
+The Commission's EHDS FAQ treats pseudonymisation and anonymisation as
+alternatives and puts ultimate responsibility for either on the Health Data
+Access Body, so a dataset built here is an input to that judgement and never the
+judgement itself.
+
 Not an Article 78 quality and utility label: those criteria are not published
 yet.
 

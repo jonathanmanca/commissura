@@ -167,12 +167,52 @@ datasets whose collection was publicly funded**. The EU project QUANTUM is
 developing the criteria. The `risk` command should grow toward this, not toward
 an invented metric.
 
-## Open question to resolve
+## Where commissura sits in the chain
 
-FAQ Q49 asks who actually performs pseudonymisation and anonymisation — the
-health data holder, the HDAB, or both. The answer determines which side of the
-chain commissura sits on, and therefore what `build` is responsible for. Read
-it and record the answer here.
+**Answered 2026-11-10 from the Commission's FAQ. commissura is a health data
+holder's tool, and both of its outputs are the holder's deliverables.**
+
+Q49 asks who performs pseudonymisation and anonymisation. The answer is
+**both, or either**: recital 72 says it "should be possible for
+pseudonymisation and anonymisation to be carried out by health data access
+bodies or by health data holders", and as early as possible, which the FAQ ties
+to GDPR data minimisation. Two things follow that matter here:
+
+- **Ultimate responsibility rests on the HDAB**, in the FAQ's own words, but
+  the actual work "might also be already carried out by the health data holder".
+  So `build` is a *first* pseudonymisation step, never the last one, and the
+  HDAB may add more. This is the strongest argument yet for
+  `.deident/manifest.json`: whoever adds the next step has to know exactly what
+  the previous one did, field by field.
+- Q49's second worked example describes a multi-hospital permit needing record
+  linkage, and names the holder's operation as "hashing the identifiers
+  before disclosure to the HDAB". That is what `subject_id` is. The design
+  decision of 2026-11-06 turns out to match the mechanism the FAQ describes,
+  which was luck rather than judgement and is worth knowing.
+
+And **the dataset description is the holder's to submit**, which Q34 and Q35
+settle rather than Q49: a health data holder of personal electronic health data
+is *always* a controller (Art. 2(2)(t)), joint controllers must agree among
+themselves who will "provide dataset descriptions", and a holder notifies IP or
+trade secrets "when submitting the dataset description for inclusion in the
+dataset catalogue in accordance with Article 60(3)". So emitting
+`healthdcat-ap.jsonld` is squarely in scope for a holder's tool.
+
+Two limits this exposes, recorded rather than fixed:
+
+1. **Cross-holder linkage needs key distribution, which commissura does not
+   address.** Q49's example has the *HDAB* linking records across hospitals.
+   Deterministic HMAC gives two hospitals the same subject label from the same
+   key, so the linkage works — but only if they share the key, and this tool
+   deliberately keeps the key out of the dataset and says nothing about how it
+   would travel. `key_fingerprint` in the manifest is what tells an HDAB whether
+   two datasets are relinkable at all, and that is as far as it goes.
+2. **commissura pseudonymises; it does not anonymise, and must never imply it
+   does.** The FAQ treats the two as alternatives. Pseudonymised data is still
+   personal data under the GDPR; anonymised data is not, which is exactly why
+   the word is not ours to use. `risk` measures re-identification risk over
+   quasi-identifiers and reports k; it does not certify anonymity, and k=1 on a
+   small cohort is the honest reminder of that.
 
 ## Scope
 
@@ -259,12 +299,14 @@ otherwise; publishing is an irreversible public act and therefore a decision,
 not a step to take in passing.
 
 Next, in order:
-1. Answer the open question above: FAQ Q49, who performs pseudonymisation. It
-   decides which side of the chain this tool sits on.
-2. Name the free-text redaction categories in the manifest's field table the
+1. Name the free-text redaction categories in the manifest's field table the
    way the structured modalities are now named. A report body is not a field,
    so the scrubber's per-category counts sit beside the table rather than in
    it, and the two have to be read together to see what happened to a report.
+2. Decide whether to publish to PyPI, which is the only thing standing between
+   this repository and the "deployable by a stranger" constraint. An
+   irreversible public act, so the author's call and not a step to take in
+   passing.
 
 ## Decision log
 
@@ -583,14 +625,15 @@ disk still gets a distribution node describing the form it would be accessed in.
 The imported DCAT-AP 3.0.0 Distribution requirements are unread, and the emitted
 document says so in its own `profileNote`.
 
-**2026-11-07 — Known limitation: the manifest's per-modality table states intent,
-not observation. Closed 2026-11-10 — and the table turned out to be wrong, not
-merely weak.** See the entry at the end of this log. `.deident/manifest.json` lists what was removed, replaced and
-kept per modality from a static table. That describes what the rules do, not
-what each file actually contained. Deriving it per file would be stronger and is
-the obvious next improvement; what makes the current form defensible is that the
-rules are deterministic and the scrubber's own per-document counts are recorded
-alongside. Recorded here so the gap is not rediscovered as a surprise.
+**2026-11-07 — Known limitation: the manifest's per-modality table states
+intent, not observation. Closed 2026-11-10 — and the table turned out to be
+wrong, not merely weak.** See the entry at the end of this log.
+`.deident/manifest.json` lists what was removed, replaced and kept per modality
+from a static table. That describes what the rules do, not what each file
+actually contained. Deriving it per file would be stronger and is the obvious
+next improvement; what makes the current form defensible is that the rules are
+deterministic and the scrubber's own per-document counts are recorded alongside.
+Recorded here so the gap is not rediscovered as a surprise.
 
 **2026-11-07 — `risk` is k-anonymity over `participants.tsv` and nothing more.**
 A `Counter` over the recommended participant columns, flagging combinations
@@ -937,6 +980,61 @@ seen a tidy skip rather than a problem. Now four explicit `-o` names, verified
 by running the block and diffing all four files against the ones in use. The
 general lesson: **a skip is a silent failure mode, and a command in a README is
 untested code.**
+
+**2026-11-10 — Answered: commissura is a health data holder's tool, performing a
+first pseudonymisation step, and both its description documents are the holder's
+to produce.** The brief has carried this as an open question since the start,
+because it decides what `build` is responsible for. FAQ Q49 settles the
+pseudonymisation half and Q34/Q35 settle the description half, and the two
+answers point the same way.
+
+Q49: both the holder and the HDAB may pseudonymise, or just one of them, and
+recital 72 asks for it as early as possible in the process, which the FAQ ties to
+GDPR data minimisation. **Ultimate responsibility rests on the HDAB**, in the
+FAQ's words, while the actual work "might also be already carried out by the
+health data holder". So nothing commissura does is final, and that reframes the
+manifest from a nice-to-have into the thing that makes the next step possible:
+whoever pseudonymises after us has to know what we already did, which is why
+deriving the per-field table from the run this morning mattered more than it
+looked at the time.
+
+Q34 and Q35: a health data holder of personal electronic health data is *always*
+a controller (Art. 2(2)(t)); joint controllers must settle among themselves who
+will "provide dataset descriptions"; and a holder flags IP or trade secrets "when
+submitting the dataset description for inclusion in the dataset catalogue in
+accordance with Article 60(3)". The Article 77 description is therefore a holder
+deliverable, not an HDAB one. That was assumed here and is now sourced.
+
+**The detail worth the whole reading**: Q49's second example is a permit covering
+procedures carried out in different hospitals, needing linkage across them. It
+names the holders' operation as "hashing the identifiers before disclosure to the
+HDAB", with the identifiers never reaching the data user — only the fact that two
+rows refer to the same person. That is `subject_id` exactly. The stack decision of
+2026-11-06 chose HMAC-SHA256 for brute-force resistance and domain separation, not
+because the FAQ described it; matching the regulator's own worked example is luck,
+and worth knowing it was luck.
+
+Two limits this exposes, both recorded rather than fixed, because fixing either
+would change what this project is:
+
+**Cross-holder linkage needs key distribution, and commissura says nothing about
+it.** In that same example it is the *HDAB* that links records across hospitals.
+Deterministic HMAC means two hospitals with the same key produce the same subject
+label, so the linkage works — and only then. This tool keeps the key out of the
+dataset on purpose and offers no answer to how a key would travel between
+institutions, who would hold it, or how it would be rotated. `key_fingerprint`
+lets an HDAB tell whether two datasets are relinkable; that is the whole of what
+is on offer. Key custody across holders is a governance problem, not a local CLI
+problem, and claiming otherwise would be the first dishonest sentence in this
+repository.
+
+**commissura pseudonymises and does not anonymise.** The FAQ treats them as
+alternatives and so must we. Pseudonymised data is still personal data under the
+GDPR; anonymised data is not, and that difference is the entire legal weight of
+the word. `risk` reports k over quasi-identifiers — it measures, it does not
+certify, and the honest k=1 it reports on a ten-person cohort is the argument for
+never letting "anonymised" into the README. Checked while here: the word appears
+nowhere in the repository as a claim about our output.
 
 ## Conventions
 
