@@ -576,11 +576,26 @@ field, so only the patterns can find it.
 
 #### Linkage is accountable
 
-A subject exists only if a laboratory message established it, because HL7 PID-19
-carries the national identifier and a DICOM header does not. Every record that
-cannot be attached produces an issue naming the file and the reason, and the
-count goes into the manifest — it is the number to look at before trusting a
-dataset.
+A subject exists only if a laboratory message established it, because the HL7
+message carries the national identifier and a DICOM header does not. Every
+record that cannot be attached produces an issue naming the file and the reason,
+and the count goes into the manifest — it is the number to look at before
+trusting a dataset.
+
+**Where that identifier sits is not one answer.** The reader looks in the PID-3
+identifier list first, for a repetition whose type code is `NNITA` or `NI`, and
+falls back to PID-19. PID-19 was deprecated in HL7 v2.3.1 and an Italian
+installation carries the codice fiscale in PID-3 with a type code — but
+deprecated is not switched off, and plenty of interfaces still send it there. A
+generated corpus contains both forms, one site per interface, because a fallback
+no corpus exercises is a fallback nobody has tested.
+
+The type code is worth a sentence of its own: **HL7 v2 table 0203 has no
+concrete code for Italy.** It documents a pattern, `NNxxx`, "National Person
+Identifier where the xxx is the ISO table 3166 3-character (alphabetic) country
+code", so `NNITA` is that pattern instantiated rather than a listed concept.
+`NI`, "National unique individual identifier", is listed, and some systems use
+it instead. The reader accepts both; the writer emits `NNITA`.
 
 Record numbers are compared with leading zeros stripped, which recovers the
 `imaging.mrn_format_drift` defect: at `--defect-rate 1.0` across twenty

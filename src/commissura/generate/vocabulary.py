@@ -72,12 +72,26 @@ class ImagingProtocol:
 
 @dataclass(frozen=True, slots=True)
 class Site:
-    """A hospital or laboratory, with the address that appears in its exports."""
+    """A hospital or laboratory, with the address that appears in its exports.
+
+    Attributes:
+        name: Institution name, always carrying the synthetic marker.
+        address: Street address, invented.
+        city: A real city, which is realism rather than attribution.
+        area_code: Italian telephone area code, without its leading zero.
+        national_id_in_pid_19: True for an interface that still carries the
+            codice fiscale in PID-19 instead of the PID-3 identifier list. A
+            property of the sending interface and not of the hospital, which is
+            why it belongs to the site rather than to a message: an interface
+            does not change its mind between two messages, and a corpus where
+            it did would be measuring something that does not happen.
+    """
 
     name: str
     address: str
     city: str
     area_code: str
+    national_id_in_pid_19: bool = False
 
 
 FAMILY_NAMES: tuple[str, ...] = (
@@ -211,7 +225,17 @@ SITES: tuple[Site, ...] = (
     Site("OSPEDALE SINTETICO DI COLLEVERDE", "Via dei Tigli 40", "Milano", "2"),
     Site("AZIENDA OSPEDALIERA SINTETICA NORDVALLE", "Corso delle Betulle 88", "Torino", "11"),
     Site("IRCCS SINTETICO MAREBIANCO", "Via dei Glicini 35", "Milano", "2"),
-    Site("PRESIDIO OSPEDALIERO SINTETICO VALLEDORO", "Via dei Lecci 92", "Cagliari", "70"),
+    # One legacy interface, on purpose: this presidio still sends the codice
+    # fiscale in PID-19. Without it every message in a generated corpus would
+    # take the PID-3 path and the reader's fallback would be dead code that
+    # only a unit test ever reached.
+    Site(
+        "PRESIDIO OSPEDALIERO SINTETICO VALLEDORO",
+        "Via dei Lecci 92",
+        "Cagliari",
+        "70",
+        national_id_in_pid_19=True,
+    ),
     Site("POLICLINICO UNIVERSITARIO SINTETICO PIETRALTA", "Viale dei Platani 155", "Roma", "6"),
 )
 """Invented institutions, at invented addresses, every name carrying ``SINTETIC``.

@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Final
 
 from commissura.models import Sex
-from commissura.read.hl7 import parse_day, parse_message, parse_timestamp
+from commissura.read.hl7 import Segment, parse_day, parse_message, parse_timestamp
 
 RAW_SOURCES: Final[dict[str, str]] = {
     "lab": "lab/*.hl7",
@@ -55,6 +55,66 @@ the same corpus -- this one to link it, :mod:`commissura.build.observe` to
 account for its fields -- and a glob that disagreed between them would make the
 manifest describe files the dataset was not built from.
 """
+
+
+NATIONAL_ID_TYPE_CODES: Final[frozenset[str]] = frozenset({"NNITA", "NI"})
+"""PID-3 identifier type codes that mark a value as the national identifier.
+
+HL7 v2 table 0203 has **no concrete code for Italy**, which is the first thing
+to know here. What it has is a documented pattern: ``NNxxx``, "National Person
+Identifier where the xxx is the ISO table 3166 3-character (alphabetic) country
+code". So ``NNITA`` is that pattern instantiated for Italy rather than a listed
+concept, and it is what Italian profiles send. ``NI``, "National unique
+individual identifier", *is* a listed concept and some systems use it instead.
+
+Both are accepted because this is a reader, and a reader that insisted on one
+spelling would reject half of the real messages for a difference that carries
+no information. Checked against the table rather than recalled -- see the
+decision log entry of 2026-11-11 for why that mattered.
+"""
+
+MEDICAL_RECORD_TYPE_CODE: Final = "MR"
+"""The listed code for a medical record number, per table 0203."""
+
+
+def _identifier_of_type(pid: Segment, wanted: frozenset[str]) -> str:
+    """Return the first PID-3 identifier whose type code is one of ``wanted``.
+
+    Args:
+        pid: The PID segment.
+        wanted: Identifier type codes to accept, from table 0203.
+
+    Returns:
+        The identifier, or an empty string if no repetition carries one of
+        those type codes.
+    """
+    for components in pid.repetition_components(3):
+        value = components[0].strip() if components else ""
+        type_code = components[4].strip().upper() if len(components) > 4 else ""
+        if value and type_code in wanted:
+            return value
+    return ""
+
+
+def _untyped_identifier(pid: Segment) -> str:
+    """Return PID-3's first identifier when the segment declares no type codes.
+
+    An interface that sends a bare ``PID|1||0012345`` means the medical record
+    number, because that is the only identifier it has room to mean. The test is
+    that *no* repetition carries a type code: once one does, an untyped value is
+    something the sender chose not to label, and guessing what it is would be
+    how a codice fiscale ends up filed as a record number.
+
+    Args:
+        pid: The PID segment.
+
+    Returns:
+        The identifier, or an empty string.
+    """
+    repetitions = pid.repetition_components(3)
+    if any(len(components) > 4 and components[4].strip() for components in repetitions):
+        return ""
+    return repetitions[0][0].strip() if repetitions and repetitions[0] else ""
 
 
 def read_exact(path: Path) -> str:
@@ -227,14 +287,22 @@ def read_lab(path: Path, relative: str) -> LabRecord:
     message = parse_message(read_exact(path))
     pid = message.require("PID")
 
-    national_id = pid.field(19).strip()
+    # PID-3 first, PID-19 only as a fallback. PID-19 was deprecated in HL7
+    # v2.3.1 and Italian installations carry the codice fiscale in the PID-3
+    # identifier list with a type code; the fallback stays because deprecated is
+    # not the same as absent and plenty of interfaces still send it there.
+    national_id = _identifier_of_type(pid, NATIONAL_ID_TYPE_CODES) or pid.field(19).strip()
     if not national_id:
-        raise ValueError("PID-19 carries no national identifier")
+        raise ValueError(
+            "no national identifier: PID-3 carries none typed "
+            f"{sorted(NATIONAL_ID_TYPE_CODES)} and PID-19 is empty"
+        )
 
     sex_value = pid.field(8).strip().upper()
     identity = Identity(
         national_id=national_id,
-        mrn=pid.component(3, 1).strip(),
+        mrn=_identifier_of_type(pid, frozenset({MEDICAL_RECORD_TYPE_CODE}))
+        or _untyped_identifier(pid),
         family_name=pid.component(5, 1).strip(),
         given_name=pid.component(5, 2).strip(),
         sex=Sex(sex_value) if sex_value in {"M", "F"} else None,

@@ -1147,6 +1147,59 @@ assumed: building the same corpus under two different keys produces an identical
 residual-risk list, so those numbers are corpus-dependent and key-independent,
 and the old fingerprint stays consistent with the labels printed beside it.
 
+**2026-11-11 — The codice fiscale is read from the PID-3 identifier list, with
+PID-19 kept as a fallback. And HL7 v2 table 0203 has no code for Italy.** The
+reader took the national identifier from PID-19 only. HL7 deprecated that field
+in v2.3.1, and an Italian installation carries the codice fiscale in the PID-3
+identifier list with a type code, so the common case was the one not handled —
+the reader would have raised "PID-19 carries no national identifier" on a
+perfectly ordinary message and dropped every subject in the export.
+
+**PID-19 stays supported, and that is a decision rather than caution.**
+Deprecated is not withdrawn: the field is still in the standard, interfaces
+built against v2.3 are still in production, and a reader is the tolerant half of
+this codebase by an explicit decision of 2026-11-07. Refusing a deprecated field
+would reject messages a hospital cannot stop sending, for the sake of a
+correctness nobody benefits from. PID-3 is preferred when both carry a value,
+because the undeprecated field is the authoritative one.
+
+**The type code was checked against the table rather than recalled, and the
+recollection was wrong.** `NNITA` is *not* a concept in HL7 v2 table 0203. What
+the table has is a pattern: `NNxxx`, "National Person Identifier where the xxx
+is the ISO table 3166 3-character (alphabetic) country code". So `NNITA` is that
+pattern instantiated for Italy — well-formed, and what Italian profiles send,
+but not something you can find by searching the table for it. The table does
+list `NI`, "National unique individual identifier", which some systems use for
+the same value. The reader accepts both; the generator emits `NNITA`. Writing
+`NNITA` into a constant without checking would have produced a plausible-looking
+code with no provenance, which is the same failure as a plausible IRI that
+resolves to nothing.
+
+**The placement belongs to the site, not to the message.** `Site` gains
+`national_id_in_pid_19`, and one of the five sites has it set. An interface does
+not change its mind between two messages, so varying it per message would model
+something that does not happen; varying it per site means a generated corpus
+contains both forms — on a 20-subject run, 42 messages in the PID-3 form and 29
+in the legacy one — and the reader's fallback is exercised by `generate` instead
+of only by a unit test. The same argument as the contact detail yesterday: a
+path no corpus reaches is a path nobody has measured.
+
+**One guard that is less obvious than the rest.** When no repetition carries a
+medical-record type code, the reader falls back to PID-3's first identifier —
+but *only if no repetition carries a type code at all*. Once a sender labels
+anything, an unlabelled identifier is something it chose not to label, and
+taking it for the record number is how a codice fiscale gets filed as a hospital
+number. The record number is what imaging links on, so that mistake would
+attach the wrong studies to the wrong person while every count still looked
+right. A test pins the distinction.
+
+Also added, because `component` could not express it: `Segment.repetition_components`.
+Splitting a repeating field on the component separator first attributes every
+later repetition to the first identifier and reads component five out of the
+second identifier's text. The two separators have to be applied in the right
+order, and PID-3 is the first field in this project that repeats *and* carries
+components that matter.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

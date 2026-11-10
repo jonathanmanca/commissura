@@ -146,6 +146,28 @@ class Segment:
             return ()
         return tuple(raw.split(REPETITION_SEPARATOR))
 
+    def repetition_components(self, index: int) -> tuple[tuple[str, ...], ...]:
+        """Return each repetition of a field, split into unescaped components.
+
+        :meth:`component` cannot answer this. It splits the whole raw field on
+        the component separator, so on a repeating field it reads the components
+        of the first repetition and silently attributes the rest to it. PID-3 is
+        a list of identifiers, each with its own type code, so getting at the
+        second identifier needs the two separators applied in the right order.
+
+        Args:
+            index: One-based HL7 field number.
+
+        Returns:
+            One tuple of components per repetition; empty if the field is
+            absent. Short repetitions stay short rather than being padded, so a
+            caller reading component five has to check the length.
+        """
+        return tuple(
+            tuple(unescape(part) for part in repetition.split(COMPONENT_SEPARATOR))
+            for repetition in self.repetitions(index)
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Message:

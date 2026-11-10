@@ -10,6 +10,7 @@ import pytest
 from commissura.generate.cohort import CohortSpec, build_cohort, child_seed
 from commissura.generate.defects import BY_ID
 from commissura.generate.writer import read_exact, verify_corpus, write_corpus
+from commissura.read.corpus import read_corpus
 
 
 def _corpus(tmp_path: Path, name: str, **kwargs: object) -> Path:
@@ -191,3 +192,41 @@ def test_duplicate_message_defect_writes_a_byte_identical_copy(tmp_path: Path) -
 def test_invalid_specifications_are_rejected(kwargs: dict[str, object], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         CohortSpec(**kwargs)  # type: ignore[arg-type]
+
+
+def _pid_segments(root: Path) -> list[str]:
+    """Return every lab message's PID segment, split on HL7's bare carriage return."""
+    segments = []
+    for path in sorted((root / "lab").glob("*.hl7")):
+        text = read_exact(path)
+        segments.append(next(s for s in text.split("\r") if s.startswith("PID")))
+    return segments
+
+
+def test_a_corpus_carries_the_codice_fiscale_in_both_positions(tmp_path: Path) -> None:
+    """One site still sends PID-19, the rest send the PID-3 list.
+
+    Without this the reader's PID-19 fallback would be dead code that only a
+    unit test ever reached, and a corpus in which every interface is modern
+    would be modelling a world where the old ones were all switched off.
+    """
+    root = _corpus(tmp_path, "both", subjects=20, seed=5, defect_rate=0.0)
+    segments = _pid_segments(root)
+
+    modern = [s for s in segments if "NNITA" in s]
+    legacy = [s for s in segments if "NNITA" not in s]
+
+    assert modern, "no message carries the codice fiscale in the PID-3 list"
+    assert legacy, "no message carries it in PID-19, so the fallback is untested here"
+    # The legacy interface sends it in PID-19 and nowhere else; the modern one
+    # sends it in PID-3 and leaves the deprecated field empty.
+    assert all(s.count("^MR") == 1 for s in segments)
+
+
+def test_every_subject_is_read_whichever_position_was_used(tmp_path: Path) -> None:
+    """The point of the fallback: no subject is lost to its interface's age."""
+    root = _corpus(tmp_path, "linked", subjects=20, seed=5, defect_rate=0.0)
+    corpus = read_corpus(root)
+
+    assert len(corpus.subjects) == 20
+    assert not [issue for issue in corpus.issues if issue.reason == "unreadable_lab_message"]

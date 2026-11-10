@@ -217,7 +217,31 @@ def render_panel(
     # --- PID: who the patient is. Nearly every field here is an identifier. ---
     pid = message.add("PID")
     pid.set(1, "1")
-    pid.set(3, (Phi(person.mrn, PhiCategory.PATIENT_ID), "", "", site.name, "MR"))
+    # PID-3 is a *list* of identifiers, each with its own type code, and a
+    # modern Italian interface puts the codice fiscale in it beside the record
+    # number. HL7 v2 table 0203 has no concrete code for Italy; it documents the
+    # pattern NNxxx, "National Person Identifier where the xxx is the ISO table
+    # 3166 3-character (alphabetic) country code", so NNITA is that pattern
+    # instantiated rather than a listed concept.
+    record_number = (Phi(person.mrn, PhiCategory.PATIENT_ID), "", "", site.name, "MR")
+    if site.national_id_in_pid_19:
+        pid.set(3, record_number)
+    else:
+        pid.set(
+            3,
+            Repeated(
+                (
+                    record_number,
+                    (
+                        Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID),
+                        "",
+                        "",
+                        "MINSAL",
+                        "NNITA",
+                    ),
+                )
+            ),
+        )
     pid.set(
         5,
         (
@@ -252,8 +276,13 @@ def render_panel(
             )
         ),
     )
-    # PID-19 is where Italian interfaces conventionally carry the codice fiscale.
-    pid.set(19, Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID))
+    # PID-19 only for the legacy interface, and only there. HL7 deprecated the
+    # field in v2.3.1, so a corpus that put the codice fiscale here in every
+    # message would be modelling an interface nobody deploys new today — while
+    # dropping it entirely would model a world where the old ones were all
+    # switched off. One site sends it, the rest do not.
+    if site.national_id_in_pid_19:
+        pid.set(19, Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID))
 
     # --- PV1: the encounter. A defect can remove it entirely. ---
     if not injector.apply(
