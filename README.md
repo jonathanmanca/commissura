@@ -20,6 +20,55 @@ de-identified, documented datasets. `commissura` is a local command-line tool th
 does exactly that — no service to deploy, no network component, no accreditation
 required.
 
+## What this will not do for you
+
+Four limits, stated here rather than further down, because a tool that touches
+health data should declare them before you install it and not after.
+
+**It needs a structured source beside the free text.** The de-identification
+here works by targeted redaction: the laboratory message *states* this patient's
+name, national identifier and record number, MSH-4 states the sending
+institution, OBR-16 the ordering clinician, the imaging header the institution's
+address. So the problem stops being "find the names in the prose" and becomes
+"remove these specific strings", which is exact, auditable and countable. Take
+the structured source away and the method has nothing to work from. **If what
+you have is a folder of PDF reports and nothing else, this tool is not for
+you** — you would need named entity recognition, which this project rejects on
+the evidence that general-purpose tools miss over half of clinical PHI. Rules
+first, measurement always; and no rules are possible without a source of truth.
+
+**Exact intervals are a re-identification channel, and this tool keeps them
+exact on purpose.** The dataset carries `day_offset` from each subject's own
+baseline, with no calendar anchor, because the interval between two events is
+clinically useful and the absolute date is what has to go. The consequence:
+anybody who learns **one** true date for a subject from anywhere else — a
+discharge letter in a drawer, a dated post, an insurance claim, an obituary —
+recovers that subject's entire timeline, because every other event is a known
+number of days from it. Blurring the intervals would close the channel and
+destroy the clinical value, so this tool does not do it. Decide which side of
+that trade-off your release is on before you publish; it is the single most
+likely route from this dataset back to a person.
+
+**On a small cohort, k-anonymity does not reach a useful threshold, and no
+amount of care changes that.** `risk` reports the number honestly and the
+honest number is often 1: twenty-five people with exact ages cannot reach k=5
+on age and sex together. That is arithmetic, not a defect in the dataset or the
+tool. The fix is banding the ages or dropping an attribute before release, which
+is a decision about your data that `commissura` does not take for you. Run
+`commissura risk` and read the number before you release anything, and see
+[`commissura risk`](#commissura-risk) for why k is a measurement and not a
+certificate.
+
+**Lose the key file and the dataset is permanently orphaned.** Not unreadable —
+the data stays exactly as useful as it was — but no longer *extensible* or
+*linkable*. You cannot add next year's records for the same people, because
+their subject labels can never be derived again. You cannot link it to another
+dataset you built, because you cannot show the labels came from the same secret.
+You cannot answer a question about which original record a row came from. Every
+pseudonym in the dataset derives from that one file, nothing in the dataset can
+reconstruct it, and that is the design working as intended. Back it up
+somewhere you will still have in five years.
+
 ## Install
 
 Requires Python 3.11 or newer.

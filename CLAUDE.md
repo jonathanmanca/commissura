@@ -1274,6 +1274,38 @@ dataset nobody had touched.
 with the old list before anybody read the file. That is precisely the drift it
 exists to catch, caught inside a day rather than inside three weeks.
 
+**2026-11-11 — Four limits are now stated in the README, above the install
+instructions rather than below them.** A tool that touches health data should
+say what it cannot do before somebody installs it. All four were true before
+today and none of them was written down where a reader would meet it, which for
+two of them is close to misleading by omission.
+
+- **It needs a structured source beside the free text.** Targeted redaction has
+  nothing to work from without the fields that state the name, the identifier
+  and the institution. Said plainly: a folder of PDF reports and nothing else is
+  not served by this tool. That is a real population of users turned away, and
+  turning them away explicitly is better than letting them find out after a
+  build that silently redacted nothing.
+- **Exact intervals are a re-identification channel, kept open on purpose.** One
+  true date for a subject, from any other source, recovers that subject's whole
+  timeline, because every other event is a known number of days from the
+  baseline. This is the most likely route from a dataset built here back to a
+  person, and the mitigation — blurring the intervals — would destroy what the
+  offsets exist to preserve. So it is a documented trade-off and not a bug, and
+  the README now says which side it takes and why the reader may need the other.
+- **Small cohorts cannot reach a useful k.** `risk` already printed the honest
+  number; a README reader never saw it. Twenty-five people with exact ages
+  cannot reach k=5 on age and sex, and that is arithmetic.
+- **Losing the key orphans the dataset permanently.** Readable, but not
+  extensible and not linkable: next year's records for the same people can never
+  be given the same labels. `keygen` says this at the moment it writes the file;
+  the README did not say it at all.
+
+Deliberately *not* restated here: that this tool pseudonymises rather than
+anonymises. It is in the `risk` section already, and the convention added
+yesterday says to point at the section that owns a fact instead of repeating it.
+The new section links there rather than paraphrasing.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.
