@@ -24,27 +24,95 @@ reviewer actually needs.
 from __future__ import annotations
 
 import json
+from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 
 from commissura import healthdcat, layout
 from commissura.build.observe import ModalityLedger, observe_corpus
+from commissura.build.scrub import CATEGORY_DISPOSITION, ScrubReport
 from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_now
 from commissura.deident.keys import SecretKey
 from commissura.read.corpus import RawCorpus
 
-MANIFEST_SCHEMA_VERSION = "1.0.0"
+MANIFEST_SCHEMA_VERSION = "2.0.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
 different clock from the dataset layout.
+
+**2.0.0 is a breaking change and the major number is doing real work.**
+``modalities`` was an object keyed by modality name whose values were three
+lists of prose; it is now an array of observed ledgers. ``free_text_redactions``
+was a top-level map of category to a count; it is now the ``body`` table inside
+the reports ledger. Anything that read 1.0.0 will not read this.
+
+Recorded with some embarrassment: the first of those two changes shipped without
+this number moving. A schema version exists so a consumer can tell, and leaving
+it at 1.0.0 while reshaping the document told them the opposite of the truth.
 """
 
 
-def _ledger_payload(ledger: ModalityLedger) -> dict[str, object]:
+def _body_payload(reports: Sequence[ScrubReport]) -> list[dict[str, object]]:
+    """Account for what the scrubber substituted inside the report bodies.
+
+    The counterpart to the field table, for the one modality that has prose. A
+    report's labelled headers are fields and are observed by
+    :mod:`commissura.build.observe`; its body is not, and until now its counts
+    sat in a separate section of the manifest, so seeing what had happened to a
+    report meant reading two places and joining them by hand.
+
+    Two counts, because for free text they answer different questions.
+    ``documents_affected`` is coverage and reads like the field table's
+    ``files_present``; ``occurrences`` is how many identifiers were actually
+    substituted. The field table reports only the first, on the grounds that an
+    occurrence count there would mostly measure how long the messages were.
+    Here the occurrence count is the measurement: it is the number of
+    identifiers the method found.
+
+    Args:
+        reports: One scrub report per document written.
+
+    Returns:
+        One row per category, including the categories that never fired, sorted
+        by name.
+
+    Raises:
+        KeyError: If the scrubber emitted a category with no declared
+            disposition. Deliberate: a manifest that guessed would be worse
+            than a build that stopped.
+    """
+    documents: Counter[str] = Counter()
+    occurrences: Counter[str] = Counter()
+    markers: dict[str, str] = {}
+    for report in reports:
+        for category, count in report.categories().items():
+            documents[category] += 1
+            occurrences[category] += count
+        for item in report.replacements:
+            markers[item.category] = item.replacement
+
+    return [
+        {
+            "category": category,
+            "disposition": CATEGORY_DISPOSITION[category],
+            "documents_affected": documents.get(category, 0),
+            "occurrences": occurrences.get(category, 0),
+            **({"marker": markers[category]} if category in markers else {}),
+        }
+        for category in sorted(set(CATEGORY_DISPOSITION) | set(occurrences))
+    ]
+
+
+def _ledger_payload(
+    ledger: ModalityLedger, *, body: list[dict[str, object]] | None = None
+) -> dict[str, object]:
     """Render one modality's observed field ledger for the manifest.
 
     Args:
         ledger: What was observed in that modality's input.
+        body: For the one modality with prose, what the scrubber substituted
+            inside it. Omitted for the others, which have no body.
 
     Returns:
         The manifest section, with the counts first so that a reader sees the
@@ -74,6 +142,22 @@ def _ledger_payload(ledger: ModalityLedger) -> dict[str, object]:
             }
             for item in ledger.fields
         ],
+        **(
+            {
+                "body_note": (
+                    "A report's prose body is not a field, so it is accounted for "
+                    "here rather than above: one row per category of thing the "
+                    "scrubber substitutes, with the marker left in the text. "
+                    "documents_affected reads like files_present above; "
+                    "occurrences is how many identifiers were found. A category "
+                    "at zero did not fire in this corpus and its rule still "
+                    "applies."
+                ),
+                "body": body,
+            }
+            if body is not None
+            else {}
+        ),
     }
 
 
@@ -97,11 +181,7 @@ def write_manifest(
     Returns:
         The manifest payload.
     """
-    redaction_totals: dict[str, int] = {}
-    for report in summary.scrub_reports:
-        for category, count in report.categories().items():
-            redaction_totals[category] = redaction_totals.get(category, 0) + count
-
+    body = _body_payload(summary.scrub_reports)
     payload: dict[str, object] = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "schema_note": (
@@ -141,11 +221,14 @@ def write_manifest(
             "nobody anticipated is reported as removed rather than going "
             "unmentioned. The build carries a whitelist: a field absent from the "
             "output is absent because nothing copies it, which is why removal does "
-            "not have to be enumerated in advance. Free-text bodies are not fields "
-            "and are accounted for under free_text_redactions."
+            "not have to be enumerated in advance. A report's prose body is not a "
+            "field, so the reports modality carries a second table, 'body', "
+            "counting what the scrubber substituted inside it."
         ),
-        "modalities": [_ledger_payload(ledger) for ledger in observe_corpus(corpus.root)],
-        "free_text_redactions": redaction_totals,
+        "modalities": [
+            _ledger_payload(ledger, body=body if ledger.modality == "reports" else None)
+            for ledger in observe_corpus(corpus.root)
+        ],
         "residual_risk": {
             "note": (
                 "What the method cannot reach, listed rather than scored. A score "

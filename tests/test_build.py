@@ -22,15 +22,19 @@ import pytest
 from commissura import healthdcat, layout
 from commissura.build.manifest import (
     MANIFEST_SCHEMA_VERSION,
+    _body_payload,
     write_healthdcat_description,
     write_manifest,
 )
 from commissura.build.scrub import (
+    CATEGORY_DISPOSITION,
     PLACEHOLDER_BIRTH_DATE,
     PLACEHOLDER_INSTITUTION,
     PLACEHOLDER_NAME,
     PLACEHOLDER_NATIONAL_ID,
     KnownIdentifiers,
+    Replacement,
+    ScrubReport,
     scrub_text,
 )
 from commissura.build.writer import BuildSpec, BuildSummary, build_dataset
@@ -848,3 +852,108 @@ def test_the_summary_counts_redactions_across_documents(tmp_path: Path) -> None:
         report.total_occurrences for report in summary.scrub_reports
     )
     assert summary.redaction_count > 0
+
+
+# --------------------------------------------------------------------------
+# The reports body table: what the scrubber did inside the prose
+# --------------------------------------------------------------------------
+
+
+def test_only_the_reports_modality_carries_a_body_table(tmp_path: Path) -> None:
+    """Laboratory tables and DICOM sidecars have no prose, so no body to account for."""
+    out, _ = _build(tmp_path, defect_rate=0.0)
+    manifest = json.loads(
+        (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+    )
+    ledgers = {entry["modality"]: entry for entry in manifest["modalities"]}
+
+    assert "body" in ledgers["reports"]
+    assert "body" not in ledgers["lab"]
+    assert "body" not in ledgers["imaging"]
+
+
+def test_the_body_table_names_every_category_including_the_silent_ones(
+    tmp_path: Path,
+) -> None:
+    """A rule that did not fire is reported at zero, not omitted.
+
+    The same decision as the field table above, for the same reason: an omitted
+    row reads as "no such rule", and the one time a declared field came back at
+    zero it was a bug in the observer rather than a quiet corpus.
+    """
+    out, _ = _build(tmp_path, defect_rate=0.0)
+    manifest = json.loads(
+        (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+    )
+    reports = next(e for e in manifest["modalities"] if e["modality"] == "reports")
+    rows = {row["category"]: row for row in reports["body"]}
+
+    assert set(rows) == set(CATEGORY_DISPOSITION)
+    for category, row in rows.items():
+        assert row["disposition"] == CATEGORY_DISPOSITION[category]
+        # Coverage cannot exceed the documents written, and a document cannot
+        # hold fewer occurrences than one.
+        assert row["documents_affected"] <= reports["files_read"]
+        assert row["occurrences"] >= row["documents_affected"]
+        # The marker is what a reader will see in the text, so it is present
+        # exactly when something was substituted.
+        assert ("marker" in row) == (row["occurrences"] > 0)
+
+
+def test_only_dates_and_ages_are_replaced_in_free_text(tmp_path: Path) -> None:
+    """Everything else becomes a placeholder carrying nothing of the original.
+
+    A day_offset still states the interval to the subject's other events and the
+    age ceiling still states that the age was above it, so both remain partly
+    recoverable. That is the distinction an auditor is reading for.
+    """
+    out, _ = _build(tmp_path, defect_rate=0.0)
+    manifest = json.loads(
+        (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+    )
+    reports = next(e for e in manifest["modalities"] if e["modality"] == "reports")
+
+    replaced = {r["category"] for r in reports["body"] if r["disposition"] == "replaced"}
+    assert replaced == {"date", "age"}
+
+
+def test_the_birth_date_is_removed_rather_than_replaced(tmp_path: Path) -> None:
+    """The one that looks like it belongs with the dates and does not.
+
+    An offset from the subject's own baseline would state the birth date exactly
+    in a dataset that also carries the baseline, so it is removed outright. If
+    this ever flips to "replaced", the scrubber has regressed to offsetting it.
+    """
+    out, _ = _build(tmp_path, defect_rate=0.0)
+    manifest = json.loads(
+        (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+    )
+    reports = next(e for e in manifest["modalities"] if e["modality"] == "reports")
+    row = next(r for r in reports["body"] if r["category"] == "date_of_birth")
+
+    assert row["disposition"] == "removed"
+    assert row["marker"] == PLACEHOLDER_BIRTH_DATE
+
+
+def test_a_category_with_no_declared_disposition_stops_the_build() -> None:
+    """Deliberately loud: a manifest that guessed would be worse than a failure."""
+    report = ScrubReport(path="sub-x/ses-01/reports/r.txt")
+    report.replacements.append(Replacement("a_category_nobody_declared", "x", "[X]", 1))
+
+    with pytest.raises(KeyError):
+        _body_payload([report])
+
+
+def test_the_redaction_counts_no_longer_sit_outside_the_modality(tmp_path: Path) -> None:
+    """They moved into the reports ledger, so one place answers one question.
+
+    Reading what happened to a report used to mean joining two sections of the
+    manifest by hand.
+    """
+    out, _ = _build(tmp_path, defect_rate=0.0)
+    manifest = json.loads(
+        (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+    )
+
+    assert "free_text_redactions" not in manifest
+    assert manifest["schema_version"] == "2.0.0", "reshaping the document moves this number"

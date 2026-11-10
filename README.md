@@ -544,6 +544,32 @@ pseudonymiser, which is a fact about the code rather than about the data. A
 `replaced` value is still relinkable by whoever holds the key; a `kept` value is
 the original.
 
+A report's prose body is not a field, so the reports modality carries a second
+table beside the first, with the same three-way vocabulary:
+
+```
+category           disposition   documents   occurrences   marker
+institution        removed              19           170   [INSTITUTION]
+date               replaced             19            34   [day_offset:N]
+date_of_birth      removed              19            19   [BIRTH-DATE]
+provider_name      removed              14            29   [PROVIDER]
+age                replaced              0             0
+contact            removed               0             0
+```
+
+Both counts are there because for prose they answer different questions:
+`documents` is coverage, `occurrences` is how many identifiers the method
+actually found. `date_of_birth` sits with the removed and not with the dates on
+purpose — an offset from the subject's own baseline would state the birth date
+exactly in a dataset that also carries the baseline.
+
+The two rows at zero are rules that did not fire in this corpus, reported rather
+than omitted, because an omitted row reads as "no such rule". One of them is a
+finding: **the generator never writes an email or telephone number into a report
+body**, so the contact rule — and the ordering fix that stops a redacted name
+from breaking the email pattern — is exercised only by a unit test and by no
+corpus this tool produces.
+
 #### Linkage is accountable
 
 A subject exists only if a laboratory message established it, because HL7 PID-19

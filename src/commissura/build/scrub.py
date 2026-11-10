@@ -36,6 +36,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from typing import Final
 
 from commissura import layout
 from commissura.deident.pseudonymise import Pseudonymiser
@@ -65,6 +66,45 @@ _ALL_PLACEHOLDERS: tuple[str, ...] = (
 The residual-risk detector has to ignore them: the placeholders are
 all-capitals too, so without this it reports its own output as unremoved
 identifiers, which is exactly what happened on the first real run.
+"""
+
+CATEGORY_DISPOSITION: Final[dict[str, str]] = {
+    "address": "removed",
+    "age": "replaced",
+    "contact": "removed",
+    "date": "replaced",
+    "date_of_birth": "removed",
+    "institution": "removed",
+    "national_id": "removed",
+    "patient_id": "removed",
+    "person_name": "removed",
+    "provider_name": "removed",
+}
+"""What became of each category of thing this module substitutes.
+
+The same three-way vocabulary the structured modalities use, so one reading of
+the manifest covers all three -- except that nothing in free text is ever
+*kept*, because a body of prose is carried whole and only its identifiers are
+touched. What is left is the distinction that matters to an auditor, and only
+two of the ten fall on the other side of it:
+
+* ``date`` becomes ``[day_offset:N]``, which still states the interval to every
+  other event in the subject's record, so the original is partly recoverable by
+  whoever holds the baseline -- **replaced**;
+* ``age`` becomes the age-ceiling marker, which states that the original was
+  above the ceiling -- **replaced**;
+* everything else becomes a placeholder carrying nothing of the original --
+  **removed**.
+
+``date_of_birth`` is in the second group deliberately and is the one that looks
+like it belongs in the first. It is removed rather than offset, because an
+offset from the subject's own baseline would state the birth date exactly in a
+dataset that also carries the baseline. The decision log of 2026-11-07 has the
+reasoning; this table has to agree with it.
+
+A category missing from here raises ``KeyError`` when the manifest is written,
+which is deliberate: a manifest that silently described an unknown category as
+one thing or the other would be worse than a build that stopped.
 """
 
 _AGE_PATTERN = re.compile(r"\b(\d{1,3})\s*anni\b", re.IGNORECASE)

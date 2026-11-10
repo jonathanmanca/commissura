@@ -299,10 +299,12 @@ otherwise; publishing is an irreversible public act and therefore a decision,
 not a step to take in passing.
 
 Next, in order:
-1. Name the free-text redaction categories in the manifest's field table the
-   way the structured modalities are now named. A report body is not a field,
-   so the scrubber's per-category counts sit beside the table rather than in
-   it, and the two have to be read together to see what happened to a report.
+1. Put a contact detail into the generated reports. The body table's first run
+   showed the `contact` rule firing in zero of nineteen documents, because the
+   generator never writes an email or telephone number into a report body. The
+   rule and its load-bearing ordering fix are therefore exercised by a unit
+   test and by no corpus this tool produces. Needs ground-truth PHI
+   annotations with offsets, so it is a real change and not a one-liner.
 2. Decide whether to publish to PyPI, which is the only thing standing between
    this repository and the "deployable by a stranger" constraint. An
    irreversible public act, so the author's call and not a step to take in
@@ -1035,6 +1037,62 @@ the word. `risk` reports k over quasi-identifiers — it measures, it does not
 certify, and the honest k=1 it reports on a ten-person cohort is the argument for
 never letting "anonymised" into the README. Checked while here: the word appears
 nowhere in the repository as a claim about our output.
+
+**2026-11-10 — The reports ledger accounts for the prose body too, and its first
+run found that one scrubber rule has never been exercised by a real corpus.**
+A report has labelled headers, which are fields, and a body, which is not. The
+headers were in the field table; the body's per-category counts sat in a
+separate top-level `free_text_redactions` map, so seeing what had happened to a
+report meant reading two sections and joining them by hand. The counts now live
+inside the reports ledger as a second table, with the same three-way vocabulary
+the structured modalities use.
+
+**Nothing in free text is ever `kept`**, because the body is carried whole and
+only its identifiers are touched, so the useful distinction is the other one —
+and only two of the ten categories fall on the `replaced` side. `date` becomes
+`[day_offset:N]`, which still states the interval to every other event in that
+subject's record. `age` becomes the ceiling marker, which states that the
+original was above the ceiling. Everything else becomes a placeholder carrying
+nothing of the original. **`date_of_birth` is in the `removed` group and is the
+one that looks like it belongs with the dates**: it is removed rather than
+offset for the reason recorded on 2026-11-07, and a test now fails if that ever
+flips, because the disposition flipping to `replaced` is exactly what a
+regression to offsetting it would look like in the manifest.
+
+Two counts per category, not one, because for prose they answer different
+questions. `documents_affected` is coverage and reads like the field table's
+`files_present`; `occurrences` is how many identifiers the method actually
+found. The field table reports only coverage, on the grounds that an occurrence
+count there would mostly measure how long the messages were. In free text the
+occurrence count *is* the measurement.
+
+**What the table found on its first run, which is the argument for building
+it**: `contact` fired in 0 of 19 documents, and `grep` confirms the generator
+never writes an email or telephone number into a report body. So the contact
+rule — and the ordering fix of 2026-11-07, where redacting a name first broke
+the email pattern and left the domain behind, a leak that looks like a
+redaction — is exercised by one unit test and by no corpus this tool produces.
+That is a gap in the **generator**, not the scrubber, and it matters because
+this project's argument is rules first and measurement always: a defect that
+cannot be injected is a rule that cannot be measured end to end. Fixing it needs
+ground-truth PHI annotations with character offsets, so it is the next step
+rather than a passing edit. `age` is also at zero and is not a finding: eight
+subjects produced nobody over the age ceiling.
+
+**And the schema version moved to 2.0.0, which it should have done this
+morning.** Reshaping `modalities` from an object of prose lists into an array of
+observed ledgers was a breaking change, and it shipped with `schema_version`
+still reading 1.0.0. A version exists so a consumer can tell; leaving it alone
+while rewriting the document told them the opposite of the truth. 2.0.0 now
+covers both that change and this one, and the constant's docstring says what
+broke. The lesson is dull and worth having anyway: **the schema version is part
+of the schema change, not a chore afterwards.**
+
+One guard worth naming: `CATEGORY_DISPOSITION` is looked up without a default,
+so a scrubber category added without a declared disposition raises `KeyError`
+and stops the build. A manifest that guessed whether an unknown category was
+removed or replaced would be worse than a build that stopped, and a test pins
+that behaviour.
 
 ## Conventions
 
