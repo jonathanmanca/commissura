@@ -693,3 +693,85 @@ def test_verify_with_an_unreadable_key_fails_cleanly(tmp_path: Path) -> None:
     result = runner.invoke(app, ["verify", str(out), "--key-file", str(bad)])
 
     assert result.exit_code == 1
+
+
+# --------------------------------------------------------------------------
+# commissura measure
+# --------------------------------------------------------------------------
+
+
+def test_measure_reports_full_recall_on_a_clean_corpus(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    assert runner.invoke(app, _build_args(tmp_path, raw, key)).exit_code == 0
+
+    result = runner.invoke(app, ["measure", str(raw), str(tmp_path / "dataset")])
+
+    assert result.exit_code == 0, result.stdout
+    assert "recall" in result.stdout
+    assert "Every measurable planted identifier was removed." in result.stdout
+
+
+def test_measure_exits_non_zero_and_names_the_leak(tmp_path: Path) -> None:
+    """A leak has to be loud, and has to say where it came from."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    assert runner.invoke(app, _build_args(tmp_path, raw, key)).exit_code == 0
+    out = tmp_path / "dataset"
+    spans = json.loads((raw / "_generator" / "phi_annotations.json").read_text(encoding="utf-8"))
+    leaked = next(
+        s for s in spans["spans"] if s["category"] == "person_name" and len(s["text"]) >= 4
+    )
+    document = sorted(out.rglob(f"*{layout.REPORT_TEXT_EXTENSION}"))[0]
+    document.write_text(
+        document.read_text(encoding="utf-8") + f"\n{leaked['text']}\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["measure", str(raw), str(out)])
+
+    assert result.exit_code == 1
+    assert "LEAKED" in result.stdout
+    assert leaked["path"] in result.stdout
+
+
+def test_measure_reports_as_json(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    assert runner.invoke(app, _build_args(tmp_path, raw, key)).exit_code == 0
+
+    result = runner.invoke(app, ["measure", str(raw), str(tmp_path / "dataset"), "--json"])
+    payload = json.loads(result.stdout)
+
+    assert result.exit_code == 0
+    assert payload["recall"] == 1.0
+    assert payload["survived"] == 0
+    assert payload["measurable"] > 0
+    assert {c["category"] for c in payload["categories"]}
+    assert any(c["retained_by_design"] for c in payload["categories"])
+
+
+def test_measure_without_ground_truth_fails_cleanly(tmp_path: Path) -> None:
+    (tmp_path / "empty").mkdir()
+
+    result = runner.invoke(app, ["measure", str(tmp_path / "empty"), str(tmp_path / "empty")])
+
+    assert result.exit_code == 1
+    assert "no ground truth" in (result.stderr or result.output)
+
+
+def test_measure_caps_the_listed_misses(tmp_path: Path) -> None:
+    """--misses 0 keeps the summary and drops the list, for a wide terminal's sake."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    assert runner.invoke(app, _build_args(tmp_path, raw, key)).exit_code == 0
+    out = tmp_path / "dataset"
+    spans = json.loads((raw / "_generator" / "phi_annotations.json").read_text(encoding="utf-8"))
+    leaked = next(
+        s for s in spans["spans"] if s["category"] == "person_name" and len(s["text"]) >= 4
+    )
+    document = sorted(out.rglob(f"*{layout.REPORT_TEXT_EXTENSION}"))[0]
+    document.write_text(
+        document.read_text(encoding="utf-8") + f"\n{leaked['text']}\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["measure", str(raw), str(out), "--misses", "0"])
+
+    assert result.exit_code == 1
+    assert "LEAKED" in result.stdout
+    assert leaked["path"] not in result.stdout

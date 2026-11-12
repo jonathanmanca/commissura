@@ -38,6 +38,8 @@ from commissura.generate.defects import CATALOGUE, Modality, defects_for
 from commissura.generate.writer import verify_corpus, write_corpus
 from commissura.healthdcat import RELEASE as HEALTHDCAT_RELEASE
 from commissura.healthdcat import Tier as HealthTier
+from commissura.measure import RETAINED_BY_DESIGN
+from commissura.measure import measure as run_measure
 from commissura.read.corpus import read_corpus
 from commissura.validate import registered_rules, validate_dataset
 
@@ -766,3 +768,114 @@ def verify(
             "so its contents were edited after the build."
         )
     raise typer.Exit(1)
+
+
+@app.command()
+def measure(
+    source: Annotated[Path, typer.Argument(help="The raw corpus, with its ground truth.")],
+    dataset: Annotated[Path, typer.Argument(help="The dataset built from it.")],
+    misses: Annotated[
+        int, typer.Option("--misses", min=0, help="How many surviving identifiers to list.")
+    ] = 20,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the report as JSON instead of text.")
+    ] = False,
+) -> None:
+    """Measure what the de-identification actually removed, against ground truth.
+
+    The generator records every identifier it plants and where. This looks for
+    each one in the built dataset and reports, per category, how many are gone
+    and how many survive — with the file and offset of every miss.
+
+    It asks whether the exact planted string survived. A fragment of one is not
+    a miss here; that is what the scrubber's residual-risk list is for, and the
+    two fail differently on purpose. Ages are kept by design and are reported
+    apart from the recall figure, and spans shorter than four characters are
+    not counted either way, because a two-letter name fragment matches inside
+    ordinary words.
+    """
+    try:
+        report = run_measure(source, dataset)
+    except (FileNotFoundError, OSError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "recall": report.recall,
+                    "measurable": report.measurable,
+                    "removed": report.removed,
+                    "survived": report.survived,
+                    "too_short": report.too_short,
+                    "declared_by_holder": report.declared,
+                    "dataset_files": report.dataset_files,
+                    "categories": [
+                        {
+                            "category": c.category.value,
+                            "planted": c.planted,
+                            "measurable": c.measurable,
+                            "removed": c.removed,
+                            "survived": c.survived,
+                            "too_short": c.too_short,
+                            "declared_by_holder": c.declared,
+                            "recall": c.recall,
+                            "retained_by_design": c.category in RETAINED_BY_DESIGN,
+                        }
+                        for c in report.categories
+                    ],
+                    "misses": [
+                        {
+                            "category": m.category.value,
+                            "text": m.text,
+                            "path": m.path,
+                            "start": m.start,
+                            "end": m.end,
+                            "found_in": m.found_in,
+                        }
+                        for m in report.misses
+                    ],
+                },
+                indent=2,
+            )
+        )
+        if report.survived:
+            raise typer.Exit(1)
+        return
+
+    typer.echo(f"  {'category':16} {'planted':>8} {'measured':>9} {'removed':>8} {'survived':>9}")
+    for item in report.categories:
+        retained = "  (kept by design)" if item.category in RETAINED_BY_DESIGN else ""
+        typer.echo(
+            f"  {item.category.value:16} {item.planted:8} {item.measurable:9} "
+            f"{item.removed:8} {item.survived:9}{retained}"
+        )
+
+    typer.echo("")
+    if report.recall is None:
+        typer.echo("  Nothing measurable: no planted identifier was long enough to look for.")
+        return
+    typer.echo(f"  recall                 {report.recall * 100:.2f}%  of {report.measurable}")
+    typer.echo(f"  survived               {report.survived}")
+    typer.echo(f"  too short to measure   {report.too_short}  (under 4 characters)")
+    typer.echo(f"  declared by the holder {report.declared}  (publisher, HDAB, title)")
+    typer.echo(f"  dataset files searched {report.dataset_files}")
+
+    for miss in report.misses[:misses]:
+        typer.echo(
+            f"    {miss.category.value:14} {miss.text!r} "
+            f"from {miss.path}:{miss.start} found in {miss.found_in}"
+        )
+    if len(report.misses) > misses:
+        typer.echo(f"    ... and {len(report.misses) - misses} more")
+
+    typer.echo("")
+    if report.survived:
+        typer.echo(f"  LEAKED: {report.survived} planted identifier(s) survived into the dataset.")
+        raise typer.Exit(1)
+    typer.echo("  Every measurable planted identifier was removed.")
+    typer.echo(
+        "  This checks exact strings. Fragments are the scrubber's residual-risk "
+        "list, reported by `build`."
+    )

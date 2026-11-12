@@ -275,7 +275,8 @@ dataset/
 ## Current state
 
 Every command runs end to end: `generate`, `defects`, `validate`, `rules`,
-`keygen`, `key-info`, `build`, `risk`, `verify`. A test pins that list against the CLI's
+`keygen`, `key-info`, `build`, `risk`, `verify`, `measure`. A test pins that
+list against the CLI's
 own registrations, so it cannot quietly go stale again — which it had. Five of
 them take a corpus from an empty directory to a dataset `validate` reports as
 conformant, and the README's worked example is that run with its real output.
@@ -1459,6 +1460,94 @@ templates. Two known-pending upstream changes, two single points of edit. The
 pattern is worth naming as a pattern, because the next one will arrive the same
 way: **when a specification tells you a part of it is unsettled, put that part
 behind one function and write down which issue will move it.**
+
+**2026-11-12 — `commissura measure` exists, and the first thing it did was find
+three leaks.** The generator has always recorded every identifier it plants,
+with file and character offsets. Nothing ever compared that record to the
+output. "Rules first, **measurement always**" was the project's differentiating
+claim and half of it was a promise. The number on the walkthrough corpus is
+**100% of 3,471 measurable planted identifiers removed**; the value of the
+command is not that number but what producing it turned up.
+
+**What it found, none of it visible by reading the code.**
+
+1. **The manifest recorded the corpus's absolute path.** On any ordinary
+   machine that contains the operator's account name, and it sat in the one
+   document written to be sent to a Health Data Access Body. It surfaced
+   absurdly: the generator invented a clinician called JONATHAN, the measurement
+   reported that name as surviving, and the match was the username in
+   `source.root`. Now `root_name`, the directory's name alone — the part a human
+   chose, where the rest was an accident of where the command was run.
+2. **The residual-risk list quoted the tokens it was warning about.** A
+   patient's surname appeared in `.deident/manifest.json` of a dataset from
+   which every other trace of it had been scrubbed. The document whose sentence
+   is "I could not remove these" was handing them over, to the same reader. It
+   now reports a count and a length range; `ScrubReport.path` already names the
+   document, so a reviewer loses nothing but the convenience of not opening it.
+3. **Institution addresses were learned only from imaging metadata.** A site
+   that sent laboratory messages and wrote reports but produced no imaging study
+   had its street and city printed in every report header and never redacted.
+   Its *name* was removed, which is exactly what made it hard to see: the header
+   read `[INSTITUTION]` above an intact `Via dei Lecci 92 - Cagliari`. The fix
+   reads the line under an institution the structured exports already named —
+   anchored rather than positional, because "the second line" would redact
+   whatever sits there in somebody else's template, while anchoring on a value
+   MSH-4 declared is the same move the rest of this pipeline makes.
+
+Number three is worth dwelling on. It only appeared on a **five**-subject
+corpus; the twenty-five-subject walkthrough gives every site an imaging study,
+so every address was known and the run was clean. A measurement taken on one
+corpus is a measurement of that corpus, and the bug was waiting behind a cohort
+size.
+
+**Three exclusions, each reported rather than folded into the number**, because
+every one of them could be used to flatter it:
+
+- **Spans under four characters are counted neither way.** `DE`, a fragment of
+  a surname, matches inside "de-identification". Calling it survived invents a
+  leak; calling it removed invents a success. The threshold is the scrubber's
+  own `_MINIMUM_REDACTABLE`, deliberately: measuring against a stricter rule
+  than the method was given would be scoring it on a different exam.
+- **Ages are kept by design** and reported apart. Scoring them would measure
+  the opposite of the intended behaviour. The exclusion currently changes no
+  number — report ages are two characters and fall in the short bucket, DICOM
+  `045Y` values are four and are removed with the rest of the tag — so it is
+  insurance rather than load-bearing, and saying so is part of the entry.
+- **Strings the holder typed are excluded**, read back from the emitted Article
+  77 description so the dataset itself declares which values were supplied
+  rather than derived. Forced by a real collision: the README's own walkthrough
+  passes `--publisher "IRCCS SINTETICO MAREBIANCO"`, which is also one of the
+  generator's sites, so 72 institution spans "survive" into a description that
+  is *supposed* to name its publisher. Reporting that as a leak would be
+  literally true and wrong, and any user following the README would hit it.
+
+**Case-insensitive, and that decision earned itself immediately.** Matching
+case-sensitively reported a clean sweep. The same corpus matched
+case-insensitively showed surviving clinician names. A name in different case
+is still the name.
+
+**The threshold is two thresholds, because the honest answers differ.** A clean
+corpus is pinned at 100%: a floor with slack absorbs the first regression
+silently, and the first is the one worth catching. A corpus at
+`--defect-rate 0.6` scores **98.45%** and is pinned above 95% — *and* every
+survivor is asserted to be a person's name in a report. The leak there is
+`reports.missing_author` meeting `reports.identifier_in_prose`: the signature
+block is the only structured field naming that clinician, and removing it
+leaves them named mid-sentence with nothing to match against. That is the
+documented limit of targeted redaction with a number attached rather than a
+caveat in prose, and closing it would mean named entity recognition, which this
+project rejects. Pinning the *class* of survivor matters more than the bound: a
+number alone stays green while the failure changes character into something
+that is a defect rather than a limit.
+
+**And the limit no exclusion fixes, stated in the command's own output.** This
+asks whether the exact planted string survived. A fragment of one is not a miss
+here and never will be. The scrubber's residual-risk list answers the opposite
+question — it inspects the output for anything shaped like an identifier,
+knowing nothing about what was planted. Two measurements that fail differently,
+and a reader needs both. A test pins that a truncated institution name is *not*
+reported, so nobody later "improves" the recall figure by making it
+substring-match and quietly turns it into a different, worse metric.
 
 ## Conventions
 

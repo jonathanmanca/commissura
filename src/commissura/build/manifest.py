@@ -206,7 +206,17 @@ def write_manifest(
         "tool_versions": tool_versions(),
         "generated_at": utc_now().isoformat(),
         "source": {
-            "root": str(corpus.root),
+            # The directory's name, not its path. An absolute path carries the
+            # operator's account name and local layout -- "C:\\Users\\<someone>\\..."
+            # -- into a document written to be sent to a Health Data Access
+            # Body. That is information about a person which nobody decided to
+            # publish, in the one file whose purpose is to be read by outsiders.
+            # The name is what a human chose and is the part with provenance
+            # value; the rest was an accident of where the command was run.
+            # Found by `commissura measure`, which flagged a generated clinician
+            # called JONATHAN as surviving into the dataset and turned out to be
+            # pointing at the username in this field.
+            "root_name": corpus.root.name,
             "subjects_linked": len(corpus.subjects),
             "records_linked": corpus.record_count,
             "linkage_issues": [

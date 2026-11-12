@@ -161,8 +161,9 @@ Wrote 217 files to ./dataset
   profile                HealthDCAT-AP 8, non-public tier
 
   Residual risk the method cannot reach:
-    unrecognised all-capitals tokens remain, which in this corpus is how names
-    are written: GIOV
+    1 unrecognised all-capitals token(s) remain, of 4 characters, which in
+    this corpus is how names are written. Not quoted here: this report
+    travels with the dataset.
 
   Validation: conforms - 0 error(s), 0 warning(s)
 ```
@@ -271,6 +272,7 @@ together.
 | `commissura build` | Pseudonymise a raw corpus into a dataset, with manifest and HealthDCAT-AP description | available |
 | `commissura risk` | k-anonymity over participant attributes, flagging k < 5 | available |
 | `commissura verify` | Recompute every file's digest and report what changed since the build | available |
+| `commissura measure` | Compare the generator's ground truth against the built dataset | available |
 
 Every command that reports anything accepts `--json`, so the tool composes
 inside somebody else's pipeline without being screen-scraped.
@@ -534,8 +536,9 @@ What the method cannot reach is printed, not scored:
 
 ```
   Residual risk the method cannot reach:
-    unrecognised all-capitals tokens remain, which in this corpus is how
-    names are written: GIOV
+    1 unrecognised all-capitals token(s) remain, of 4 characters, which in
+    this corpus is how names are written. Not quoted here: this report
+    travels with the dataset.
 ```
 
 A score invites a reader to treat de-identification as solved above some
@@ -694,6 +697,105 @@ Zero files differing *and* a failed tag is the signature of somebody adjusting
 the manifest to cover their tracks, which is why the two are reported apart.
 Without `--key-file` the output says "not authenticated" rather than anything
 reassuring: unchecked and checked-and-fine must never read the same way.
+
+### `commissura measure`
+
+```bash
+commissura measure ./raw ./dataset
+```
+
+```
+  category          planted  measured  removed  survived
+  accession             314       314      314         0
+  address               525       525      525         0
+  age                   132        84       84         0  (kept by design)
+  contact               268       268      268         0
+  date                  538       538      538         0
+  device_id             168       168      168         0
+  institution           328       256      256         0
+  national_id           163       163      163         0
+  patient_id            258       258      258         0
+  person_name           376       371      371         0
+  provider_name         447       442      442         0
+  uid                   168       168      168         0
+
+  recall                 100.00%  of 3471
+  survived               0
+  too short to measure   58  (under 4 characters)
+  declared by the holder 72  (publisher, HDAB, title)
+  dataset files searched 223
+```
+
+**100% of 3,471 measurable planted identifiers removed**, on the corpus the
+walkthrough above builds. That number is the point of this project. "Rules
+first, measurement always" is easy to write and the measurement half was a
+promise until this command existed: the generator had been recording every
+identifier it planted, with the file and character offsets, and nothing had
+ever compared that record to the output.
+
+The ground truth is the unusual part. Real corpora are annotated by hand,
+partially, expensively, and the annotation is itself uncertain. Here it is a
+by-product of writing the text, so it is complete by construction — and a
+measurement is only ever as good as what it is measured against.
+
+**Three exclusions, each visible in the output rather than folded into the
+number.** Spans under four characters are not counted either way: a two-letter
+fragment of a surname matches inside "de-identification", so calling it a leak
+invents one and calling it removed invents a success. Ages are kept on purpose
+and reported apart. And strings the holder typed on the command line — the
+publisher's name, the HDAB — are excluded, because a hospital publishing its
+own data names itself in the description, and that name is also written across
+every report in the corpus; it is in the output by the holder's decision, not
+because redaction failed.
+
+**And one limit no exclusion fixes.** This asks whether the *exact* planted
+string survived. Half an institution name surviving is not a miss here and
+never will be. That question is answered by the scrubber's residual-risk list,
+which works the other way round — it looks at the output for anything shaped
+like an identifier, without knowing what was planted. The two fail differently
+on purpose and a reader needs both.
+
+#### On a corpus with injected defects, it is not 100%, and that is the finding
+
+```bash
+commissura generate --subjects 5 --seed 23 --defect-rate 0.6 --out ./rough
+```
+
+Recall drops to **98.45%**, and every survivor is a clinician's name in a
+report. The cause is two defects meeting: `reports.missing_author` removes the
+signature block, which is the only structured field naming that clinician, and
+`reports.identifier_in_prose` leaves them named mid-sentence in the body.
+Targeted redaction cannot reach a name nothing declared.
+
+That is the method's documented limit with a number attached to it rather than
+a caveat in prose. Closing it would mean named entity recognition, which this
+project rejects on the evidence that general-purpose tools miss over half of
+clinical PHI. So the test suite pins the clean corpus at 100%, pins the
+defective one above 95%, **and pins that every survivor is a person's name in a
+report** — because a bound alone would stay green while the failure changed
+character into something that is a defect rather than a limit.
+
+#### What it found on its first run
+
+Two leaks, neither visible by reading the code:
+
+- **The manifest recorded the corpus's absolute path**, which on any ordinary
+  machine contains the operator's account name, inside the one document written
+  to be sent to an access body. A generated clinician who happened to be called
+  JONATHAN is what made it visible. It now records the directory's name.
+- **The residual-risk list quoted the tokens it was warning about.** A patient's
+  surname appeared in `.deident/manifest.json` of a dataset from which every
+  other trace of it had been removed — the document saying "I could not remove
+  these" was handing them over. It now reports a count and a length range, and
+  the file path tells a reviewer where to look.
+
+A third, found while measuring a smaller corpus: a site that sent laboratory
+messages and wrote reports but produced no imaging study had its street address
+printed in every report header and never redacted, because imaging metadata was
+the only place addresses were learned from. Its *name* was removed, which is
+what made it hard to see — the header read `[INSTITUTION]` above an intact
+street and city. Addresses are now also read from the line under an institution
+the structured exports already named.
 
 ### `commissura risk`
 

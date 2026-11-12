@@ -415,8 +415,26 @@ def _assess_residual_risk(text: str) -> list[str]:
         word for placeholder in _ALL_PLACEHOLDERS for word in re.findall(r"[A-Z]{4,}", placeholder)
     }
     if capitalised:
+        # Counted, not quoted. These tokens are by construction the ones most
+        # likely to *be* identifiers, and this list is written into
+        # `.deident/manifest.json`, which is the document sent to an access
+        # body. A residual-risk report that prints the values it is warning
+        # about hands over the very strings it says it could not remove.
+        #
+        # `commissura measure` found this: a patient's surname appeared in the
+        # manifest of a dataset in which every other trace of it had been
+        # removed, and it was here. The reviewer still gets what they need —
+        # `ScrubReport.path` names the document, and the count and length
+        # bound say what to look for in it.
+        lengths = sorted(len(token) for token in capitalised)
+        span = (
+            f"{lengths[0]} characters"
+            if lengths[0] == lengths[-1]
+            else f"{lengths[0]} to {lengths[-1]} characters"
+        )
         risks.append(
-            "unrecognised all-capitals tokens remain, which in this corpus is how names "
-            f"are written: {', '.join(sorted(capitalised)[:5])}"
+            f"{len(capitalised)} unrecognised all-capitals token(s) remain, of {span}, "
+            "which in this corpus is how names are written. Not quoted here: this "
+            "report travels with the dataset."
         )
     return risks

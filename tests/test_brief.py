@@ -71,5 +71,12 @@ def test_the_brief_says_that_the_list_is_pinned() -> None:
 
     Without the sentence the check is invisible: somebody edits the list, this
     test fails, and they have to go looking for the reason.
+
+    Whitespace is collapsed before looking. Adding a command lengthens the list
+    and rewraps the prose around it, and a sentinel that broke on a line break
+    would fail for the one edit it exists to accompany — telling the author
+    their correct change is wrong, which is how a check gets deleted.
     """
-    assert "A test pins that list" in paragraph_under_current_state()
+    flattened = " ".join(paragraph_under_current_state().split())
+
+    assert "A test pins that list" in flattened

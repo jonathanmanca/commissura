@@ -196,6 +196,51 @@ def _session_dates(subject: Subject) -> list[date]:
     return sorted(moments)
 
 
+_ADDRESS_SEPARATORS = (",", " - ")
+"""How a header or a DICOM address string joins a street to a city."""
+
+
+def _address_parts(value: str) -> set[str]:
+    """Split an address into the pieces worth redacting on their own.
+
+    A street and a city are each a quasi-identifier, and they are redacted
+    separately because a report may name one without the other.
+
+    Args:
+        value: An address as written, such as ``Via dei Lecci 92 - Cagliari``.
+
+    Returns:
+        The parts long enough to be worth matching. Short fragments are left
+        out for the reason the scrubber leaves them out: below four characters
+        a string is as likely to be part of an ordinary word.
+    """
+    parts = [value]
+    for separator in _ADDRESS_SEPARATORS:
+        parts = [piece for part in parts for piece in part.split(separator)]
+    return {piece.strip() for piece in parts if len(piece.strip()) >= 4}
+
+
+def _address_after_institution(text: str, institutions: set[str]) -> set[str]:
+    """Return the address a report prints directly under a known institution.
+
+    Args:
+        text: The report as written.
+        institutions: Institution names already known from the structured
+            exports, which is what anchors the search.
+
+    Returns:
+        The address parts, or an empty set if no line names a known
+        institution or nothing follows the one that does.
+    """
+    lines = text.splitlines()
+    found: set[str] = set()
+    for index, line in enumerate(lines[:-1]):
+        stripped = line.strip()
+        if stripped and any(stripped == name for name in institutions):
+            found.update(_address_parts(lines[index + 1].strip()))
+    return found
+
+
 def _known_identifiers(corpus: RawCorpus, subject: Subject) -> KnownIdentifiers:
     """Collect everything the structured exports declared about this subject.
 
@@ -227,10 +272,23 @@ def _known_identifiers(corpus: RawCorpus, subject: Subject) -> KnownIdentifiers:
     addresses: set[str] = set()
     for other in corpus.subjects:
         for study in other.imaging:
-            for part in study.institution_address.split(","):
-                cleaned = part.strip()
-                if len(cleaned) >= 4:
-                    addresses.add(cleaned)
+            addresses.update(_address_parts(study.institution_address))
+    # And from the reports themselves, anchored on an institution we already
+    # know. `commissura measure` found this: a site that sent laboratory
+    # messages and wrote reports but produced no imaging study had its street
+    # address printed in every report header and never redacted, because
+    # imaging was the only place an address was being learned from. Its *name*
+    # was removed, which is what made the leak hard to see — the header read
+    # "[INSTITUTION]" above an intact street and city.
+    #
+    # Anchored rather than positional. Taking "the second line" would redact
+    # whatever happened to be there in somebody else's template; finding the
+    # line that holds an institution MSH-4 already declared, and reading the
+    # one after it, uses a structured source to locate an unstructured value,
+    # which is the same move the rest of this pipeline makes.
+    for other in corpus.subjects:
+        for report in other.reports:
+            addresses.update(_address_after_institution(report.text, institutions))
     return KnownIdentifiers(
         identity=subject.identity,
         providers=frozenset(providers),
