@@ -576,6 +576,13 @@ def build(
         typer.echo(f"  free-text redactions   {summary.redaction_count}")
         typer.echo(f"  linkage issues         {summary.linkage_issues}")
         typer.echo(f"  records dropped        {len(summary.dropped)}  (no readable date)")
+        # Printed here and nowhere else. The manifest records how many and
+        # why but not which, because a filename usually holds the record
+        # number and that document travels. This output does not.
+        for record in summary.dropped[:10]:
+            typer.echo(f"    {record.path}  ({record.reason})")
+        if len(summary.dropped) > 10:
+            typer.echo(f"    ... and {len(summary.dropped) - 10} more")
         typer.echo(
             f"  minimum k              {risk['minimum_k']}"
             f"  ({len(risk['combinations_below_threshold'])} combination(s) below "  # type: ignore[arg-type]
@@ -813,6 +820,7 @@ def measure(
                     "survived": report.survived,
                     "too_short": report.too_short,
                     "declared_by_holder": report.declared,
+                    "records_not_in_dataset": report.records_not_in_dataset,
                     "dataset_files": report.dataset_files,
                     "categories": [
                         {
@@ -863,6 +871,12 @@ def measure(
     typer.echo(f"  survived               {report.survived}")
     typer.echo(f"  too short to measure   {report.too_short}  (under 4 characters)")
     typer.echo(f"  declared by the holder {report.declared}  (publisher, HDAB, title)")
+    if report.records_not_in_dataset:
+        typer.echo(
+            f"  records not included   {report.records_not_in_dataset}  "
+            "(their identifiers are absent because the record is,"
+        )
+        typer.echo("                                 not because redaction removed them)")
     typer.echo(f"  dataset files searched {report.dataset_files}")
 
     for miss in report.misses[:misses]:

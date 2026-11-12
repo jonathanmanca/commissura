@@ -230,3 +230,37 @@ def test_every_subject_is_read_whichever_position_was_used(tmp_path: Path) -> No
 
     assert len(corpus.subjects) == 20
     assert not [issue for issue in corpus.issues if issue.reason == "unreadable_lab_message"]
+
+
+def test_the_unreadable_date_defect_is_injectable_and_recorded(tmp_path: Path) -> None:
+    """The third rule this project found that no corpus could reach, now reachable.
+
+    Before this defect existed, a record that linked and was then dropped for
+    want of a date was exercised by hand-built fixtures and by nothing the tool
+    produced. The format-drift defect was no help: it emits DD/MM/YYYY, which
+    the reader accepts.
+    """
+    root = _corpus(tmp_path, "undated", subjects=12, seed=31, defect_rate=0.5)
+    manifest = json.loads(
+        (root / "_generator" / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    applied = [d for d in manifest["defects"] if d["defect_id"] == "reports.unreadable_date"]
+
+    assert applied, "the defect did not fire at this rate and seed"
+    for entry in applied:
+        text = read_exact(root / entry["path"])
+        assert "Data del referto: __/__/____" in text
+
+
+def test_the_placeholder_is_not_recorded_as_an_identifier(tmp_path: Path) -> None:
+    """`__/__/____` is not PHI, and recording it would inflate every recall figure.
+
+    A span in the ground truth that nothing could ever leak counts as removed
+    for free, which is a way of scoring better by planting easier targets.
+    """
+    root = _corpus(tmp_path, "placeholder", subjects=12, seed=31, defect_rate=0.5)
+    spans = json.loads((root / "_generator" / "phi_annotations.json").read_text(encoding="utf-8"))[
+        "spans"
+    ]
+
+    assert not [s for s in spans if "_" in s["text"] and "/" in s["text"]]

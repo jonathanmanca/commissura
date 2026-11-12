@@ -24,6 +24,8 @@ from commissura.measure import (
     ANNOTATIONS_PATH,
     MEASURABLE_LENGTH,
     RETAINED_BY_DESIGN,
+    declared_values,
+    excluded_record_count,
     measure,
     read_annotations,
 )
@@ -42,10 +44,12 @@ far enough to cross a lenient bar, nobody knows which change did it.
 """
 
 
-def corpus_and_dataset(tmp_path: Path, *, defect_rate: float = 0.0) -> tuple[Path, Path]:
+def corpus_and_dataset(
+    tmp_path: Path, *, defect_rate: float = 0.0, seed: int = 23
+) -> tuple[Path, Path]:
     """Generate a corpus and build a dataset from it, as the command line does."""
     raw, out = tmp_path / "raw", tmp_path / "dataset"
-    write_corpus(CohortSpec(subjects=5, seed=23, defect_rate=defect_rate), raw)
+    write_corpus(CohortSpec(subjects=5, seed=seed, defect_rate=defect_rate), raw)
     parsed = read_corpus(raw)
     spec = BuildSpec(
         dataset_name="Synthetic dataset",
@@ -95,16 +99,26 @@ failure changed character.
 """
 
 
-def test_a_defective_corpus_leaks_only_names_nothing_declared(tmp_path: Path) -> None:
+def test_a_defective_corpus_leaks_only_things_nothing_declared(tmp_path: Path) -> None:
     """Injected defects are where de-identification is supposed to get harder.
 
     Not a 100% test, because the honest answer is not 100%. What is pinned is
-    the shape of the failure: every survivor is a person's name, in a report,
-    which is the one class the method is documented as unable to reach. An
-    identifier of any other kind surviving — a national identifier, an
-    accession, a date — would be a defect rather than a limit.
+    the *shape* of the failure: every survivor is a name written in running
+    prose that no structured field declared — a colleague mentioned
+    mid-sentence, or the site of a previous study cited after "presso". That is
+    the one class targeted redaction is documented as unable to reach, and the
+    scrubber's residual-risk list already warns about both. An identifier of
+    any other kind surviving — a national identifier, an accession, a date —
+    would be a defect rather than a limit, and this would catch it.
+
+    The seed is load-bearing and that is worth knowing rather than discovering.
+    Seed 23 stopped leaking when `reports.unreadable_date` was added, because
+    the new defect drops the very reports that used to leak: an identifier in a
+    document that is not in the dataset is not in the dataset. That is the
+    degenerate effect `records_not_in_dataset` exists to make visible, and it
+    is why this test fixes a seed that still exercises the limit.
     """
-    raw, out = corpus_and_dataset(tmp_path, defect_rate=0.6)
+    raw, out = corpus_and_dataset(tmp_path, defect_rate=0.4, seed=5)
 
     report = measure(raw, out)
 
@@ -113,11 +127,16 @@ def test_a_defective_corpus_leaks_only_names_nothing_declared(tmp_path: Path) ->
         (m.category.value, m.text, m.found_in) for m in report.misses
     ]
     assert report.survived > 0, (
-        "a defect rate this high used to leak clinician names; if it no longer "
-        "does, find out why before celebrating"
+        "this seed exercises the documented limit; if it no longer leaks, find "
+        "out whether the method improved or the records were merely dropped"
     )
+    undeclarable = {
+        PhiCategory.PERSON_NAME,
+        PhiCategory.PROVIDER_NAME,
+        PhiCategory.INSTITUTION,
+    }
     for miss in report.misses:
-        assert miss.category in {PhiCategory.PERSON_NAME, PhiCategory.PROVIDER_NAME}, miss
+        assert miss.category in undeclarable, miss
         assert layout.REPORT_TEXT_EXTENSION in miss.found_in, miss
 
 
@@ -285,3 +304,68 @@ def test_the_manifest_carries_no_absolute_path(tmp_path: Path) -> None:
     assert "root" not in source
     assert str(tmp_path) not in text
     assert str(tmp_path).replace("\\", "\\\\") not in text
+
+
+def test_a_dropped_record_is_counted_apart_from_the_recall(tmp_path: Path) -> None:
+    """A record that was never written removes its identifiers by not existing.
+
+    That is no evidence about redaction, and in the degenerate case a build
+    that dropped everything would score a perfect recall for producing nothing.
+    So the count sits beside the figure rather than inside it.
+    """
+    raw, out = corpus_and_dataset(tmp_path, defect_rate=0.6, seed=31)
+
+    report = measure(raw, out)
+
+    assert report.records_not_in_dataset > 0, (
+        "this seed should trip reports.unreadable_date; without a dropped "
+        "record the caveat is untested"
+    )
+
+
+def test_the_caveat_is_zero_when_nothing_was_left_out(tmp_path: Path) -> None:
+    raw, out = corpus_and_dataset(tmp_path)
+
+    assert measure(raw, out).records_not_in_dataset == 0
+
+
+def test_the_caveat_is_zero_without_a_manifest(tmp_path: Path) -> None:
+    """`measure` works on a dataset built by an older version, or half-built."""
+    raw, out = corpus_and_dataset(tmp_path)
+    (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).unlink()
+
+    assert excluded_record_count(out) == 0
+    assert measure(raw, out).records_not_in_dataset == 0
+
+
+def test_a_damaged_manifest_does_not_stop_the_measurement(tmp_path: Path) -> None:
+    """The caveat is a courtesy; losing it must not cost the recall figure."""
+    raw, out = corpus_and_dataset(tmp_path)
+    (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).write_text("{ not json", encoding="utf-8")
+
+    assert excluded_record_count(out) == 0
+    assert measure(raw, out).recall == 1.0
+
+
+def test_a_non_numeric_count_is_ignored(tmp_path: Path) -> None:
+    """A hand-edited manifest should not make the caveat nonsense."""
+    _, out = corpus_and_dataset(tmp_path)
+    path = out / layout.DEIDENT_DIR / layout.MANIFEST_JSON
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["source"]["records_not_in_dataset"] = "lots"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert excluded_record_count(out) == 0
+
+
+def test_declared_values_survives_a_missing_or_damaged_description(tmp_path: Path) -> None:
+    """Same reasoning: an exclusion that cannot be read excludes nothing."""
+    raw, out = corpus_and_dataset(tmp_path)
+    description = out / layout.HEALTHDCAT_DESCRIPTION
+    description.write_text("{ not json", encoding="utf-8")
+
+    assert declared_values(out) == frozenset()
+
+    description.unlink()
+    assert declared_values(out) == frozenset()
+    assert measure(raw, out).recall is not None

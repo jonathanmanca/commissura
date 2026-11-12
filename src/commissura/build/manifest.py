@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from commissura import healthdcat, layout
@@ -41,7 +41,7 @@ from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_
 from commissura.deident.keys import SecretKey
 from commissura.read.corpus import RawCorpus
 
-MANIFEST_SCHEMA_VERSION = "2.1.0"
+MANIFEST_SCHEMA_VERSION = "3.0.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
@@ -57,11 +57,39 @@ Recorded with some embarrassment: the first of those two changes shipped without
 this number moving. A schema version exists so a consumer can tell, and leaving
 it at 1.0.0 while reshaping the document told them the opposite of the truth.
 
-**2.1.0 adds and breaks nothing**: ``source.records_dropped`` and
+**2.1.0 added** ``source.records_dropped`` and
 ``source.records_not_in_dataset``, for records that linked to a subject and
-were then left out because they carried no readable date. A reader of 2.0.0
-still parses this; a reader of 2.1.0 can answer a question 2.0.0 could not.
+were then left out because they carried no readable date.
+
+**3.0.0 breaks both of those and ``source.linkage_issues`` with them.** They
+were lists of ``{path, reason, detail}`` and are now lists of
+``{reason, count, detail}``. The paths had to go: an export names its files
+after the record they hold, so they were patient identifiers, in the document
+written to be sent to an access body. The shape had been wrong since linkage
+issues were first recorded and never fired, because every corpus tested had
+none of them.
 """
+
+
+def _by_reason(entries: Iterable[tuple[str, str]]) -> list[dict[str, object]]:
+    """Group records that are absent from the dataset by why they are absent.
+
+    Args:
+        entries: Pairs of reason token and human-readable detail.
+
+    Returns:
+        One row per reason, with a count and the first detail seen for it,
+        sorted by reason. No paths: see the call site for why.
+    """
+    counts: Counter[str] = Counter()
+    details: dict[str, str] = {}
+    for reason, detail in entries:
+        counts[reason] += 1
+        details.setdefault(reason, detail)
+    return [
+        {"reason": reason, "count": counts[reason], "detail": details[reason]}
+        for reason in sorted(counts)
+    ]
 
 
 def _body_payload(reports: Sequence[ScrubReport]) -> list[dict[str, object]]:
@@ -224,22 +252,40 @@ def write_manifest(
             "root_name": corpus.root.name,
             "subjects_linked": len(corpus.subjects),
             "records_linked": corpus.record_count,
-            "linkage_issues": [
-                {"path": issue.path, "reason": issue.reason, "detail": issue.detail}
-                for issue in corpus.issues
-            ],
+            # Counted by reason, and **without the file paths**. An export names
+            # its files after the thing they are about, so `lab/6895111_LAB...`
+            # carries a medical record number in its name, and a list of paths
+            # is a list of patient identifiers inside the document written to be
+            # sent to an access body.
+            #
+            # This list has had that shape since linkage issues were first
+            # recorded. It never fired, because every corpus tested had zero of
+            # them, so the leak sat latent until `records_dropped` gave it a
+            # non-empty case and `commissura measure` reported the identifiers
+            # the next morning.
+            #
+            # Two audiences, and only one of them needs the paths. An auditor
+            # needs to know how many records are absent and why, which is here.
+            # The operator needs to know *which* files to go and fix, and gets
+            # them from `build`'s own output, which stays on their terminal.
+            "linkage_issues": _by_reason((issue.reason, issue.detail) for issue in corpus.issues),
             # The other half of "what did I hand over that is not here". A
             # linkage issue is a record that could not be attached to anybody;
             # a dropped record was attached and then had nowhere to go, because
             # sessions are dated encounters and it carried no readable date.
-            # Kept as a separate list rather than folded into the one above,
-            # because the two need different fixes and a shared name would
-            # misdescribe one of them.
-            "records_dropped": [
-                {"path": record.path, "reason": record.reason, "detail": record.detail}
-                for record in summary.dropped
-            ],
+            # Separate from the list above, because the two need different fixes
+            # and a shared name would misdescribe one of them.
+            "records_dropped": _by_reason(
+                (record.reason, record.detail) for record in summary.dropped
+            ),
             "records_not_in_dataset": len(corpus.issues) + len(summary.dropped),
+            "records_not_in_dataset_note": (
+                "Paths are deliberately not recorded. An export names its files "
+                "after the record they hold, so a list of them is a list of "
+                "patient identifiers, and this document is written to be read by "
+                "an access body. `commissura build` prints the paths for the "
+                "operator instead."
+            ),
         },
         "output": {
             "subjects": summary.subject_count,

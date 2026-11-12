@@ -201,10 +201,22 @@ def render_report(
     )
     text.line("Codice fiscale: ", Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID))
     text.line("Numero nosografico: ", Phi(person.mrn, PhiCategory.PATIENT_ID))
-    text.line(
-        "Data del referto: ",
-        Phi(report.authored_at.strftime(_ITALIAN_DATE), PhiCategory.DATE, "report date"),
-    )
+    # An unfilled template placeholder where the date should be. Written as a
+    # plain string and *not* as a Phi span, deliberately: `__/__/____` is not an
+    # identifier, and recording it as one would put a value in the ground truth
+    # that nothing could ever leak, quietly inflating every recall figure
+    # measured against this corpus.
+    if injector.apply(
+        "reports.unreadable_date",
+        path,
+        "report date left as an unresolved template placeholder",
+    ):
+        text.line("Data del referto: __/__/____")
+    else:
+        text.line(
+            "Data del referto: ",
+            Phi(report.authored_at.strftime(_ITALIAN_DATE), PhiCategory.DATE, "report date"),
+        )
     text.line()
 
     if report.kind is ReportKind.RADIOLOGY:

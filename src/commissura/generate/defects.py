@@ -157,6 +157,16 @@ CATALOGUE: tuple[Defect, ...] = (
         "The report has no signing clinician.",
         "Unsigned preliminary reports get exported alongside final ones.",
     ),
+    Defect(
+        "reports.unreadable_date",
+        Modality.REPORTS,
+        DefectClass.STRUCTURAL,
+        "The report date is a template placeholder that was never filled in.",
+        "A document template exported with its merge field unresolved. The report "
+        "reads perfectly to a human and has no date a parser can use, so it links "
+        "to a subject and then has no session to go in — which is how a record "
+        "disappears from a dataset without anything reporting it.",
+    ),
     # ----- Imaging -----
     Defect(
         "imaging.phi_in_series_description",

@@ -1677,6 +1677,73 @@ It is not done here because it was not what was asked, and because it changes
 the ground-truth annotations and every captured number in the README again —
 which is a reason to do it deliberately rather than in passing.
 
+**2026-11-12 — `reports.unreadable_date` makes the dropped-record path
+reachable from a generated corpus, and adding it found a leak I had introduced
+that morning.** The drop reporting shipped hours earlier with an honest gap
+recorded against it: at `--defect-rate 0.8` the drop count was zero, because
+the only date defect emits `DD/MM/YYYY` and the reader accepts that. The new
+defect leaves the report date as an unfilled template placeholder,
+`Data del referto: __/__/____` — a document that reads perfectly to a human and
+carries no date a parser can use.
+
+**The placeholder is written as a plain string and not as a `Phi` span**, which
+matters more than it looks. Recording it as ground truth would put a value in
+the annotations that nothing could ever leak, and it would count as removed for
+free: a way of scoring better by planting easier targets. A test asserts no
+span in a generated corpus looks like it.
+
+**And then `measure` reported fifty-five surviving patient identifiers.** The
+manifest's `records_dropped` entries carried the file paths, and an export
+names its files after the record they hold — `reports/8750056_dim_1.txt` is a
+medical record number with an extension. So the list of absent records was a
+list of patient identifiers, inside the document written to be sent to an
+access body. One commit old, mine, and the instrument built that morning caught
+it the same afternoon.
+
+The shape had been wrong since linkage issues were first recorded, months of
+commits ago. It never fired because every corpus tested had zero linkage
+issues, so an empty list hid an unsafe shape until `records_dropped` gave it a
+non-empty case. That is the third latent problem this project has found behind
+"the list happened to be empty", after the conformance test that skipped
+silently and the contact rule no corpus exercised.
+
+**Two audiences, and only one of them needs the paths.** An auditor needs to
+know how many records are absent and why; the operator needs to know *which
+files* to go and fix. So the manifest carries `{reason, count, detail}` and
+`build` prints the paths to the terminal, which does not travel. Breaking
+change, schema **3.0.0**, and `linkage_issues` changes shape with
+`records_dropped` because it had the same defect.
+
+**One consequence I predicted and one I did not.**
+
+Predicted: a dropped record removes its identifiers by not existing, so the
+defect would flatter the recall figure. In the degenerate case a build that
+dropped everything would score 100% for producing nothing. `measure` now reads
+`records_not_in_dataset` from the manifest and prints it beside the recall —
+*beside* and not subtracted from, because attributing it span by span would
+need the file paths that had just been removed for good reason. The first
+attempt did exactly that and had to be undone within the hour.
+
+Not predicted: the defect **silenced an existing test**.
+`test_a_defective_corpus_leaks_only_names_nothing_declared` asserted that seed
+23 at rate 0.6 leaks clinician names, and it stopped leaking — because the new
+defect drops the very reports that used to leak. The assertion's own message
+said "if it no longer does, find out why before celebrating", which is exactly
+what happened. The test now fixes a seed that still exercises the limit and
+says in its docstring why the seed is load-bearing.
+
+That seed also widened the documented limit: it leaks an **institution** as
+well as clinician names — the site of a previous study, cited in prose after
+"presso", declared in no structured field. Same class, and the scrubber's
+residual-risk list already warns about exactly that sentence shape. The test
+now pins the class as "named in prose, declared nowhere" rather than "a
+person's name", which is what it always meant.
+
+Cost, recorded because it is visible to anyone reading the README: at the
+walkthrough's `--defect-rate 0.2`, thirteen of forty-eight reports are now
+dropped. The example dataset is smaller and the example is better, because the
+number is on screen and the paths are under it.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

@@ -102,7 +102,7 @@ commissura keygen --out ./commissura.key
 
 ```
 Wrote a new key to commissura.key
-  fingerprint        02971fa50adf0fcc
+  fingerprint        35eea6fcd0bad4df
   owner-only access  NO
 
   This platform does not honour POSIX file modes, so the key file inherits the
@@ -128,8 +128,8 @@ Wrote 190 files to ./raw
   imaging       27  DICOM JSON Model sidecars
 
   subjects      25  seed 42
-  PHI spans   3685  recorded as ground truth
-  defects      321  injected at rate 0.2
+  PHI spans   3654  recorded as ground truth
+  defects      333  injected at rate 0.2
 
   Verified: every recorded PHI offset matches the file on disk.
 ```
@@ -148,16 +148,20 @@ commissura build ./raw --out ./dataset --key-file ./commissura.key \
 ```
 
 ```
-Wrote 217 files to ./dataset
-  subjects       25  sessions 93
+Wrote 191 files to ./dataset
+  subjects       25  sessions 80
   lab            94  tables and sidecars
-  reports        96  documents and sidecars
+  reports        70  documents and sidecars
   imaging        27  metadata sidecars in derivatives/
 
-  key fingerprint        02971fa50adf0fcc
-  free-text redactions   975
+  key fingerprint        35eea6fcd0bad4df
+  free-text redactions   702
   linkage issues         0
-  records dropped        0  (no readable date)
+  records dropped        13  (no readable date)
+    reports/5806125_rad_2.txt  (undated_record)
+    reports/0976285_dim_1.txt  (undated_record)
+    reports/9680416_dim_3.txt  (undated_record)
+    ... and 10 more
   minimum k              1  (21 combination(s) below 5)
   profile                HealthDCAT-AP 8, non-public tier
 
@@ -165,9 +169,20 @@ Wrote 217 files to ./dataset
     1 unrecognised all-capitals token(s) remain, of 4 characters, which in
     this corpus is how names are written. Not quoted here: this report
     travels with the dataset.
+    1 unrecognised all-capitals token(s) remain, of 6 characters, which in
+    this corpus is how names are written. Not quoted here: this report
+    travels with the dataset.
 
   Validation: conforms - 0 error(s), 0 warning(s)
 ```
+
+**Thirteen of the forty-eight reports are not in the dataset**, and that is the
+walkthrough earning its keep rather than a disappointment. At this defect rate
+the generator leaves some report dates as an unfilled template placeholder —
+`Data del referto: __/__/____` — and a session is a dated encounter, so those
+documents link to a person and then have nowhere to go. They used to vanish
+without a word. Now the count is on the second screen you look at and the paths
+are listed under it.
 
 `linkage issues 0` is the line to read first: all 190 records were attached to
 the right person, including the ones where the imaging export wrote the record
@@ -217,9 +232,9 @@ dataset/
   healthdcat-ap.jsonld          EHDS Article 77, for the access body
   participants.tsv              participant_id, age, sex
   participants.json
-  sub-83360a70e183/
+  sub-0366506f1824/
     ses-01/ ses-02/
-      lab/      sub-..._ses-02_lab.tsv  + .json
+      lab/      sub-..._ses-01_lab.tsv  + .json
       reports/  sub-..._ses-02_run-01_report.txt + .json
   derivatives/imaging-metadata/
   .deident/
@@ -230,25 +245,21 @@ dataset/
 And one report, before and after. Same document, same patient:
 
 ```
-POLICLINICO UNIVERSITARIO SINTETICO PIETRALTA        [INSTITUTION]
-Viale dei Platani 155 - Roma                         [ADDRESS] - [ADDRESS]
+IRCCS SINTETICO MAREBIANCO                           [INSTITUTION]
+Via dei Glicini 35 - Milano                          [ADDRESS] - [ADDRESS]
 
 REFERTO DI DIAGNOSTICA PER IMMAGINI                  REFERTO DI DIAGNOSTICA PER IMMAGINI
 ===================================                  ===================================
 
-Paziente: GIOVANNI BARBIERI                          Paziente: [NAME]
-Nato/a il: 07/08/2000   Eta: 22 anni                 Nato/a il: [BIRTH-DATE]   Eta: 22 anni
-Codice fiscale: BRBGNN00M07X692O                     Codice fiscale: [NATIONAL-ID]
-Numero nosografico: 5806125                          Numero nosografico: [PATIENT-ID]
-Data del referto: 31/12/2022                         Data del referto: [day_offset:+2]
-
-QUESITO CLINICO                                      QUESITO CLINICO
-Episodio sincopale, esclusione di lesioni            Episodio sincopale, esclusione di lesioni
-strutturali.                                         strutturali.
+Paziente: GIULIA FERRARA                             Paziente: [NAME]
+Nato/a il: 15/07/1950   Eta: 72 anni                 Nato/a il: [BIRTH-DATE]   Eta: 72 anni
+Codice fiscale: FRRGLI50L55X959F                     Codice fiscale: [NATIONAL-ID]
+Numero nosografico: 8975172                          Numero nosografico: [PATIENT-ID]
+Data del referto: 26/08/2022                         Data del referto: [day_offset:+3]
 ```
 
-`reports/5806125_rad_1.txt` became
-`sub-83360a70e183/ses-02/reports/sub-83360a70e183_ses-02_run-01_report.txt`.
+`reports/8975172_rad_1.txt` became
+`sub-0366506f1824/ses-02/reports/sub-0366506f1824_ses-02_run-01_report.txt`.
 
 Four things to notice. The clinical question survives word for word — a scrubber
 that removed the medicine would protect a useless dataset. The **age stays**,
@@ -256,7 +267,7 @@ because 22 is clinically useful and not identifying on its own, while the
 **birth date is removed rather than offset**, since an offset from the subject's
 own baseline would state it exactly. The report date became an offset, so the
 interval to every other event in this subject's record is still exact. And the
-subject label `sub-83360a70e183` is the same label this person carries in the
+subject label `sub-0366506f1824` is the same label this person carries in the
 lab branch and in the imaging metadata, which is the only thing tying the three
 together.
 
@@ -335,13 +346,17 @@ Both are now counted where you will see them:
   records dropped        0  (no readable date)
 ```
 
-Each is listed in `.deident/manifest.json` with the file and the reason —
-`source.linkage_issues` for records that could not be attached to anybody,
-`source.records_dropped` for records that were attached and then had nowhere to
-go. Two lists rather than one, because they need different fixes: the first is
-a labelling problem in your export, the second a date format the reader does
-not recognise. `source.records_not_in_dataset` adds them up, which is the
-single number answering "what did I hand over that is not here".
+**The paths are printed by `build` and nowhere else.** An export names its
+files after the record they hold, so `lab/6895111_LAB17546198.hl7` carries a
+medical record number in its name, and a list of them is a list of patient
+identifiers. `.deident/manifest.json` is written to be sent to an access body,
+so it counts them by reason instead — `source.linkage_issues` for records that
+could not be attached to anybody, `source.records_dropped` for records that
+were attached and then had nowhere to go, and
+`source.records_not_in_dataset` adding them up. Two lists rather than one
+because they need different fixes: the first is a labelling problem in your
+export, the second a date format the reader does not recognise. Your terminal
+gets the filenames; the document that travels gets the counts.
 
 A dropped record carries one of two reasons. `undated_record` names the field
 that should have held a date. `subject_has_no_dated_event` is worse and is
@@ -807,23 +822,25 @@ commissura measure ./raw ./dataset
   address               525       525      525         0
   age                   132        84       84         0  (kept by design)
   contact               268       268      268         0
-  date                  538       538      538         0
+  date                  523       523      523         0
   device_id             168       168      168         0
-  institution           328       256      256         0
+  institution           322       250      250         0
   national_id           163       163      163         0
   patient_id            258       258      258         0
   person_name           376       371      371         0
-  provider_name         447       442      442         0
+  provider_name         437       432      432         0
   uid                   168       168      168         0
 
-  recall                 100.00%  of 3471
+  recall                 100.00%  of 3440
   survived               0
   too short to measure   58  (under 4 characters)
   declared by the holder 72  (publisher, HDAB, title)
-  dataset files searched 223
+  records not included   13  (their identifiers are absent because the record is,
+                                 not because redaction removed them)
+  dataset files searched 197
 ```
 
-**100% of 3,471 measurable planted identifiers removed**, on the corpus the
+**100% of 3,440 measurable planted identifiers removed**, on the corpus the
 walkthrough above builds. That number is the point of this project. "Rules
 first, measurement always" is easy to write and the measurement half was a
 promise until this command existed: the generator had been recording every
@@ -844,6 +861,15 @@ publisher's name, the HDAB — are excluded, because a hospital publishing its
 own data names itself in the description, and that name is also written across
 every report in the corpus; it is in the output by the holder's decision, not
 because redaction failed.
+
+**A fourth number that is a caveat and not an exclusion.** `records not
+included` counts identifiers in records the dataset left out — here the
+thirteen reports with no readable date. Their identifiers are absent because
+the record is absent, which is no evidence that redaction works: in the
+degenerate case a build that dropped everything would score a perfect recall
+for producing nothing. It is reported beside the figure rather than subtracted
+from it, because attributing it span by span would need the file paths, and
+those are deliberately not in the manifest.
 
 **And one limit no exclusion fixes.** This asks whether the *exact* planted
 string survived. Half an institution name surviving is not a miss here and

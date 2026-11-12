@@ -1102,13 +1102,17 @@ def test_a_dropped_record_reaches_the_manifest(tmp_path: Path) -> None:
         (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
     )["source"]
 
+    # Counted by reason and *without the path*: an export names its files after
+    # the record they hold, so a list of paths is a list of record numbers, in
+    # the document written to be sent to an access body.
     assert source["records_dropped"] == [
         {
-            "path": "reports/r.txt",
             "reason": "undated_record",
+            "count": 1,
             "detail": source["records_dropped"][0]["detail"],
         }
     ]
+    assert "reports/r.txt" not in json.dumps(source)
     # One number answering "what did I hand over that is not here", across both
     # the records that could not be attached and the ones that were and then
     # had nowhere to go.

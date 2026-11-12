@@ -283,9 +283,11 @@ def test_key_info_without_a_key_explains_how_to_make_one(
 # --------------------------------------------------------------------------
 
 
-def _raw_corpus(tmp_path: Path, subjects: int = 5, defect_rate: float = 0.0) -> Path:
+def _raw_corpus(
+    tmp_path: Path, subjects: int = 5, defect_rate: float = 0.0, seed: int = 17
+) -> Path:
     root = tmp_path / "raw"
-    write_corpus(CohortSpec(subjects=subjects, seed=17, defect_rate=defect_rate), root)
+    write_corpus(CohortSpec(subjects=subjects, seed=seed, defect_rate=defect_rate), root)
     return root
 
 
@@ -885,3 +887,49 @@ def test_there_is_no_command_that_reverses_a_label() -> None:
     assert "whois" in commands
     for forbidden in ("unwhois", "reverse", "resolve", "lookup", "identify"):
         assert forbidden not in commands
+
+
+def test_build_prints_the_dropped_paths_but_the_manifest_does_not_record_them(
+    tmp_path: Path,
+) -> None:
+    """Two audiences. The operator needs the paths; the access body must not get them.
+
+    An export names its files after the record they hold, so a list of them is
+    a list of record numbers — and the manifest is the document written to
+    travel. The terminal is not.
+    """
+    raw = _raw_corpus(tmp_path, subjects=12, defect_rate=0.5, seed=31)
+    key = _key(tmp_path)
+
+    result = runner.invoke(app, _build_args(tmp_path, raw, key))
+    manifest = (tmp_path / "dataset" / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(
+        encoding="utf-8"
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "records dropped" in result.stdout
+    dropped = json.loads(manifest)["source"]["records_dropped"]
+    assert dropped, "this corpus should trip reports.unreadable_date"
+    assert all(set(row) == {"reason", "count", "detail"} for row in dropped)
+    # The filenames reached the terminal and not the file that ships.
+    printed = [line for line in result.stdout.splitlines() if "undated_record" in line]
+    assert printed
+    for line in printed:
+        assert line.split()[0] not in manifest
+
+
+def test_measure_names_the_records_that_were_not_included(tmp_path: Path) -> None:
+    """So a recall of 100% on a corpus half of which was dropped reads honestly."""
+    raw = _raw_corpus(tmp_path, subjects=12, defect_rate=0.5, seed=31)
+    key = _key(tmp_path)
+    assert runner.invoke(app, _build_args(tmp_path, raw, key)).exit_code == 0
+
+    result = runner.invoke(app, ["measure", str(raw), str(tmp_path / "dataset")])
+
+    assert "records not included" in result.stdout
+    assert (
+        json.loads(
+            runner.invoke(app, ["measure", str(raw), str(tmp_path / "dataset"), "--json"]).stdout
+        )["records_not_in_dataset"]
+        > 0
+    )

@@ -78,6 +78,7 @@ them would be its own dishonesty, so they are counted and reported separately.
 ANNOTATIONS_PATH: Final = "_generator/phi_annotations.json"
 """Where the generator writes the ground truth, relative to the corpus root."""
 
+
 DECLARED_FIELDS: Final[tuple[str, ...]] = (
     "dct:title",
     "dct:description",
@@ -95,6 +96,37 @@ Agent names are collected separately, from ``foaf:name`` wherever it appears,
 because the publisher and the HDAB are nested nodes rather than top-level
 fields.
 """
+
+
+def excluded_record_count(dataset: Path) -> int:
+    """Return how many input records the dataset says it did not include.
+
+    A record that was never written removes its identifiers by not existing,
+    which is no evidence that redaction works. In the degenerate case, a build
+    that dropped everything would score a perfect recall for having produced
+    nothing, so the number belongs beside the recall figure.
+
+    A count and not a list of paths, because the manifest no longer carries the
+    paths: an export names its files after the record they hold, so they were
+    patient identifiers in a document written to travel. That is also why this
+    is a caveat on the whole report rather than an exclusion applied span by
+    span — attributing it per span would need exactly the paths that had to go.
+
+    Args:
+        dataset: The dataset root.
+
+    Returns:
+        The count, or zero when there is no manifest to read.
+    """
+    path = dataset / layout.DEIDENT_DIR / layout.MANIFEST_JSON
+    if not path.is_file():
+        return 0
+    try:
+        source = json.loads(path.read_text(encoding="utf-8")).get("source", {})
+    except (OSError, json.JSONDecodeError):
+        return 0
+    count = source.get("records_not_in_dataset", 0)
+    return count if isinstance(count, int) else 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +184,7 @@ class MeasureReport:
     categories: tuple[CategoryResult, ...]
     misses: tuple[Miss, ...]
     dataset_files: int
+    records_not_in_dataset: int = 0
 
     @property
     def scored(self) -> tuple[CategoryResult, ...]:
@@ -307,6 +340,7 @@ def measure(corpus: Path, dataset: Path) -> MeasureReport:
     spans = read_annotations(corpus)
     contents = _dataset_text(dataset)
     holder_declared = declared_values(dataset)
+    records_not_in_dataset = excluded_record_count(dataset)
 
     planted: Counter[PhiCategory] = Counter()
     short: Counter[PhiCategory] = Counter()
@@ -360,4 +394,5 @@ def measure(corpus: Path, dataset: Path) -> MeasureReport:
         categories=tuple(categories),
         misses=tuple(misses),
         dataset_files=len(contents),
+        records_not_in_dataset=records_not_in_dataset,
     )
