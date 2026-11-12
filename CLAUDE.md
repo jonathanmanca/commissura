@@ -1549,6 +1549,38 @@ and a reader needs both. A test pins that a truncated institution name is *not*
 reported, so nobody later "improves" the recall figure by making it
 substring-match and quietly turns it into a different, worse metric.
 
+**2026-11-12 — The README now says how to bring your own data, because the
+capability existed and the instructions did not.** `read_corpus` never required
+the generator: it globs `lab/*.hl7`, `reports/*.txt` and `imaging/*.json` and
+reads what it finds. So a hospital could always have pointed `build` at a real
+export. Nothing anywhere said so, which made a working feature invisible.
+
+Documentation only, no code. The part worth the entry is **what fails quietly**,
+because both failure modes read to a new user as "the tool is broken":
+
+- **Unrecognised header labels mean every report is unlinked.** A template
+  writing `CF` instead of `Codice fiscale` attaches no report to anybody. The
+  build then *succeeds*, with no reports in the dataset and an
+  `unlinked_report` issue per file — which is the tool stating the problem
+  exactly, in `.deident/manifest.json`, where nobody has looked yet.
+- **A linked record with an unparseable date is dropped and is not an issue.**
+  Sessions are dated encounters, so a report whose `Data del referto` cannot be
+  read has nowhere to go. Linkage succeeded, so nothing is reported; the record
+  is simply absent. The only signal is the file count in the build summary
+  being lower than the number of files handed over, and the README now says to
+  compare them.
+
+The second one is the worse of the two and was the harder to find: a failure
+that produces no issue, no warning and no error, visible only as a number that
+is smaller than you expected and only if you were counting.
+
+Not fixed here, deliberately — this task was documentation, and turning a
+silent drop into a reported one changes `build`'s behaviour and the manifest's
+schema. Recorded as the obvious next improvement: records dropped for an
+unreadable date belong in `linkage_issues` with a reason of their own, since
+"the dataset does not contain what you gave it" is exactly the class of fact
+that file exists to carry.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

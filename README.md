@@ -259,6 +259,90 @@ subject label `sub-83360a70e183` is the same label this person carries in the
 lab branch and in the imaging metadata, which is the only thing tying the three
 together.
 
+## Bringing your own data
+
+Nothing in `build` depends on the generator. `read_corpus` does three globs and
+reads whatever it finds, so a corpus exported from a real system works — if it
+is laid out the way the reader looks for it, and if the documents carry the
+labels linkage needs. Both are undocumented until this section, which is a
+problem, because getting them wrong fails *quietly*.
+
+```
+raw/
+  lab/        *.hl7    HL7 v2 messages, one per file
+  reports/    *.txt    free text, UTF-8
+  imaging/    *.json   DICOM JSON Model (PS3.18) metadata, one array per study
+```
+
+Those three patterns are the whole contract. Subdirectories are not searched,
+other extensions are ignored, and the `_generator/` directory a generated
+corpus carries is only read by `commissura measure`.
+
+### What each kind of file has to carry
+
+**A laboratory message establishes a subject, so it needs an identity.** The
+reader wants a national identifier: in the PID-3 identifier list with type code
+`NNITA` or `NI`, or failing that in PID-19. A message with neither is reported
+as `unreadable_lab_message` and the person it describes does not exist as far
+as the rest of the run is concerned. PID-3 with type code `MR` supplies the
+record number, which is the only thing imaging can be linked on. The rest is
+read where present and skipped where not: MSH-4 the sending facility, OBR-4 the
+panel, OBR-7 the collection time, OBR-16 the ordering clinician, OBX the
+results.
+
+**A report is linked by the labels in its header.** Lines of the form
+`Label: value`, matched exactly:
+
+| Label | Used for |
+| --- | --- |
+| `Codice fiscale` | the national identifier — tried first |
+| `Numero nosografico` | the record number — the fallback |
+| `Data del referto` | which session the report belongs to |
+| `Paziente` | the patient's name, so the scrubber can remove it |
+
+A line reading `Dott. SURNAME NAME` is taken as the signature, and it is the
+**only** structured source for the report's author: no laboratory message names
+the clinician who wrote a report, so without it that name cannot be redacted
+anywhere it appears.
+
+**Imaging is linked on `(0010,0020)` PatientID**, compared to the record number
+with leading zeros stripped. `(0008,0020)` StudyDate decides the session.
+
+Dates are accepted as `YYYYMMDD`, `YYYYMMDDHHMM`, `YYYYMMDDHHMMSS`,
+`DD/MM/YYYY`, `DD.MM.YYYY` or `YYYY-MM-DD`.
+
+### The two silent failures, and how to see them
+
+**Labels the reader does not recognise mean every report is unlinked.** If your
+template writes `Paziente / Patient` or `CF` or nothing at all, no report
+attaches to anybody, every one of them is reported as `unlinked_report`, and
+the dataset builds successfully with no reports in it. That reads as "the tool
+does not work" and is in fact the tool telling you precisely what is wrong, in
+a place you have not looked yet.
+
+**A linked record with no readable date is dropped too.** Sessions are dated
+encounters, so a report whose `Data del referto` cannot be parsed, or an
+imaging study with no StudyDate, has nowhere to go and is skipped. It is not
+reported as a linkage issue, because linkage succeeded; it simply is not in the
+output.
+
+So the number to read first is the one `build` prints:
+
+```
+  linkage issues         0
+```
+
+Anything above zero is listed in `.deident/manifest.json` under
+`source.linkage_issues`, with the file and the reason for each. And the file
+counts in the same summary are what catch the second failure — if `reports`
+reads lower than the number of files you handed over, the difference went to
+dates the reader could not parse.
+
+The labels live in one table, `_REPORT_LABELS` in
+[`read/corpus.py`](src/commissura/read/corpus.py), for exactly this reason:
+adapting to another hospital's template is an edit there rather than a rewrite
+of the reader.
+
 ## Commands
 
 | Command | What it does | Status |
