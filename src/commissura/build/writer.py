@@ -92,6 +92,27 @@ class BuildSpec:
         return tuple(missing)
 
 
+@dataclass(frozen=True, slots=True)
+class DroppedRecord:
+    """One input record that linked to a subject and is not in the dataset.
+
+    Distinct from a :class:`commissura.read.corpus.LinkageIssue`, and the two
+    must not be merged: a linkage issue is a record that could not be attached
+    to anybody, while this is one that was attached and then had nowhere to go.
+    Both answer "what did I hand over that is not here", and they answer it for
+    different reasons, which is what a reader needs in order to fix either.
+
+    Attributes:
+        path: The corpus file, relative to the corpus root.
+        reason: A stable token, for a reader that is a program.
+        detail: The same thing in a sentence, for a reader that is a person.
+    """
+
+    path: str
+    reason: str
+    detail: str
+
+
 @dataclass(slots=True)
 class BuildSummary:
     """What a build produced, and what it could not."""
@@ -104,6 +125,7 @@ class BuildSummary:
     imaging_files: int = 0
     scrub_reports: list[ScrubReport] = field(default_factory=list)
     linkage_issues: int = 0
+    dropped: list[DroppedRecord] = field(default_factory=list)
     missing_for_conformance: tuple[str, ...] = ()
 
     @property
@@ -358,6 +380,40 @@ def build_dataset(corpus: RawCorpus, key: SecretKey, spec: BuildSpec, out: Path)
     return summary
 
 
+def _undated(path: str, baseline: date | None, field_name: str) -> DroppedRecord:
+    """Describe a record that has no date to place it by.
+
+    Two reasons rather than one, because they need different fixes. A record
+    whose own date is unreadable is a parsing problem in that file. A subject
+    with no dated event anywhere has no baseline at all, so every one of their
+    records drops and nothing in the dataset will show it — the worse of the
+    two, and the one a single reason would have hidden inside the other.
+
+    Args:
+        path: The corpus file, relative to the corpus root.
+        baseline: The subject's anchor date, or None if they have none.
+        field_name: Where the date should have been, named the way the source
+            format names it, so the reader knows what to go and look at.
+
+    Returns:
+        The record.
+    """
+    if baseline is None:
+        return DroppedRecord(
+            path=path,
+            reason="subject_has_no_dated_event",
+            detail=(
+                "nothing in this subject's records carries a readable date, so there "
+                "is no baseline to express offsets from and none of them can be placed"
+            ),
+        )
+    return DroppedRecord(
+        path=path,
+        reason="undated_record",
+        detail=f"no readable date in {field_name}, so there is no session to place it in",
+    )
+
+
 def _write_subject_labs(
     subject: Subject,
     out: Path,
@@ -371,6 +427,7 @@ def _write_subject_labs(
     by_session: dict[str, list[list[str]]] = {}
     for lab in subject.labs:
         if lab.collected_at is None or baseline is None:
+            summary.dropped.append(_undated(lab.path, baseline, "OBR-7 collection time"))
             continue
         session = session_of[lab.collected_at.date()]
         offset = pseudonymiser.day_offset(baseline, lab.collected_at.date())
@@ -429,6 +486,7 @@ def _write_subject_reports(
     counters: dict[str, int] = {}
     for report in subject.reports:
         if report.authored_on is None or baseline is None:
+            summary.dropped.append(_undated(report.path, baseline, "the 'Data del referto' header"))
             continue
         session = session_of[report.authored_on]
         counters[session] = counters.get(session, 0) + 1
@@ -474,6 +532,7 @@ def _write_subject_imaging(
     """
     for study in subject.imaging:
         if study.study_date is None or baseline is None:
+            summary.dropped.append(_undated(study.path, baseline, "(0008,0020) StudyDate"))
             continue
         payload = {
             "study_uid": pseudonymiser.uid(study.study_uid),

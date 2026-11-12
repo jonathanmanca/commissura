@@ -542,6 +542,7 @@ def build(
                     "sessions": summary.session_count,
                     "files": summary.file_count,
                     "linkage_issues": summary.linkage_issues,
+                    "records_dropped": len(summary.dropped),
                     "free_text_redactions": summary.redaction_count,
                     "key_fingerprint": key.fingerprint,
                     "profile": {
@@ -574,6 +575,7 @@ def build(
         typer.echo(f"  key fingerprint        {key.fingerprint}")
         typer.echo(f"  free-text redactions   {summary.redaction_count}")
         typer.echo(f"  linkage issues         {summary.linkage_issues}")
+        typer.echo(f"  records dropped        {len(summary.dropped)}  (no readable date)")
         typer.echo(
             f"  minimum k              {risk['minimum_k']}"
             f"  ({len(risk['combinations_below_threshold'])} combination(s) below "  # type: ignore[arg-type]

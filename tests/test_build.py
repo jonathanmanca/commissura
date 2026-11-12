@@ -956,7 +956,13 @@ def test_the_redaction_counts_no_longer_sit_outside_the_modality(tmp_path: Path)
     )
 
     assert "free_text_redactions" not in manifest
-    assert manifest["schema_version"] == "2.0.0", "reshaping the document moves this number"
+    # Major 2 or later, not exactly 2.0.0. The claim is that reshaping the
+    # document moved the major number, and pinning the patch version makes
+    # every later additive change look like a regression in this test.
+    assert manifest["schema_version"] == MANIFEST_SCHEMA_VERSION
+    assert int(MANIFEST_SCHEMA_VERSION.split(".")[0]) >= 2, (
+        "reshaping the document moves the major number"
+    )
 
 
 def test_no_contact_detail_survives_into_a_built_dataset(tmp_path: Path) -> None:
@@ -988,3 +994,133 @@ def test_no_contact_detail_survives_into_a_built_dataset(tmp_path: Path) -> None
         # The half-redaction is worth naming separately: it is what the ordering
         # prevents, and it would otherwise read as a successful redaction.
         assert f"{PLACEHOLDER_NAME}@" not in text, document
+
+
+# --------------------------------------------------------------------------
+# Records that link and are then dropped, which used to happen in silence
+# --------------------------------------------------------------------------
+
+CR = "\r"
+
+
+def _lab_message(*, national_id: str, mrn: str, collected: str) -> str:
+    """One ORU^R01, with a controllable OBR-7 collection time."""
+    return (
+        CR.join(
+            [
+                r"MSH|^~\&|LIS|SINTETIC LAB|EHR|SINTETIC HOSP|20240101120000||ORU^R01|1|P|2.5",
+                f"PID|1||{mrn}^^^SINTETIC HOSP^MR~{national_id}^^^MINSAL^NNITA"
+                "||ROSSI^MARIO||19800101|M",
+                f"OBR|1|ACC9|ACC9|PANEL^Pannello|||{collected}",
+                "OBX|1|NM|718-7^Emoglobina||13.0|g/dL|12.0-16.0|N|||F",
+            ]
+        )
+        + CR
+    )
+
+
+def _report_text(*, mrn: str, authored: str) -> str:
+    return (
+        "OSPEDALE SINTETICO DI COLLEVERDE\n"
+        "Via dei Tigli 40 - Milano\n\n"
+        "REFERTO\n\n"
+        "Paziente: MARIO ROSSI\n"
+        f"Numero nosografico: {mrn}\n"
+        f"Data del referto: {authored}\n\n"
+        "QUESITO CLINICO\nControllo.\n"
+    )
+
+
+def _hand_built(tmp_path: Path, *, collected: str, authored: str | None) -> BuildSummary:
+    """Build from a corpus written by hand, so the dates can be made unreadable."""
+    raw, out = tmp_path / "raw", tmp_path / "dataset"
+    (raw / "lab").mkdir(parents=True)
+    (raw / "lab" / "a.hl7").write_text(
+        _lab_message(national_id="RSSMRA80A01X000A", mrn="0012345", collected=collected),
+        encoding="utf-8",
+        newline="",
+    )
+    if authored is not None:
+        (raw / "reports").mkdir()
+        (raw / "reports" / "r.txt").write_text(
+            _report_text(mrn="0012345", authored=authored), encoding="utf-8", newline=""
+        )
+    corpus = read_corpus(raw)
+    assert not corpus.issues, "the point is a record that links and is then dropped"
+    return build_dataset(corpus, KEY, _spec(), out)
+
+
+def test_a_report_with_an_unreadable_date_is_reported_not_silently_dropped(
+    tmp_path: Path,
+) -> None:
+    """It linked. A session is a dated encounter, so it has nowhere to go.
+
+    Before this it simply was not in the output, with no issue, no warning and
+    no error — visible only as a file count lower than the number of files
+    handed over, and only to somebody who was counting.
+    """
+    summary = _hand_built(tmp_path, collected="20240101110000", authored="not a date")
+
+    assert summary.report_files == 0
+    assert [(d.path, d.reason) for d in summary.dropped] == [("reports/r.txt", "undated_record")]
+    assert "Data del referto" in summary.dropped[0].detail
+
+
+def test_a_subject_with_no_dated_event_at_all_gets_its_own_reason(tmp_path: Path) -> None:
+    """The worse case, and one a single reason would have hidden inside the other.
+
+    No baseline means every one of that subject's records drops, not just the
+    undated one, and a row still appears in participants.tsv — so the dataset
+    claims a participant it holds nothing for.
+    """
+    summary = _hand_built(tmp_path, collected="nonsense", authored=None)
+
+    assert summary.lab_files == 0
+    assert [d.reason for d in summary.dropped] == ["subject_has_no_dated_event"]
+    assert "no baseline" in summary.dropped[0].detail
+
+
+def test_a_dropped_record_reaches_the_manifest(tmp_path: Path) -> None:
+    """Where somebody auditing the dataset will actually find it."""
+    raw, out = tmp_path / "raw", tmp_path / "dataset"
+    (raw / "lab").mkdir(parents=True)
+    (raw / "lab" / "a.hl7").write_text(
+        _lab_message(national_id="RSSMRA80A01X000A", mrn="0012345", collected="20240101110000"),
+        encoding="utf-8",
+        newline="",
+    )
+    (raw / "reports").mkdir()
+    (raw / "reports" / "r.txt").write_text(
+        _report_text(mrn="0012345", authored="whenever"), encoding="utf-8", newline=""
+    )
+    corpus = read_corpus(raw)
+    spec = _spec()
+    summary = build_dataset(corpus, KEY, spec, out)
+    write_manifest(out, corpus=corpus, summary=summary, key=KEY, spec=spec)
+
+    source = json.loads(
+        (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+    )["source"]
+
+    assert source["records_dropped"] == [
+        {
+            "path": "reports/r.txt",
+            "reason": "undated_record",
+            "detail": source["records_dropped"][0]["detail"],
+        }
+    ]
+    # One number answering "what did I hand over that is not here", across both
+    # the records that could not be attached and the ones that were and then
+    # had nowhere to go.
+    assert source["records_not_in_dataset"] == len(corpus.issues) + 1
+
+
+def test_a_clean_corpus_drops_nothing(tmp_path: Path) -> None:
+    """The counterpart: the new list must stay empty when nothing is wrong."""
+    out, summary = _build(tmp_path, defect_rate=0.0)
+
+    assert summary.dropped == []
+    manifest = json.loads(
+        (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+    )
+    assert manifest["source"]["records_not_in_dataset"] == 0

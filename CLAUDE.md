@@ -1633,6 +1633,50 @@ should not be in the business of. The text output says so, and tells the
 operator to check the key fingerprint against the manifest's before trusting a
 label against a particular dataset.
 
+**2026-11-12 — A record that links and is then dropped is now reported, with
+its own reason.** Yesterday's entry on bringing your own data named this as the
+worse of two silent failures and left it: a report whose `Data del referto`
+cannot be parsed, or an imaging study with no StudyDate, has nowhere to go
+because sessions are dated encounters. Linkage *succeeded*, so it produced no
+linkage issue, no warning and no error. The only evidence was a file count
+lower than the number of files handed over, visible to somebody who was
+counting. "The dataset does not contain what you gave it" is exactly the class
+of fact the manifest exists to carry, and it was not carrying it.
+
+**Two lists, not one, and the reason is precision rather than tidiness.** A
+`LinkageIssue` is a record that could not be attached to anybody; a
+`DroppedRecord` was attached and then had nowhere to go. Folding the second
+into `source.linkage_issues` would have been one fewer field and a lie about
+half its contents — and the two need different fixes, a labelling problem in
+the export versus a date format the reader does not recognise. What a reader
+actually wanted was the *sum*, so `source.records_not_in_dataset` is that one
+number and the two lists keep their own names.
+
+**Two reasons, because one would have hidden the worse case.**
+`undated_record` names the field that should have held a date, in the source
+format's own terms, so a reader knows what to open. `subject_has_no_dated_event`
+is reported separately: with no baseline, *every* one of that subject's records
+drops rather than one, and a row still appears in `participants.tsv` — so the
+dataset claims a participant it holds nothing for. A single reason would have
+made that look like several ordinary parse failures that happened to share a
+subject.
+
+Schema to **2.1.0**. Additive, so a reader of 2.0.0 still parses it; the minor
+number moves because there is something new to read. Noted because yesterday's
+entry had to record a reshape that shipped without the version moving at all.
+
+**And the honest gap: no generated corpus reaches this code.** At
+`--defect-rate 0.8` the drop count is zero. The generator has no defect that
+produces an unparseable date — the format-drift defect emits `DD/MM/YYYY`,
+which `parse_timestamp` accepts — so the path is exercised by hand-built
+fixtures and by nothing else. That is the third time this project has found a
+rule no corpus reaches, after the contact patterns and the PID-19 fallback, and
+both of those were closed by giving the generator a way to produce the case. An
+`*.unreadable_date` defect would close this one and is the obvious next step.
+It is not done here because it was not what was asked, and because it changes
+the ground-truth annotations and every captured number in the README again —
+which is a reason to do it deliberately rather than in passing.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

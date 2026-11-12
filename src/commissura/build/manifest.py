@@ -41,7 +41,7 @@ from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_
 from commissura.deident.keys import SecretKey
 from commissura.read.corpus import RawCorpus
 
-MANIFEST_SCHEMA_VERSION = "2.0.0"
+MANIFEST_SCHEMA_VERSION = "2.1.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
@@ -56,6 +56,11 @@ the reports ledger. Anything that read 1.0.0 will not read this.
 Recorded with some embarrassment: the first of those two changes shipped without
 this number moving. A schema version exists so a consumer can tell, and leaving
 it at 1.0.0 while reshaping the document told them the opposite of the truth.
+
+**2.1.0 adds and breaks nothing**: ``source.records_dropped`` and
+``source.records_not_in_dataset``, for records that linked to a subject and
+were then left out because they carried no readable date. A reader of 2.0.0
+still parses this; a reader of 2.1.0 can answer a question 2.0.0 could not.
 """
 
 
@@ -223,6 +228,18 @@ def write_manifest(
                 {"path": issue.path, "reason": issue.reason, "detail": issue.detail}
                 for issue in corpus.issues
             ],
+            # The other half of "what did I hand over that is not here". A
+            # linkage issue is a record that could not be attached to anybody;
+            # a dropped record was attached and then had nowhere to go, because
+            # sessions are dated encounters and it carried no readable date.
+            # Kept as a separate list rather than folded into the one above,
+            # because the two need different fixes and a shared name would
+            # misdescribe one of them.
+            "records_dropped": [
+                {"path": record.path, "reason": record.reason, "detail": record.detail}
+                for record in summary.dropped
+            ],
+            "records_not_in_dataset": len(corpus.issues) + len(summary.dropped),
         },
         "output": {
             "subjects": summary.subject_count,

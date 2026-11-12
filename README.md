@@ -157,6 +157,7 @@ Wrote 217 files to ./dataset
   key fingerprint        02971fa50adf0fcc
   free-text redactions   975
   linkage issues         0
+  records dropped        0  (no readable date)
   minimum k              1  (21 combination(s) below 5)
   profile                HealthDCAT-AP 8, non-public tier
 
@@ -320,23 +321,34 @@ the dataset builds successfully with no reports in it. That reads as "the tool
 does not work" and is in fact the tool telling you precisely what is wrong, in
 a place you have not looked yet.
 
-**A linked record with no readable date is dropped too.** Sessions are dated
-encounters, so a report whose `Data del referto` cannot be parsed, or an
-imaging study with no StudyDate, has nowhere to go and is skipped. It is not
-reported as a linkage issue, because linkage succeeded; it simply is not in the
-output.
+**A linked record with no readable date is dropped too**, and that one used to
+be genuinely silent. Sessions are dated encounters, so a report whose
+`Data del referto` cannot be parsed, or an imaging study with no StudyDate, has
+nowhere to go. It is not a linkage issue, because linkage succeeded — so until
+this was fixed nothing said anything at all, and the only evidence was a file
+count lower than the number of files you handed over.
 
-So the number to read first is the one `build` prints:
+Both are now counted where you will see them:
 
 ```
   linkage issues         0
+  records dropped        0  (no readable date)
 ```
 
-Anything above zero is listed in `.deident/manifest.json` under
-`source.linkage_issues`, with the file and the reason for each. And the file
-counts in the same summary are what catch the second failure — if `reports`
-reads lower than the number of files you handed over, the difference went to
-dates the reader could not parse.
+Each is listed in `.deident/manifest.json` with the file and the reason —
+`source.linkage_issues` for records that could not be attached to anybody,
+`source.records_dropped` for records that were attached and then had nowhere to
+go. Two lists rather than one, because they need different fixes: the first is
+a labelling problem in your export, the second a date format the reader does
+not recognise. `source.records_not_in_dataset` adds them up, which is the
+single number answering "what did I hand over that is not here".
+
+A dropped record carries one of two reasons. `undated_record` names the field
+that should have held a date. `subject_has_no_dated_event` is worse and is
+reported separately for that reason: nothing in that person's records carries a
+readable date, so there is no baseline to express offsets from, *every* one of
+their records drops — and a row still appears in `participants.tsv`, so the
+dataset claims a participant it holds nothing for.
 
 The labels live in one table, `_REPORT_LABELS` in
 [`read/corpus.py`](src/commissura/read/corpus.py), for exactly this reason:
