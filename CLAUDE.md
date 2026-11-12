@@ -1744,6 +1744,54 @@ walkthrough's `--defect-rate 0.2`, thirteen of forty-eight reports are now
 dropped. The example dataset is smaller and the example is better, because the
 number is on screen and the paths are under it.
 
+**2026-11-12 — CI went red on a test that asserted against rendered help text,
+and the fix exposed a second guard that had been green without guarding.** The
+failure was `test_whois_takes_no_key_as_a_value`, which did
+`assert "--key-file" in result.stdout` after invoking `whois --help`. It passed
+on this machine and failed on every CI job.
+
+**The cause is that typer renders help through rich, and rich emits style codes
+when colour is on.** GitHub Actions sets an environment where colour is
+enabled; the terminal these commands run in locally does not, so rich printed
+plain text here and ANSI there. And the codes land *inside* the token:
+`--key-file` is simply not a substring of the coloured output. Reproduced
+exactly before changing anything — with `FORCE_COLOR=1` the substring test
+returns False, and after stripping the escapes it returns True.
+
+**The fix is not to strip ANSI in the test.** That would keep asserting against
+a picture of the interface, which is also width-dependent and renderer-
+dependent, and would break again the next time typer changes how it draws a
+panel. The intent was always about the *declared* interface: `whois` offers
+`--key-file` and offers no option taking a key as a value. So the tests now ask
+click for the parameter list — `get_command(app).commands[name].params` — which
+is the interface itself.
+
+**The second finding is the better one.** The pre-existing
+`test_there_is_no_option_to_pass_a_key_as_an_argument` asserted only
+*negatives* against the same help text: `"--key " not in help_text`. A negative
+substring assertion against coloured output passes no matter what, because the
+styled token never matches the plain one. That test had therefore been green in
+CI while checking nothing at all, since the day CI was set up — and it guards
+one of this project's load-bearing security decisions.
+
+It is now `test_no_command_anywhere_takes_a_key_as_a_value`, over **every**
+registered command rather than the two that existed when it was written,
+because the rule is about the project and a new command is exactly where it
+would be broken. And a second test asserts the positive it was missing: the
+commands that read a key do offer `--key-file`. A guard that only forbids
+something passes on a command that offers no way to do the thing at all.
+
+Both were checked by sabotage rather than by reading: adding `--key` as an
+alias to `whois` makes both fail, and removing it makes them pass. A guard
+nobody has watched fail is a guard nobody has tested.
+
+**The generalisable lesson, and it is the second time today.** The brief's
+sentinel broke this morning because a sentence wrapped across two lines; this
+broke because a token acquired colour. Both asserted on *rendered text* when
+they meant something structural. Assert on the thing, not on its picture — and
+where the picture is all you have, be suspicious of a negative assertion, which
+is the shape that fails silently.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.
@@ -1755,6 +1803,11 @@ number is on screen and the paths are under it.
 - **One fact, one place.** A fact stated in two sections will disagree with
   itself inside a week. Point at the section that owns it instead of restating
   it, and rewrite rather than append.
+- **Assert on the thing, not on its picture.** Rendered output wraps, gets
+  coloured and gets redrawn by whatever library draws it. A test that reads
+  `--help` or a formatted document is testing the renderer. Ask the code for
+  its interface instead — and distrust a negative assertion against rendered
+  text, because that is the shape that passes while checking nothing.
 
 ## Reference material
 

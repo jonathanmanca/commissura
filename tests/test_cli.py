@@ -235,16 +235,48 @@ def test_keygen_overwrites_when_forced(tmp_path: Path) -> None:
     assert not read_key_file(out).matches(original)
 
 
-def test_there_is_no_option_to_pass_a_key_as_an_argument() -> None:
+def _declared_options(command: str) -> set[str]:
+    """Return every option string a command declares, asked of click.
+
+    Not of the rendered help. Typer prints help through rich, which inserts
+    style codes inside a token when colour is on — so `--key-file` is simply
+    not a substring of the output in CI, while it is on a terminal that gets no
+    colour. The option list is the interface; the help text is a picture of it.
+    """
+    group = get_command(app)
+    assert isinstance(group.commands, dict)  # type: ignore[attr-defined]
+    return {
+        option
+        for parameter in group.commands[command].params  # type: ignore[attr-defined]
+        for option in parameter.opts
+    }
+
+
+def test_no_command_anywhere_takes_a_key_as_a_value() -> None:
     """A key on the command line lands in shell history, `ps` output and CI logs.
 
     Pinned as a test because the convenient option is the one people reach for,
     so it must not exist rather than merely be discouraged.
+
+    Checked against every command rather than the two that existed when this
+    was written: the rule is about the project, and a new command is exactly
+    where it would be broken.
     """
-    for command in ("keygen", "key-info"):
-        help_text = runner.invoke(app, [command, "--help"]).stdout
-        assert "--key " not in help_text
-        assert "--secret" not in help_text
+    for command in get_command(app).commands:  # type: ignore[attr-defined]
+        declared = _declared_options(command)
+        assert "--key" not in declared, command
+        assert "--secret" not in declared, command
+
+
+def test_the_commands_that_read_a_key_offer_the_file_option() -> None:
+    """The counterpart: the rule above is only honest if the usable route exists.
+
+    Asserting the absence of `--key` alone would pass on a command that offered
+    no way to supply a key at all, which is how a negative-only guard comes to
+    be green without guarding anything.
+    """
+    for command in ("key-info", "build", "verify", "whois"):
+        assert "--key-file" in _declared_options(command), command
 
 
 def test_key_info_reports_the_fingerprint_and_rule_version(tmp_path: Path) -> None:
@@ -846,16 +878,18 @@ def test_whois_gives_different_labels_under_different_keys(tmp_path: Path) -> No
     assert json.loads(one.stdout)["subject_label"] != json.loads(two.stdout)["subject_label"]
 
 
-def test_whois_takes_no_key_as_a_value(tmp_path: Path) -> None:
+def test_whois_takes_no_key_as_a_value() -> None:
     """The same rule as `build`, pinned so a convenience flag cannot creep in.
 
-    A key on the command line is a key in shell history, in `ps` output and in
-    CI logs.
+    This asserted on `--help` output and failed in CI while passing locally:
+    typer renders help through rich, which emits style codes when colour is on,
+    and those codes land *inside* the token, so `--key-file` stops being a
+    substring. The intent was never about the help text.
     """
-    result = runner.invoke(app, ["whois", "--help"])
+    declared = _declared_options("whois")
 
-    assert "--key-file" in result.stdout
-    assert "--key " not in result.stdout
+    assert "--key-file" in declared
+    assert "--key" not in declared
 
 
 def test_whois_without_an_identifier_fails_cleanly(tmp_path: Path) -> None:
