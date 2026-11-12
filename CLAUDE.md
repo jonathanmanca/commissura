@@ -275,8 +275,8 @@ dataset/
 ## Current state
 
 Every command runs end to end: `generate`, `defects`, `validate`, `rules`,
-`keygen`, `key-info`, `build`, `risk`, `verify`, `measure`. A test pins that
-list against the CLI's
+`keygen`, `key-info`, `build`, `risk`, `verify`, `measure`, `whois`. A test
+pins that list against the CLI's
 own registrations, so it cannot quietly go stale again — which it had. Five of
 them take a corpus from an empty directory to a dataset `validate` reports as
 conformant, and the README's worked example is that run with its real output.
@@ -1580,6 +1580,58 @@ schema. Recorded as the obvious next improvement: records dropped for an
 unreadable date belong in `linkage_issues` with a reason of their own, since
 "the dataset does not contain what you gave it" is exactly the class of fact
 that file exists to carry.
+
+**2026-11-12 — `commissura whois` derives a subject label from a real
+identifier, and the inverse does not exist and will not.** Without it a data
+holder cannot act on an EHDS opt-out. Somebody exercises their right to object;
+the holder knows exactly who they are and has to find them in datasets already
+released, where the name appears nowhere. The subject label is the only handle,
+and until now nothing produced one outside a build.
+
+**Why there is no command going the other way**, recorded here so that it is a
+decision and not an omission somebody later "fixes":
+
+- **There is nothing to implement.** The label is
+  `HMAC-SHA256(key, "subject|" + national_id)` truncated to twelve hex
+  characters. An HMAC has no inverse, and the truncation means the mapping is
+  not injective even in principle, so "the identifier for this label" is not a
+  well-defined question.
+- **The only way to fake one is to enumerate the identifier space and build a
+  table — which is the attack this design was chosen to resist.** The stack
+  decision of 2026-11-06 rejected a plain `hash(national_id)` in exactly those
+  words. A reverse command would be that attack, shipped, with the key holder's
+  convenience as the excuse. A codice fiscale is derivable from a name, a date
+  of birth, a birthplace and a sex, so the space is enumerable for any
+  individual somebody is actually interested in.
+- **The forward direction is all the use case needs.** An opt-out starts from a
+  named person. You do not need to ask who a label belongs to; you need to ask
+  which label a person was given.
+
+A test asserts that no command named `unwhois`, `reverse`, `resolve`, `lookup`
+or `identify` exists. That is cheap and it is how the decision survives a
+future contributor who has a good afternoon and a bad idea.
+
+**Three constraints on the command itself.**
+
+It takes **no key as a value**, only `--key-file` or the environment variable,
+and a test pins that the help text offers no `--key`. Same reasoning as `build`:
+a key on the command line is a key in shell history, in `ps` output and in CI
+logs.
+
+It also **reads the identifier from stdin** when the argument is omitted, and
+the help says why. The argument against putting the key on a command line
+applies, less severely, to a codice fiscale: it is patient data, and
+`whois RSSMRA80A01X000A` sits in `.bash_history` afterwards. Offering the pipe
+costs one line and the test confirms both routes agree.
+
+And it **reads no dataset**. Pure derivation, which has a consequence worth
+stating rather than discovering: it gives the same answer for somebody who is
+in no dataset at all. That is deliberate. A command that looked the label up
+would answer "is this person in this dataset?", which is a different and much
+more dangerous question, and one that a tool handing out answers over a key
+should not be in the business of. The text output says so, and tells the
+operator to check the key fingerprint against the manifest's before trusting a
+label against a particular dataset.
 
 ## Conventions
 

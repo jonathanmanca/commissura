@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from commissura import __version__, layout
@@ -16,6 +17,7 @@ from commissura.deident.keys import KEY_FILE_ENV_VAR, read_key_file
 from commissura.deident.pseudonymise import RULE_VERSION
 from commissura.generate.cohort import CohortSpec
 from commissura.generate.writer import write_corpus
+from commissura.read.corpus import read_corpus
 
 runner = CliRunner()
 
@@ -775,3 +777,111 @@ def test_measure_caps_the_listed_misses(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert "LEAKED" in result.stdout
     assert leaked["path"] not in result.stdout
+
+
+# --------------------------------------------------------------------------
+# commissura whois
+# --------------------------------------------------------------------------
+
+
+def test_whois_resolves_a_person_to_a_directory_in_the_dataset(tmp_path: Path) -> None:
+    """The point of the command: an opt-out names a person, the dataset does not.
+
+    Derivation alone would be easy to get subtly wrong and still look
+    self-consistent, so this checks the label against a dataset actually built
+    from that person's records.
+    """
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    assert runner.invoke(app, _build_args(tmp_path, raw, key)).exit_code == 0
+    subject = read_corpus(raw).subjects[0]
+
+    result = runner.invoke(
+        app, ["whois", subject.identity.national_id, "--key-file", str(key), "--json"]
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.exit_code == 0
+    assert (tmp_path / "dataset" / payload["subject_directory"]).is_dir()
+    assert payload["key_fingerprint"] == read_key_file(key).fingerprint
+
+
+def test_whois_reads_the_identifier_from_stdin(tmp_path: Path) -> None:
+    """So a codice fiscale need not go into shell history, as the key does not."""
+    key = _key(tmp_path)
+
+    typed = runner.invoke(app, ["whois", "RSSMRA80A01X000A", "--key-file", str(key), "--json"])
+    piped = runner.invoke(
+        app, ["whois", "--key-file", str(key), "--json"], input="RSSMRA80A01X000A\n"
+    )
+
+    assert piped.exit_code == 0
+    assert json.loads(piped.stdout) == json.loads(typed.stdout)
+
+
+def test_whois_is_pure_derivation(tmp_path: Path) -> None:
+    """No dataset argument, and the same answer for somebody who is in none.
+
+    It must not become a lookup: an answer that depended on a dataset would
+    leak whether a person is in it, which is the question the command is
+    carefully not answering.
+    """
+    key = _key(tmp_path)
+
+    absent = runner.invoke(app, ["whois", "VRDGPP85B02X000B", "--key-file", str(key), "--json"])
+
+    assert absent.exit_code == 0
+    assert len(json.loads(absent.stdout)["subject_label"]) == 12
+
+
+def test_whois_gives_different_labels_under_different_keys(tmp_path: Path) -> None:
+    """Otherwise the label would be a plain hash and enumerable by anyone."""
+    first, second = _key(tmp_path), tmp_path / "other.key"
+    assert runner.invoke(app, ["keygen", "--out", str(second)]).exit_code == 0
+
+    one = runner.invoke(app, ["whois", "RSSMRA80A01X000A", "--key-file", str(first), "--json"])
+    two = runner.invoke(app, ["whois", "RSSMRA80A01X000A", "--key-file", str(second), "--json"])
+
+    assert json.loads(one.stdout)["subject_label"] != json.loads(two.stdout)["subject_label"]
+
+
+def test_whois_takes_no_key_as_a_value(tmp_path: Path) -> None:
+    """The same rule as `build`, pinned so a convenience flag cannot creep in.
+
+    A key on the command line is a key in shell history, in `ps` output and in
+    CI logs.
+    """
+    result = runner.invoke(app, ["whois", "--help"])
+
+    assert "--key-file" in result.stdout
+    assert "--key " not in result.stdout
+
+
+def test_whois_without_an_identifier_fails_cleanly(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+
+    result = runner.invoke(app, ["whois", "--key-file", str(key)], input="\n")
+
+    assert result.exit_code == 1
+    assert "No identifier" in (result.stderr or result.output)
+
+
+def test_whois_without_a_key_fails_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(KEY_FILE_ENV_VAR, raising=False)
+
+    result = runner.invoke(app, ["whois", "RSSMRA80A01X000A", "--key-file", str(tmp_path / "no")])
+
+    assert result.exit_code == 1
+
+
+def test_there_is_no_command_that_reverses_a_label() -> None:
+    """Pinned as a decision, not left to whoever reads the help next.
+
+    The derivation is an HMAC, so no inverse exists to implement; the only way
+    to fake one is to enumerate the identifier space, which is the attack the
+    design was chosen to resist. A test is how that stays true.
+    """
+    commands = set(get_command(app).commands)  # type: ignore[attr-defined]
+
+    assert "whois" in commands
+    for forbidden in ("unwhois", "reverse", "resolve", "lookup", "identify"):
+        assert forbidden not in commands

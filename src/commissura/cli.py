@@ -14,6 +14,7 @@ a human-readable table.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -32,7 +33,7 @@ from commissura.deident.keys import (
     resolve_key,
     write_key_file,
 )
-from commissura.deident.pseudonymise import RULE_VERSION
+from commissura.deident.pseudonymise import RULE_VERSION, Pseudonymiser
 from commissura.generate.cohort import DEFAULT_REFERENCE_DATE, CohortSpec
 from commissura.generate.defects import CATALOGUE, Modality, defects_for
 from commissura.generate.writer import verify_corpus, write_corpus
@@ -879,3 +880,77 @@ def measure(
         "  This checks exact strings. Fragments are the scrubber's residual-risk "
         "list, reported by `build`."
     )
+
+
+@app.command()
+def whois(
+    identifier: Annotated[
+        str | None,
+        typer.Argument(
+            help="The real identifier, such as a codice fiscale. Omit it to read from stdin."
+        ),
+    ] = None,
+    key_file: Annotated[
+        Path | None,
+        typer.Option("--key-file", help="The key the dataset was built with."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the result as JSON instead of text.")
+    ] = False,
+) -> None:
+    """Derive the subject label a real identifier was given.
+
+    This is what a data holder needs to act on an EHDS opt-out. Somebody
+    exercises their right to object; you know who they are and you have to find
+    them in datasets already released, where their name does not appear. The
+    label is the only thing that does.
+
+    One direction only. There is no command that turns a subject label back
+    into an identifier, and there will not be: the derivation is an HMAC, so no
+    inverse exists to implement, and the only way to fake one is to enumerate
+    the identifier space — which is the attack this design was chosen to
+    resist. See the decision log.
+
+    Reads nothing. It derives the label from the identifier and the key, so it
+    gives the same answer whether or not the person is in any dataset, and
+    tells you nothing about whether they are.
+
+    Pass the identifier on stdin rather than as an argument when you would
+    rather it stayed out of your shell history — it is patient data, and the
+    argument for keeping the key off the command line applies to it too.
+    """
+    value = (identifier if identifier is not None else sys.stdin.read()).strip()
+    if not value:
+        typer.echo("No identifier given, on the command line or on stdin.", err=True)
+        raise typer.Exit(1)
+
+    try:
+        key = resolve_key(key_file)
+    except KeyMaterialError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+
+    label = Pseudonymiser(key).subject_label(value)
+
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "subject_label": label,
+                    "subject_directory": f"{layout.SUBJECT_PREFIX}{label}",
+                    "key_fingerprint": key.fingerprint,
+                    "deidentification_rule_version": RULE_VERSION,
+                },
+                indent=2,
+            )
+        )
+        return
+
+    typer.echo(f"  subject label                   {label}")
+    typer.echo(f"  directory                       {layout.SUBJECT_PREFIX}{label}")
+    typer.echo(f"  key fingerprint                 {key.fingerprint}")
+    typer.echo(f"  de-identification rule version  {RULE_VERSION}")
+    typer.echo("")
+    typer.echo("  Derived, not looked up: this says nothing about whether that")
+    typer.echo("  subject is in any dataset. Check the fingerprint matches the")
+    typer.echo("  one in the manifest before trusting the label against it.")

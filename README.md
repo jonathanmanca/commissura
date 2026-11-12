@@ -357,6 +357,7 @@ of the reader.
 | `commissura risk` | k-anonymity over participant attributes, flagging k < 5 | available |
 | `commissura verify` | Recompute every file's digest and report what changed since the build | available |
 | `commissura measure` | Compare the generator's ground truth against the built dataset | available |
+| `commissura whois` | Derive the subject label a real identifier was given | available |
 
 Every command that reports anything accepts `--json`, so the tool composes
 inside somebody else's pipeline without being screen-scraped.
@@ -880,6 +881,48 @@ the only place addresses were learned from. Its *name* was removed, which is
 what made it hard to see — the header read `[INSTITUTION]` above an intact
 street and city. Addresses are now also read from the line under an institution
 the structured exports already named.
+
+### `commissura whois`
+
+```bash
+commissura whois RSSMRA80A01X000A --key-file ./commissura.key
+```
+
+```
+  subject label                   ee0d8f0315e1
+  directory                       sub-ee0d8f0315e1
+  key fingerprint                 dab6e8f96ecb2386
+  de-identification rule version  1.0.0
+```
+
+**This is what an EHDS opt-out needs.** Somebody exercises their right to
+object. You know exactly who they are; the datasets you already released
+contain no name, no codice fiscale and no record number. The subject label is
+the only handle that connects the two, and this derives it.
+
+It reads nothing. The label comes from the identifier and the key, so the
+answer is the same whether or not that person is in any dataset — which is
+deliberate, because a command that *looked it up* would be answering "is this
+person in this dataset?", a different and far more dangerous question. Check
+the key fingerprint against the one in a dataset's manifest before trusting a
+label against it.
+
+Pipe the identifier instead of typing it when you would rather it stayed out of
+your shell history. It is patient data, and the argument for keeping the key
+off the command line applies to it too:
+
+```bash
+echo RSSMRA80A01X000A | commissura whois --key-file ./commissura.key
+```
+
+**There is no command that goes the other way, and there will not be.** The
+label is an HMAC truncated to twelve hex characters: no inverse exists to
+implement, and the truncation means "the identifier for this label" is not even
+a well-defined question. The only way to fake one is to enumerate the
+identifier space and build a lookup table — which is precisely the attack this
+design was chosen to resist, and a codice fiscale is derivable from a name, a
+birth date, a birthplace and a sex, so that space is enumerable for anyone
+somebody is actually interested in. A test asserts no such command exists.
 
 ### `commissura risk`
 
