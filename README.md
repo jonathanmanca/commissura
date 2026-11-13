@@ -1176,7 +1176,17 @@ placed where no authority assigns:
 
 Every push and pull request to `main` runs `ruff check`, `ruff format --check`,
 `mypy` and `pytest` on Python 3.11 to 3.14 on Ubuntu, and on 3.14 on Windows,
-**installing from the lockfile**.
+**installing from the lockfile**. It then builds the same dataset from the same
+seed and the same key on Ubuntu and on Windows and **compares the per-file
+digests**, because for a tool whose output is meant to be verified later,
+reproducibility is a property worth proving rather than assuming.
+
+Three things have to match for that comparison to mean anything, and all three
+are pinned in the workflow: the seed, the key, and the *name* of the output
+directory — `dct:identifier` is derived from it, so building into `ds_a` and
+`ds_b` legitimately produces two different documents. That was found by running
+the comparison locally before writing the job, which is the only reason it is
+not the first thing the job reported.
 
 The two badges mean different things on purpose. **CI** is the gate: it installs
 the locked dependency set, so a red tick means the commit in front of it broke

@@ -1889,6 +1889,48 @@ stays exact. A complete list would be the dataset again with its rarest values
 highlighted — a worse artefact than the dataset itself, written into the file
 that travels.
 
+**2026-11-13 — CI now proves that the same inputs produce the same bytes on
+Ubuntu and on Windows.** Recording a SHA-256 per file made this checkable, and
+for a tool whose whole point is to produce artefacts somebody will verify later,
+"probably reproducible" is not a claim worth making. Each platform builds the
+same dataset from the same seed and the same key, uploads its manifest, and a
+third job compares the `integrity.files` maps.
+
+**Only `integrity.files` is compared**, because the rest of the manifest
+legitimately differs: `generated_at` is a timestamp and `tool_versions` names
+the interpreter. The manifest excludes itself from its own digest list, which is
+what makes this comparison possible at all — a document containing a timestamp
+cannot be digested into a reproducible list that includes itself.
+
+**Three things had to be pinned, and the third was a surprise.** The seed and
+the key are obvious. The third is the *name* of the output directory:
+`dct:identifier` is `urn:commissura:<directory name>`, so a build into `ds_a`
+and one into `ds_b` differ in exactly one file and for a completely legitimate
+reason. My first local comparison reported `healthdcat-ap.jsonld` as
+non-deterministic and it was the test that was wrong. Running the comparison
+locally before writing the CI job is the only reason that is a footnote rather
+than a morning spent reading CI logs.
+
+**The key is a published test vector**, the bytes `0x00` to `0x1f` in order,
+which is what the test suite already uses. It is written by the workflow rather
+than committed, because `.gitignore` excludes `*.key` for a reason and this file
+has no business existing outside a CI run. It pseudonymises synthetic data in a
+throwaway runner; a comment in the workflow says so, so nobody later mistakes it
+for something that could be reused.
+
+**Checked by sabotage before being trusted**, the same discipline as the
+`--key` guard: the comparison script was extracted from the YAML, run against
+two real manifests — which it declared identical — and then run again with one
+digest altered, which it rejected while naming the file. A comparison nobody has
+watched fail is a comparison nobody has tested. The embedded Python is also
+compiled out of the YAML by hand, because a syntax error there is a round trip
+through CI to discover.
+
+What it also establishes, quietly: the corpus and dataset writers really do put
+identical bytes on every platform. Checked while here — every file in a built
+dataset is LF-terminated on Windows, which is the `newline=""` discipline the
+brief has argued for since the beginning actually holding.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

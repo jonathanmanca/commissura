@@ -108,3 +108,122 @@ jobs:
 
       - name: Test
         run: uv run pytest
+
+  reproducible:
+    # Now that `build` records a SHA-256 per file, reproducibility is a property
+    # that can be *proved* rather than assumed — and for a tool whose output is
+    # meant to be verified later, assuming it is not good enough. Each platform
+    # builds the same dataset from the same seed and the same key and uploads
+    # its manifest; the job below compares the digest lists.
+    #
+    # Three things have to match for this to mean anything, and all three are
+    # set here rather than left to chance: the seed, the key, and the output
+    # directory's *name* — `dct:identifier` is derived from it, so building into
+    # `ds_a` and `ds_b` produces two legitimately different documents. That was
+    # found by running the comparison locally before writing this job.
+    name: Reproducible bytes on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and Python 3.14
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Create the environment
+        run: uv venv
+
+      - name: Install the project, from the lock
+        run: uv sync --locked
+
+      # A published test vector, not a secret: the bytes 0x00 to 0x1f in order,
+      # which is also what the test suite uses. It pseudonymises synthetic data
+      # in a throwaway runner and must never be used for anything else. Written
+      # here rather than committed, because `.gitignore` excludes `*.key` for a
+      # reason and this file should not exist outside a CI run.
+      - name: Write the reproducibility test key
+        shell: bash
+        run: |
+          printf '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\n' > ci-test-vector.key
+
+      - name: Generate a corpus
+        shell: bash
+        run: uv run commissura generate --subjects 10 --seed 99 --defect-rate 0.3 --out ./raw
+
+      - name: Build the dataset
+        shell: bash
+        run: |
+          uv run commissura build ./raw --out ./dataset \
+            --key-file ./ci-test-vector.key \
+            --hdab "Agenzia Nazionale Sintetica per i Dati Sanitari" \
+            --publisher "IRCCS SINTETICO MAREBIANCO" \
+            --contact-point "dati@irccs-sintetico.invalid" \
+            --access-url "https://portale-hdab-sintetico.invalid/permessi"
+
+      - name: Confirm the dataset verifies against its own manifest
+        shell: bash
+        run: uv run commissura verify ./dataset --key-file ./ci-test-vector.key
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifest-${{ matrix.os }}
+          path: dataset/.deident/manifest.json
+          retention-days: 7
+
+  compare-platforms:
+    # The comparison itself. Separate job because it needs both manifests, and
+    # `needs` is the only way to be sure both exist.
+    name: Same bytes everywhere
+    runs-on: ubuntu-latest
+    needs: reproducible
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-*
+          path: manifests
+
+      - name: Compare the per-file digests
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          # Only `integrity.files` is compared. The rest of the manifest
+          # legitimately differs between platforms: `generated_at` is a
+          # timestamp and `tool_versions` names the interpreter.
+          found = {}
+          for path in sorted(pathlib.Path("manifests").rglob("manifest.json")):
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              found[path.parent.name] = payload["integrity"]["files"]
+
+          if len(found) < 2:
+              sys.exit(f"expected two manifests, found {sorted(found)}")
+
+          (first, baseline), *rest = sorted(found.items())
+          print(f"{first}: {len(baseline)} files")
+          failed = False
+          for name, other in rest:
+              print(f"{name}: {len(other)} files")
+              differing = sorted(
+                  key for key in set(baseline) | set(other)
+                  if baseline.get(key) != other.get(key)
+              )
+              if differing:
+                  failed = True
+                  print(f"\n{len(differing)} file(s) differ between {first} and {name}:")
+                  for key in differing[:20]:
+                      print(f"  {key}")
+                      print(f"    {first}: {baseline.get(key, '(absent)')}")
+                      print(f"    {name}: {other.get(key, '(absent)')}")
+          if failed:
+              sys.exit("the same inputs did not produce the same bytes")
+          print("\nIdentical on every platform.")
+          PY
