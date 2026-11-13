@@ -415,7 +415,11 @@ def _typed(iri: str, rdf_type: str, label: str = "") -> dict[str, object]:
 
 
 def write_healthdcat_description(
-    out: Path, *, spec: BuildSpec, summary: BuildSummary
+    out: Path,
+    *,
+    spec: BuildSpec,
+    summary: BuildSummary,
+    dataset_name: str | None = None,
 ) -> dict[str, object]:
     """Write ``healthdcat-ap.jsonld`` and return what it contains.
 
@@ -429,6 +433,10 @@ def write_healthdcat_description(
         out: Dataset root.
         spec: What the data holder supplied.
         summary: Used for the record and participant counts.
+        dataset_name: The name of the directory the dataset will be published
+            to, which ``dct:identifier`` is derived from. Needed because builds
+            are staged, so the directory being written to is not the one the
+            dataset ends up in. Defaults to ``summary.root.name``.
 
     Returns:
         The JSON-LD payload.
@@ -438,7 +446,13 @@ def write_healthdcat_description(
         "dct:title": spec.dataset_name,
         "dct:description": spec.description,
         "dct:accessRights": _typed(healthdcat.TIER_ACCESS_RIGHT[spec.tier], "dct:RightsStatement"),
-        "dct:identifier": f"urn:commissura:{summary.root.name}",
+        # The *published* directory's name, which is not the directory being
+        # written to: builds are staged, so `summary.root` here is
+        # `<name>.commissura-staging-<pid>`. Deriving the identifier from it
+        # would put a process id into the dataset's own name and make two runs
+        # of the same corpus differ in exactly one file -- which is the trap the
+        # cross-platform reproducibility job was built to catch, and did.
+        "dct:identifier": f"urn:commissura:{dataset_name or summary.root.name}",
         # Mandatory at 1..*, and a dataset on a hospital disk still needs one:
         # the profile assumes the data is distributable, so a description has to
         # say in what form it would be. The Distribution shape requires its own

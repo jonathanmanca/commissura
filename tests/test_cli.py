@@ -519,24 +519,29 @@ def test_build_appears_in_the_command_list() -> None:
     assert "build" in result.stdout
 
 
-def test_build_fails_when_its_output_does_not_conform(tmp_path: Path) -> None:
-    """Building into a directory that already holds a stale subject.
+def test_build_refuses_a_destination_that_is_not_its_own_output(tmp_path: Path) -> None:
+    """A non-empty directory holding no manifest is somebody else's, and is refused.
 
-    The pre-existing `sub-` directory is not in the participants table build
-    writes, so PT006 fires. The command must report the finding and exit
-    non-zero rather than announce success over a broken dataset.
+    This test used to assert the opposite outcome: that a stale `sub-` directory
+    left in the destination would be *reported* by the validator, exit 1, after
+    the build had already written over the directory. Staging makes the question
+    moot for our own output -- a rebuild replaces the tree wholesale -- and turns
+    this case into the one that matters, which is a mistyped `--out` aimed at a
+    directory this tool did not write. Nothing is published and nothing is
+    removed.
     """
     raw, key = _raw_corpus(tmp_path), _key(tmp_path)
-    stale = tmp_path / "dataset" / "sub-ffffffffffff" / "ses-01" / "lab"
-    stale.mkdir(parents=True)
-    (stale / "sub-ffffffffffff_ses-01_lab.tsv").write_text(
-        "day_offset\tloinc_code\tvalue\tunit\n0\t718-7\t14.1\tg/dL\n", encoding="utf-8"
-    )
+    destination = tmp_path / "dataset"
+    destination.mkdir()
+    (destination / "thesis.tex").write_text("not a dataset", encoding="utf-8")
 
     result = runner.invoke(app, _build_args(tmp_path, raw, key))
-    assert result.exit_code == 1
-    assert "DOES NOT CONFORM" in result.stdout
-    assert "PT006" in result.stdout
+
+    assert result.exit_code == 2
+    assert "does not look like a commissura dataset" in (result.stderr or result.output)
+    # Untouched, which is the whole point.
+    assert (destination / "thesis.tex").read_text(encoding="utf-8") == "not a dataset"
+    assert sorted(p.name for p in destination.iterdir()) == ["thesis.tex"]
 
 
 def test_build_writes_the_risk_report_so_validate_stops_warning(tmp_path: Path) -> None:

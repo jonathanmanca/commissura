@@ -423,36 +423,50 @@ def write_report(
     manifest: dict[str, object],
     risk: dict[str, object],
     comparisons: int = DEFAULT_COMPARISONS,
+    destination: Path | None = None,
 ) -> Path:
     """Write the HTML report, refusing to put it inside the dataset.
 
     Args:
         path: Where to write it.
         corpus: The corpus built from.
-        summary: What the build produced.
+        summary: What the build produced. ``summary.root`` is the tree the files
+            were written to, which during a staged build is not where they will
+            end up.
         manifest: The manifest payload.
         risk: The risk report payload.
         comparisons: How many before/after pairs to include.
+        destination: Where the dataset will be published, when that differs
+            from ``summary.root``. Both are refused.
 
     Returns:
         The path written.
 
     Raises:
-        ValueError: If the path is inside the dataset directory. Refused rather
-            than warned about: a file there would be digested into the
-            manifest's integrity list and released with the dataset, and the
-            page holds unredacted reports. The obvious thing to type is
+        ValueError: If the path is inside either tree. Refused rather than
+            warned about: a file there would be digested into the manifest's
+            integrity list and released with the dataset, and the page holds
+            unredacted reports. The obvious thing to type is
             ``--report ./dataset/report.html``, which is exactly the mistake.
     """
     resolved = path.resolve()
-    dataset = summary.root.resolve()
-    if resolved == dataset or dataset in resolved.parents:
-        raise ValueError(
-            f"refusing to write {resolved} inside the dataset at {dataset}. "
-            "This report contains unredacted reports; a file inside the dataset "
-            "is digested into the manifest and shipped with the release. Put it "
-            "somewhere that does not travel."
-        )
+    # Both trees, and this is not belt-and-braces. Builds are staged, so during
+    # one `summary.root` is a directory beside the destination that will *become*
+    # the dataset -- a file written into it is published with everything else.
+    # Checking only `summary.root` would have let `--report ./dataset/x.html`
+    # through from the moment staging was introduced, which is what happened: the
+    # test for this guard caught it the same afternoon.
+    forbidden = [summary.root.resolve()]
+    if destination is not None:
+        forbidden.append(destination.resolve())
+    for tree in forbidden:
+        if resolved == tree or tree in resolved.parents:
+            raise ValueError(
+                f"refusing to write {resolved} inside the dataset at {tree}. "
+                "This report contains unredacted reports; a file inside the dataset "
+                "is digested into the manifest and shipped with the release. Put it "
+                "somewhere that does not travel."
+            )
 
     document = render(
         corpus=corpus,

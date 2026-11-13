@@ -24,6 +24,7 @@ from commissura import __version__, layout
 from commissura import healthdcat as healthdcat_module
 from commissura.build.integrity import verify_dataset
 from commissura.build.manifest import write_healthdcat_description, write_manifest
+from commissura.build.publish import PublicationError, abandon, begin, publish
 from commissura.build.report import DEFAULT_COMPARISONS, write_report
 from commissura.build.risk import K_THRESHOLD, assess, write_risk_report
 from commissura.build.writer import BuildSpec, build_dataset
@@ -542,14 +543,37 @@ def build(
         access_url=access_url,
         dataset_type=dataset_type,
     )
-    summary = build_dataset(corpus, key, spec, out)
-    write_healthdcat_description(out, spec=spec, summary=summary)
-    risk = write_risk_report(out)
-    # The manifest goes last, because it digests every other file in the tree.
-    # Written earlier it would describe a dataset that did not exist yet, and
-    # `commissura verify` would report the two documents written after it as
-    # additions on a dataset nobody had touched.
-    manifest = write_manifest(out, corpus=corpus, summary=summary, key=key, spec=spec)
+    # Everything is assembled in a staging directory beside the destination and
+    # moved into place at the end. A build used to write straight into `out`,
+    # which left a previous build's files wherever this one did not happen to
+    # overwrite them -- so a record withdrawn from the corpus survived the
+    # rebuild, was digested into the new manifest, and was then certified
+    # `INTACT` by `commissura verify`. See the audit of 2026-11-13, finding 3.
+    try:
+        staged = begin(out)
+    except PublicationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+
+    working = staged.root
+    try:
+        summary = build_dataset(corpus, key, spec, working)
+        write_healthdcat_description(
+            working, spec=spec, summary=summary, dataset_name=staged.destination.name
+        )
+        risk = write_risk_report(working)
+        # The manifest goes last, because it digests every other file in the
+        # tree. Written earlier it would describe a dataset that did not exist
+        # yet, and `commissura verify` would report the two documents written
+        # after it as additions on a dataset nobody had touched.
+        manifest = write_manifest(working, corpus=corpus, summary=summary, key=key, spec=spec)
+        # Validated while still staged, so the verdict is about what is being
+        # published rather than about what has already replaced the previous
+        # dataset.
+        report = validate_dataset(working) if validate_output else None
+    except Exception:
+        abandon(staged)
+        raise
 
     written_report: Path | None = None
     if report_to is not None:
@@ -561,12 +585,21 @@ def build(
                 manifest=manifest,
                 risk=risk,
                 comparisons=comparisons,
+                destination=staged.destination,
             )
         except (ValueError, OSError) as exc:
+            abandon(staged)
             typer.echo(str(exc), err=True)
             raise typer.Exit(1) from None
 
-    report = validate_dataset(out) if validate_output else None
+    try:
+        published = publish(staged)
+    except PublicationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    # The summary was built against the staging path; the dataset is at the
+    # destination now, and every line printed below names it.
+    summary.root = published
 
     if as_json:
         typer.echo(
@@ -829,6 +862,18 @@ def verify(
                 "  Note: without the key this detects accident, not tampering. "
                 "The digests live in the manifest."
             )
+        # Four different claims, and conflating them is how a holder comes to
+        # believe that a verified dataset is a correct one. The audit of
+        # 2026-11-13 found a dataset holding a withdrawn record that verified
+        # perfectly -- correctly, because the bytes had not changed since the
+        # manifest was written. Integrity is not completeness.
+        typer.echo(
+            "  This does not prove completeness or correctness: a dataset still holding a record"
+        )
+        typer.echo(
+            "  withdrawn from the corpus verifies cleanly, because its bytes have not changed."
+        )
+        typer.echo("  Rebuild from the current corpus to publish a withdrawal.")
         return
 
     typer.echo("")
