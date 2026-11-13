@@ -1836,6 +1836,59 @@ same logic twice and hoping the two agreed.
 And one behaviour: a comparison whose source file has since moved is skipped
 rather than raised. A picture of a build must not be able to fail the build.
 
+**2026-11-13 — `risk` now measures the rarity of laboratory values, and the
+honest answer is that almost everything is unique.** The demographic assessment
+asks who is alone on age and sex. This asks who is alone on a *measurement*,
+which is the same question about a column nobody thinks of as identifying: a
+haemoglobin of 13.2 that nobody else in the cohort shares is a handle on
+whoever has it, for anyone who knows that one value — and a clinician, a
+relative or a previous employer may well know it.
+
+**The number, on a sixty-subject corpus: 469 of 478 analyte-and-value
+combinations are shared by fewer than five subjects. 98.1%.** On eight subjects
+it was 100%. Tripling the cohort moved it two points. That is not a defect in
+the dataset and not something a bigger cohort fixes: a measured value is a
+near-unique quantity rather than a category, so **full k-anonymity over
+continuous multivariate clinical data is not reachable at all**.
+
+Which is worth stating because it explains the shape of the regulation this
+project is built against. The EHDS does not protect secondary use by demanding
+anonymisation; it protects it with **data permits and secure processing
+environments**, because for data like this anonymisation is not available. The
+report is a measurement handed to whoever makes that judgement. A test asserts
+the note says so — that it contains "not a certificate of anonymity" and "not
+reachable" — because the one way this section could do harm is by being read as
+a clearance.
+
+**Counted per subject and not per row**, which took a moment to see and matters.
+The same person measured three times at the same value is one person. A row
+count would report a patient with frequent bloods as *less* identifiable than
+one with a single test, which is exactly backwards, and a test pins it.
+
+**It reports and does not correct, and that is the substantive decision.** Every
+available remedy destroys what the data is for:
+
+- **Suppressing rare rows** removes the unusual value, which is simultaneously
+  the re-identification risk and the reason somebody asked for the dataset.
+- **Top and bottom coding** removes the extremes, where the clinically
+  interesting cases live by definition.
+- **Rounding into bands** does the same thing more quietly: a creatinine banded
+  to the nearest whole number is a different measurement, and nothing
+  downstream can tell.
+- **Adding noise** is worse in a clinical setting than in most. An analyst who
+  does not know how far wrong their numbers are cannot reason about them at
+  all; the usual defence — that the distribution is preserved — is no comfort
+  to somebody asking a question about one patient.
+
+And the choice between them depends on the permit, the recipient and the release
+arrangement, which only the data holder knows. A tool that silently banded the
+values would be making that call on their behalf and hiding it in a build log.
+
+One sizing decision: the listing is capped at fifty combinations while the count
+stays exact. A complete list would be the dataset again with its rarest values
+highlighted — a worse artefact than the dataset itself, written into the file
+that travels.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

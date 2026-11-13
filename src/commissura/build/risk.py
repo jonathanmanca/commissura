@@ -11,9 +11,32 @@ The quasi-identifiers are the recommended participant columns, ``age`` and
 :data:`commissura.layout.RECOMMENDED_PARTICIPANT_COLUMNS` rather than listing
 them again means adding a column to the table also adds it to the assessment.
 
+A second assessment covers the laboratory values, where the same reasoning
+applies to clinical measurements rather than to demographics: a result nobody
+else in the cohort shares is a handle on whoever has it. That one answers a
+harsher question and the answer is usually worse, which is the point — see
+:func:`assess_laboratory`.
+
+**Neither assessment alters the data, and that is a decision rather than an
+omission.** Every remedy — suppressing rare rows, top and bottom coding,
+rounding to bands — destroys exactly the clinically interesting cases, because
+the unusual value is both the re-identification risk and the reason somebody
+wants the dataset. Adding noise is worse in a clinical setting than in most:
+an analyst who does not know how far wrong their numbers are cannot reason
+about them at all. Which remedy is acceptable depends on the release
+arrangement, the permit and the recipient, and only the data holder knows
+those. So this measures and reports; the choice is theirs.
+
 What this deliberately is not: an Article 78 quality and utility label. The
 criteria for that are not published — the EU project QUANTUM is still developing
 them — so there is nothing to build against yet.
+
+And what it must never be read as: a certificate of anonymity. For continuous,
+multivariate clinical data full k-anonymity is not reachable at all, and the
+numbers below say so plainly rather than implying a threshold was met. That
+unreachability is not a gap in this tool — it is the reason the EHDS protects
+secondary use with secure processing environments and data permits instead of
+with anonymisation.
 """
 
 from __future__ import annotations
@@ -25,6 +48,15 @@ from pathlib import Path
 from commissura import layout
 from commissura.validate.context import DatasetContext
 
+LABORATORY_SAMPLE = 50
+"""How many rare laboratory combinations to list, out of however many there are.
+
+On continuous values nearly every combination is unique, so a complete list
+would be the dataset again with its rarest values highlighted — a worse artefact
+than the dataset itself, written into a file that travels. The count is always
+exact; the listing is a sample to look at.
+"""
+
 K_THRESHOLD = 5
 """Combinations shared by fewer than this many participants are flagged.
 
@@ -33,6 +65,100 @@ this project's brief names. It is a convention, not a law: a cohort of forty
 cannot reach it on age and sex together, which is a property of small cohorts
 rather than a mistake in the dataset.
 """
+
+
+def assess_laboratory(root: Path, *, threshold: int = K_THRESHOLD) -> dict[str, object]:
+    """Measure how many subjects share each analyte-and-value combination.
+
+    The demographic assessment asks who is unique on age and sex. This asks who
+    is unique on a measurement, which is the same question about a column nobody
+    thinks of as identifying. A haemoglobin of 13.2 shared by nobody else in the
+    cohort is a handle on whoever has it, for anyone who knows that one value.
+
+    Counted **per subject, not per row**. The same person measured twice at the
+    same value is one person, and counting rows would report a patient with
+    frequent bloods as less identifiable than one with a single test, which is
+    backwards.
+
+    Args:
+        root: Dataset root.
+        threshold: Report combinations shared by fewer subjects than this.
+
+    Returns:
+        The laboratory section of the risk report. ``combinations_below_threshold``
+        is capped, because on continuous values almost every combination is
+        unique and a complete list would be a copy of the dataset with the
+        rarest values highlighted — which is a worse artefact than the dataset.
+
+    Raises:
+        Nothing. A dataset with no laboratory tables returns zero counts, which
+        is honest: there is nothing to assess, which is not the same as no risk.
+    """
+    context = DatasetContext(root)
+    per_combination: dict[tuple[str, str], set[str]] = {}
+
+    for data_file in context.files_of_datatype("lab"):
+        if data_file.path.suffix != ".tsv":
+            continue
+        table = context.read_tsv(data_file.relative)
+        header = table.header
+        if "loinc_code" not in header or "value" not in header:
+            continue
+        analyte, measured = header.index("loinc_code"), header.index("value")
+        for row in table.rows:
+            if len(row) <= max(analyte, measured):
+                continue
+            code, value = row[analyte].strip(), row[measured].strip()
+            if not code or not value or layout.NOT_APPLICABLE in (code, value):
+                continue
+            per_combination.setdefault((code, value), set()).add(data_file.subject)
+
+    if not per_combination:
+        return {
+            "subjects_with_results": 0,
+            "distinct_combinations": 0,
+            "threshold": threshold,
+            "minimum_k": None,
+            "combinations_below_threshold": [],
+            "below_threshold_count": 0,
+            "note": (
+                "This dataset carries no laboratory values to assess. That is not "
+                "the same as no risk."
+            ),
+        }
+
+    counts = {key: len(subjects) for key, subjects in per_combination.items()}
+    below = sorted(
+        (key for key, count in counts.items() if count < threshold),
+        key=lambda key: (counts[key], key),
+    )
+    subjects = {subject for subjects in per_combination.values() for subject in subjects}
+
+    return {
+        "subjects_with_results": len(subjects),
+        "distinct_combinations": len(counts),
+        "threshold": threshold,
+        "minimum_k": min(counts.values()),
+        "below_threshold_count": len(below),
+        "combinations_below_threshold": [
+            {"loinc_code": code, "value": value, "k": counts[(code, value)]}
+            for code, value in below[:LABORATORY_SAMPLE]
+        ],
+        "combinations_listed": min(len(below), LABORATORY_SAMPLE),
+        "note": (
+            f"{len(below)} of {len(counts)} analyte-and-value combinations are "
+            f"shared by fewer than {threshold} subjects, across "
+            f"{len(subjects)} subjects with results. On continuous measurements "
+            "this is expected to be most of them: a value is a near-unique "
+            "quantity, not a category. Reported, not corrected - suppression, "
+            "banding and rounding destroy the clinically interesting cases, and "
+            "noise leaves an analyst unable to say how wrong their numbers are. "
+            "This is a measurement and not a certificate of anonymity; for "
+            "continuous multivariate clinical data full k-anonymity is not "
+            "reachable, which is why the EHDS protects secondary use with secure "
+            "processing environments and data permits instead."
+        ),
+    }
 
 
 def assess(root: Path, *, threshold: int = K_THRESHOLD) -> dict[str, object]:
@@ -60,6 +186,7 @@ def assess(root: Path, *, threshold: int = K_THRESHOLD) -> dict[str, object]:
                 "The participants table carries none of the quasi-identifier columns, "
                 "so there is nothing to assess. That is not the same as no risk."
             ),
+            "laboratory_values": assess_laboratory(root, threshold=threshold),
         }
 
     indices = [table.header.index(c) for c in columns]
@@ -85,6 +212,7 @@ def assess(root: Path, *, threshold: int = K_THRESHOLD) -> dict[str, object]:
             f"fewer than {threshold} participants. A combination with k=1 identifies "
             "one person to anyone who knows they took part."
         ),
+        "laboratory_values": assess_laboratory(root, threshold=threshold),
     }
 
 

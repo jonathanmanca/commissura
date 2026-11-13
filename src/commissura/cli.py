@@ -708,6 +708,28 @@ def risk(
     if len(below) > 10:
         typer.echo(f"    ... and {len(below) - 10} more")
 
+    lab = payload.get("laboratory_values")
+    if isinstance(lab, dict) and lab.get("distinct_combinations"):
+        total = lab["distinct_combinations"]
+        rare = lab["below_threshold_count"]
+        assert isinstance(total, int) and isinstance(rare, int)
+        typer.echo("")
+        typer.echo(f"  laboratory values      {lab['subjects_with_results']} subject(s)")
+        typer.echo(f"  analyte-value combos   {total}")
+        typer.echo(
+            f"  below k={threshold}              {rare}"
+            f"  ({100 * rare / total:.1f}% of combinations)"
+        )
+        typer.echo(f"  minimum k              {lab['minimum_k']}")
+        typer.echo("")
+        typer.echo("  Reported, not corrected: suppression, banding and rounding")
+        typer.echo("  destroy the clinically interesting cases, and noise leaves an")
+        typer.echo("  analyst unable to say how wrong their numbers are. Which remedy")
+        typer.echo("  is acceptable depends on the release, and that is yours to pick.")
+        typer.echo("  Not a certificate of anonymity: on continuous multivariate")
+        typer.echo("  clinical data full k-anonymity is not reachable, which is why")
+        typer.echo("  the EHDS protects with secure environments and permits instead.")
+
 
 @app.command()
 def verify(

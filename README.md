@@ -804,6 +804,56 @@ Record numbers are compared with leading zeros stripped, which recovers the
 subjects, no imaging study is lost. That defect is the one that silently halves
 a cohort when somebody joins on the raw identifier.
 
+#### And over the laboratory values
+
+```
+  laboratory values      60 subject(s)
+  analyte-value combos   478
+  below k=5              469  (98.1% of combinations)
+  minimum k              1
+```
+
+The same question as age and sex, asked of a column nobody calls identifying. A
+haemoglobin of 13.2 that nobody else in the cohort shares is a handle on
+whoever has it, for anyone who knows that one value — and a clinician, a
+relative or a previous employer may well know it.
+
+Counted **per subject, not per row.** The same person measured three times at
+the same value is one person; counting rows would report a patient with frequent
+bloods as *less* identifiable than one with a single test, which is backwards.
+
+**98.1% of 478 combinations on sixty subjects, and tripling the cohort moved
+that figure by two points.** That is the real finding and it is not a defect in
+the dataset: a measured value is a near-unique quantity, not a category, so
+almost every analyte-and-value pair belongs to one person. **Full k-anonymity
+over continuous multivariate clinical data is not reachable, and no cohort size
+gets you there.**
+
+That is worth saying plainly because it explains the shape of the whole
+regulation. The EHDS does not protect secondary use by requiring anonymisation —
+it protects it with **data permits and secure processing environments**, because
+for data like this anonymisation is not on the table. This report is a
+measurement handed to whoever makes that judgement, and it is never a
+certificate of anonymity.
+
+**It reports and does not correct**, which is a decision rather than an
+omission. Every remedy damages exactly what the data is for:
+
+| Remedy | Why not here |
+| --- | --- |
+| Suppressing rare rows | The unusual value is both the risk and the reason somebody wants the dataset |
+| Top and bottom coding | Removes the extremes, which is where the clinically interesting cases live |
+| Rounding into bands | Same, more quietly: a creatinine banded to the nearest whole number is a different measurement |
+| Adding noise | Worse in a clinical setting than most — an analyst who cannot say how far wrong their numbers are cannot reason about them at all |
+
+Which of those is acceptable depends on the permit, the recipient and the
+release arrangement, and only the data holder knows those. So `commissura`
+measures, and the choice stays with the person who has to defend it.
+
+The listing is capped at fifty combinations while the count stays exact: a
+complete list would be the dataset again with its rarest values highlighted,
+which is a worse artefact than the dataset, written into a file that travels.
+
 ### `commissura verify`
 
 ```bash
