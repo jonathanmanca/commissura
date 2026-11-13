@@ -308,19 +308,32 @@ def declared_values(dataset: Path) -> frozenset[str]:
 def _dataset_text(dataset: Path) -> dict[str, str]:
     """Read every file in the dataset as text, keyed by relative path.
 
+    **The path is searched along with the contents.** A dataset's filenames are
+    composed from pseudonymous labels, so a patient identifier cannot reach one
+    by design — but "by design" is what the manifest's own ``records_dropped``
+    field said before it was found carrying file paths named after medical record
+    numbers. An export names its files after the record they hold, and any future
+    code that carried such a name into the dataset would be invisible to a
+    measurement that only read the bytes. Prepending the path costs nothing and
+    closes that against ground truth rather than against a heuristic.
+
     Args:
         dataset: The dataset root.
 
     Returns:
-        Path to content. Undecodable bytes are replaced rather than skipped: a
-        file this cannot read is still a file an identifier could be hiding in,
-        and dropping it would quietly shrink the haystack.
+        Path to the path followed by the content. Undecodable bytes are replaced
+        rather than skipped: a file this cannot read is still a file an
+        identifier could be hiding in, and dropping it would quietly shrink the
+        haystack.
     """
-    return {
-        path.relative_to(dataset).as_posix(): path.read_text(encoding="utf-8", errors="replace")
-        for path in sorted(dataset.rglob("*"))
-        if path.is_file()
-    }
+    found: dict[str, str] = {}
+    for path in sorted(dataset.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(dataset).as_posix()
+        content = path.read_text(encoding="utf-8", errors="replace")
+        found[relative] = f"{relative}\n{content}"
+    return found
 
 
 def measure(corpus: Path, dataset: Path) -> MeasureReport:

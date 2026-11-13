@@ -34,6 +34,7 @@ which spans it missed.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Final
@@ -349,7 +350,7 @@ def scrub_text(
         )
 
     scrubbed = _collapse_runs(scrubbed)
-    report.residual_risk = _assess_residual_risk(scrubbed)
+    report.residual_risk = assess_residual_risk(scrubbed, known=known)
     return scrubbed, report
 
 
@@ -440,14 +441,138 @@ def _truncate_ages(text: str) -> tuple[str, int]:
     return _AGE_PATTERN.sub(substitute, text), count
 
 
-def _assess_residual_risk(text: str) -> list[str]:
-    """Report what the scrubber knows it cannot have removed.
+_NAME_LABELS: Final[tuple[str, ...]] = (
+    "Paziente",
+    "Nome",
+    "Assistito",
+    "Medico",
+    "Medico curante",
+    "Refertante",
+    "Richiedente",
+)
+"""Header labels whose value is a person's name, whatever its capitalisation.
 
-    Honest reporting rather than a confidence score. Each entry names a category
-    of identifier that targeted redaction cannot reach, so a reviewer knows
-    where to look rather than being told a number.
+Position, not classification. A general-purpose name detector over clinical
+prose produces more false positives than a reviewer will read, and this project
+rejects named entity recognition for de-identification. But a line beginning
+``Paziente:`` is *declared* to hold a name, so anything still sitting there
+after redaction is a residue regardless of how it is written — which is the
+whole gap the audit of 2026-11-13 found. Adapting this to another hospital's
+template is an edit here, like :data:`commissura.read.corpus._REPORT_LABELS`.
+"""
+
+_LABELLED_NAME = re.compile(
+    r"^[ \t]*(?:" + "|".join(_NAME_LABELS) + r")[ \t]*:[ \t]*(?P<value>\S.*)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+_TITLED_NAME = re.compile(r"\b(?:Dott|Dr|Prof|Sig|Sig\.ra)\.?\s+(?P<value>\S+)")
+
+_WORD = re.compile(r"[^\W\d_]{4,}", re.UNICODE)
+r"""Runs of four or more letters, accented ones included.
+
+``[A-Z]{4,}`` was the previous pattern and it could not see ``FRANCESCA
+FONTANÀ``, let alone ``Francesca Fontana``. ``[^\W\d_]`` is "a word character
+that is neither a digit nor an underscore", which under :data:`re.UNICODE` is
+every letter in every script.
+"""
+
+
+def _fold(value: str) -> str:
+    """Return a value in the form two spellings of it compare equal in.
+
+    NFKD then casefold: ``casefold`` is the aggressive sibling of ``lower``
+    designed for exactly this, and the decomposition means a composed and a
+    decomposed accent match. Used only for *comparison*, never for output.
+    """
+    return unicodedata.normalize("NFKD", value).casefold()
+
+
+def _declared_values(known: KnownIdentifiers) -> set[str]:
+    """Return every string the scrubber was told to remove, folded for comparison."""
+    values: set[str] = set()
+    for identity in known.identities:
+        values.update(
+            {
+                identity.full_name,
+                identity.family_name,
+                identity.given_name,
+                identity.national_id,
+                identity.mrn,
+            }
+        )
+    values.update(known.providers, known.institutions, known.addresses)
+    return {_fold(v) for v in values if len(v) >= _MINIMUM_REDACTABLE}
+
+
+def assess_residual_risk(text: str, *, known: KnownIdentifiers) -> list[str]:
+    """Report what the scrubber knows it cannot have removed, in three layers.
+
+    Layered on purpose, strongest first, because the three answer different
+    questions and only the first is certain:
+
+    1. **Did a value we were told about survive?** Exact, case-insensitive and
+       Unicode-insensitive, with no false positives possible: these are strings
+       the scrubber was handed and asked to remove. Nothing checked this before,
+       which is remarkable in hindsight — the scrubber counted its own
+       replacements and never looked at its own output. This is the layer that
+       catches a redaction that did not fire.
+    2. **Is something still sitting where a name is declared to be?** A line
+       beginning ``Paziente:`` holds a name by definition, so a residue there is
+       a residue whatever its capitalisation. Position does the work, which is
+       what keeps the false-positive rate bounded without a name model.
+    3. **Is there an unrecognised word that looks like an identifier?** The
+       original heuristic, now Unicode-aware. It catches what nothing declared,
+       which is its whole value, and it is the noisiest of the three.
+
+    **This is a measurement, not a clearance.** A heuristic that reports nothing
+    has reported nothing; it has not established that a document is free of
+    identifiers. The counterpart measurement is ``commissura measure``, which
+    asks the opposite question — whether the identifiers the generator planted
+    survived — and the two fail differently on purpose.
+
+    Args:
+        text: The scrubbed document.
+        known: What the scrubber was told about this subject, so that layer one
+            can check its own work.
+
+    Returns:
+        One entry per category of residue found, counted rather than quoted.
     """
     risks: list[str] = []
+
+    # --- Layer 1: a value we were given, still present. ---
+    folded = _fold(text)
+    survivors = {value for value in _declared_values(known) if value in folded}
+    if survivors:
+        lengths = sorted(len(value) for value in survivors)
+        risks.append(
+            f"{len(survivors)} value(s) this document declared are still present "
+            f"after redaction, of {_span(lengths)}. These were handed to the "
+            "scrubber by name, so this is a redaction that did not fire rather "
+            "than a limit of the method. Not quoted here: this report travels "
+            "with the dataset."
+        )
+
+    # --- Layer 2: something still where a name is declared to be. ---
+    labelled = [
+        match.group("value").strip()
+        for match in _LABELLED_NAME.finditer(text)
+        if _looks_unredacted(match.group("value"))
+    ]
+    titled = [
+        match.group("value").strip()
+        for match in _TITLED_NAME.finditer(text)
+        if _looks_unredacted(match.group("value"))
+    ]
+    if labelled or titled:
+        risks.append(
+            f"{len(labelled) + len(titled)} field(s) that declare a person's name "
+            "still carry one after redaction, in whatever case the source wrote "
+            "it. Detected by position rather than by recognising the name, which "
+            "is why case and accents do not hide it."
+        )
+
     if re.search(r"\bDott\.?\s*[A-Z]\.", text):
         risks.append(
             "an abbreviated clinician name (such as 'Dott. P.') remains: too short to "
@@ -458,10 +583,10 @@ def _assess_residual_risk(text: str) -> list[str]:
             "an institution is named in running prose after 'presso' and was not in the "
             "structured exports, so it could not be matched"
         )
-    capitalised = set(re.findall(r"\b[A-Z]{4,}\b", text))
+    capitalised = {word for word in _WORD.findall(text) if word.isupper()}
     capitalised -= _PROSE_HEADINGS
     capitalised -= {
-        word for placeholder in _ALL_PLACEHOLDERS for word in re.findall(r"[A-Z]{4,}", placeholder)
+        word for placeholder in _ALL_PLACEHOLDERS for word in _WORD.findall(placeholder)
     }
     if capitalised:
         # Counted, not quoted. These tokens are by construction the ones most
@@ -475,15 +600,32 @@ def _assess_residual_risk(text: str) -> list[str]:
         # removed, and it was here. The reviewer still gets what they need —
         # `ScrubReport.path` names the document, and the count and length
         # bound say what to look for in it.
-        lengths = sorted(len(token) for token in capitalised)
-        span = (
-            f"{lengths[0]} characters"
-            if lengths[0] == lengths[-1]
-            else f"{lengths[0]} to {lengths[-1]} characters"
-        )
         risks.append(
-            f"{len(capitalised)} unrecognised all-capitals token(s) remain, of {span}, "
-            "which in this corpus is how names are written. Not quoted here: this "
-            "report travels with the dataset."
+            f"{len(capitalised)} unrecognised all-capitals token(s) remain, of "
+            f"{_span(sorted(len(token) for token in capitalised))}. Nothing declared "
+            "them, so this is the layer that catches what was not anticipated. Not "
+            "quoted here: this report travels with the dataset."
         )
     return risks
+
+
+def _span(lengths: list[int]) -> str:
+    """Describe a set of token lengths without quoting the tokens."""
+    if lengths[0] == lengths[-1]:
+        return f"{lengths[0]} characters"
+    return f"{lengths[0]} to {lengths[-1]} characters"
+
+
+def _looks_unredacted(value: str) -> bool:
+    """Return whether a declared-name field still holds something worth reporting.
+
+    False for a value that is only placeholders, which is what a successful
+    redaction leaves, and false for something too short to be a name — the same
+    floor the scrubber refuses to replace below, so the detector is not scored
+    on an exam the method was not given.
+    """
+    remaining = value
+    for placeholder in _ALL_PLACEHOLDERS:
+        remaining = remaining.replace(placeholder, " ")
+    remaining = re.sub(r"\[day_offset:-?\d+\]", " ", remaining)
+    return any(len(word) >= _MINIMUM_REDACTABLE for word in _WORD.findall(remaining))
