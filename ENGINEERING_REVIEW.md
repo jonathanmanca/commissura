@@ -371,11 +371,14 @@ a set of subjects, or into reported reasons why it cannot.
 @dataclass(frozen=True, slots=True)
 class SubjectKey:
     """What makes two records the same person, and from which authority."""
-    national_id: str          # validated and normalised, or empty
-    authority: str            # normalised assigning authority or sending facility
+
+    national_id: str  # validated and normalised, or empty
+    authority: str  # normalised assigning authority or sending facility
+
 
 class IdentityIndex:
     """Resolves records to subjects, or refuses and says why."""
+
     def establish(self, record: LabRecord) -> SubjectKey | Conflict: ...
     def resolve_record_number(self, mrn: str, authority: str) -> SubjectKey | Ambiguity: ...
 ```
