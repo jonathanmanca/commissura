@@ -314,6 +314,11 @@ def _known_identifiers(corpus: RawCorpus, subject: Subject) -> KnownIdentifiers:
     for other in corpus.subjects:
         for study in other.imaging:
             addresses.update(_address_parts(study.institution_address))
+            if study.institution_name:
+                institutions.add(study.institution_name)
+                institutions.update(
+                    part for part in study.institution_name.split() if len(part) >= 4
+                )
     # And from the reports themselves, anchored on an institution we already
     # know. `commissura measure` found this: a site that sent laboratory
     # messages and wrote reports but produced no imaging study had its street
@@ -331,7 +336,7 @@ def _known_identifiers(corpus: RawCorpus, subject: Subject) -> KnownIdentifiers:
         for report in other.reports:
             addresses.update(_address_after_institution(report.text, institutions))
     return KnownIdentifiers(
-        identity=subject.identity,
+        identities=tuple(subject.identities),
         providers=frozenset(providers),
         institutions=frozenset(institutions),
         addresses=frozenset(addresses),
@@ -363,7 +368,7 @@ def build_dataset(corpus: RawCorpus, key: SecretKey, spec: BuildSpec, out: Path)
     participant_rows: list[list[str]] = []
 
     for subject in corpus.subjects:
-        label = pseudonymiser.subject_label(subject.identity.national_id)
+        label = pseudonymiser.subject_label_for(subject.key)
         directory = f"{layout.SUBJECT_PREFIX}{label}"
         baseline = subject.baseline
         known = _known_identifiers(corpus, subject)

@@ -160,9 +160,24 @@ class KnownIdentifiers:
     are per-corpus rather than per-subject: a clinician who signed one report
     signs others, and removing their name everywhere is both safer and cheaper
     than deciding case by case.
+
+    **``identities`` is plural, and that is a correctness property rather than a
+    convenience.** A subject assembled from several laboratory messages has one
+    identity per message, and they can differ — a second institution spells the
+    given name differently or sends its own record number. This used to carry
+    one identity, so every name in the others was a name redaction never looked
+    for. The audit of 2026-11-13 leaked a patient's full name through exactly
+    that gap. Every identity the subject carries contributes its names, its
+    identifiers and its birth date to the plan.
+
+    Attributes:
+        identities: Every identity observed for this subject, primary first.
+        providers: Clinician names, gathered across the corpus.
+        institutions: Institution names, gathered across the corpus.
+        addresses: Institution address fragments, gathered across the corpus.
     """
 
-    identity: Identity
+    identities: tuple[Identity, ...]
     providers: frozenset[str] = frozenset()
     institutions: frozenset[str] = frozenset()
     addresses: frozenset[str] = frozenset()
@@ -197,6 +212,45 @@ Listed so the risk detector does not report a heading as an identifier it
 failed to remove. A real corpus would need its own list, which is why this
 is a named constant rather than a literal buried in the detector.
 """
+
+
+def _identity_entries(
+    identities: tuple[Identity, ...],
+) -> list[tuple[str, str, str]]:
+    """Return the redaction entries for every identity a subject carries.
+
+    Order within one identity is the order that was already here: the full name
+    before its parts, so ``MARIO ROSSI`` is replaced once rather than leaving a
+    doubled placeholder. Order between identities is the order they were
+    observed, primary first, which keeps the plan deterministic.
+
+    Longest first within each category would be another defensible order, and is
+    deliberately not used: the full name is already the longest form of a name,
+    and reordering identifiers against each other would make the plan depend on
+    the data rather than on the schema.
+
+    Args:
+        identities: Every identity observed for one subject.
+
+    Returns:
+        ``(category, value, placeholder)`` entries, duplicates removed.
+    """
+    entries: list[tuple[str, str, str]] = []
+    for identity in identities:
+        entries += [
+            ("person_name", identity.full_name, PLACEHOLDER_NAME),
+            ("national_id", identity.national_id, PLACEHOLDER_NATIONAL_ID),
+            ("patient_id", identity.mrn, PLACEHOLDER_PATIENT_ID),
+            ("person_name", identity.family_name, PLACEHOLDER_NAME),
+            ("person_name", identity.given_name, PLACEHOLDER_NAME),
+        ]
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[tuple[str, str, str]] = []
+    for entry in entries:
+        if entry not in seen:
+            seen.add(entry)
+            unique.append(entry)
+    return unique
 
 
 def _replace_all(text: str, needle: str, placeholder: str) -> tuple[str, int]:
@@ -238,7 +292,6 @@ def scrub_text(
     """
     report = ScrubReport(path=path)
     scrubbed = text
-    identity = known.identity
 
     # Self-contained tokens go first. An email address contains the patient's
     # own surname, so an exact-match substitution reaching inside it would
@@ -262,13 +315,11 @@ def scrub_text(
         # also the single most identifying date a record holds.
         *(
             ("date_of_birth", rendered, PLACEHOLDER_BIRTH_DATE)
-            for rendered in _render_date_forms(identity.birth_date)
+            for one in known.identities
+            if one.birth_date
+            for rendered in _render_date_forms(one.birth_date)
         ),
-        ("person_name", identity.full_name, PLACEHOLDER_NAME),
-        ("national_id", identity.national_id, PLACEHOLDER_NATIONAL_ID),
-        ("patient_id", identity.mrn, PLACEHOLDER_PATIENT_ID),
-        ("person_name", identity.family_name, PLACEHOLDER_NAME),
-        ("person_name", identity.given_name, PLACEHOLDER_NAME),
+        *_identity_entries(known.identities),
     ]
     ordered += [
         ("institution", name, PLACEHOLDER_INSTITUTION) for name in sorted(known.institutions)
@@ -302,15 +353,13 @@ def scrub_text(
     return scrubbed, report
 
 
-def _render_date_forms(value: date | None) -> tuple[str, ...]:
+def _render_date_forms(value: date) -> tuple[str, ...]:
     """Return the ways one date is written in clinical prose.
 
     Redacting a known date by exact match is stronger than finding it by shape,
     because it cannot confuse a birth date with an appointment. It needs every
     rendering a report might use, which is what this produces.
     """
-    if value is None:
-        return ()
     forms = {
         value.strftime("%d/%m/%Y"),
         value.strftime("%d.%m.%Y"),

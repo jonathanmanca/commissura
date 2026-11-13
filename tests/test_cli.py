@@ -843,9 +843,9 @@ def test_whois_reads_the_identifier_from_stdin(tmp_path: Path) -> None:
     """So a codice fiscale need not go into shell history, as the key does not."""
     key = _key(tmp_path)
 
-    typed = runner.invoke(app, ["whois", "RSSMRA80A01X000A", "--key-file", str(key), "--json"])
+    typed = runner.invoke(app, ["whois", "RSSMRA80A01X000Z", "--key-file", str(key), "--json"])
     piped = runner.invoke(
-        app, ["whois", "--key-file", str(key), "--json"], input="RSSMRA80A01X000A\n"
+        app, ["whois", "--key-file", str(key), "--json"], input="RSSMRA80A01X000Z\n"
     )
 
     assert piped.exit_code == 0
@@ -861,7 +861,7 @@ def test_whois_is_pure_derivation(tmp_path: Path) -> None:
     """
     key = _key(tmp_path)
 
-    absent = runner.invoke(app, ["whois", "VRDGPP85B02X000B", "--key-file", str(key), "--json"])
+    absent = runner.invoke(app, ["whois", "VRDGPP85B02X000I", "--key-file", str(key), "--json"])
 
     assert absent.exit_code == 0
     assert len(json.loads(absent.stdout)["subject_label"]) == 12
@@ -872,8 +872,8 @@ def test_whois_gives_different_labels_under_different_keys(tmp_path: Path) -> No
     first, second = _key(tmp_path), tmp_path / "other.key"
     assert runner.invoke(app, ["keygen", "--out", str(second)]).exit_code == 0
 
-    one = runner.invoke(app, ["whois", "RSSMRA80A01X000A", "--key-file", str(first), "--json"])
-    two = runner.invoke(app, ["whois", "RSSMRA80A01X000A", "--key-file", str(second), "--json"])
+    one = runner.invoke(app, ["whois", "RSSMRA80A01X000Z", "--key-file", str(first), "--json"])
+    two = runner.invoke(app, ["whois", "RSSMRA80A01X000Z", "--key-file", str(second), "--json"])
 
     assert json.loads(one.stdout)["subject_label"] != json.loads(two.stdout)["subject_label"]
 
@@ -904,7 +904,7 @@ def test_whois_without_an_identifier_fails_cleanly(tmp_path: Path) -> None:
 def test_whois_without_a_key_fails_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(KEY_FILE_ENV_VAR, raising=False)
 
-    result = runner.invoke(app, ["whois", "RSSMRA80A01X000A", "--key-file", str(tmp_path / "no")])
+    result = runner.invoke(app, ["whois", "RSSMRA80A01X000Z", "--key-file", str(tmp_path / "no")])
 
     assert result.exit_code == 1
 

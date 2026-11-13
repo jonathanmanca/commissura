@@ -19,7 +19,7 @@ from commissura.deident.pseudonymise import (
 
 KEY = SecretKey(bytes(range(KEY_BYTES)))
 CF = "RSSMRA80A01H501U"
-OTHER_CF = "DLCFRN62S44X217T"
+OTHER_CF = "DLCFRN62S44X217H"
 
 
 def _fresh() -> Pseudonymiser:
@@ -231,7 +231,9 @@ def test_a_truncation_collision_raises_instead_of_merging_two_people() -> None:
     """
     pseudonymiser = _fresh()
     label = _fresh().subject_label(CF)
-    pseudonymiser._issued_subjects[label] = "A DIFFERENT PERSON"
+    # The witness is the untruncated digest, not the identifier: a collision is
+    # two different full digests sharing a truncation.
+    pseudonymiser._witnesses[label] = "0" * 64
 
     with pytest.raises(ValueError, match="truncation collision"):
         pseudonymiser.subject_label(CF)

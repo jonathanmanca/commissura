@@ -38,6 +38,16 @@ from typing import Final
 
 from commissura.models import Sex
 from commissura.read.hl7 import Segment, parse_day, parse_message, parse_timestamp
+from commissura.read.identity import (
+    AuthorityScope,
+    IdentifierStatus,
+    IdentityIndex,
+    IdentityKey,
+    Refusal,
+    RefusalReason,
+    classify_national_id,
+    identities_conflict,
+)
 
 RAW_SOURCES: Final[dict[str, str]] = {
     "lab": "lab/*.hl7",
@@ -96,6 +106,44 @@ def _identifier_of_type(pid: Segment, wanted: frozenset[str]) -> str:
     return ""
 
 
+def _assigning_authority(pid: Segment) -> str:
+    """Return the authority that issued the medical record number, if stated.
+
+    PID-3 component 4. A record number is a hospital's own number, so the
+    authority is what makes it comparable: two hospitals both number their
+    patients from 1, and an index that ignored this attributed one hospital's
+    imaging study to another hospital's patient. The value was always parsed
+    into the message and discarded at exactly the point it mattered.
+
+    Read **only** from the repetition carrying the record-number type code.
+    There is deliberately no fallback to "whichever repetition names an
+    authority", which was the first version of this function and was wrong: the
+    national identifier's repetition names MINSAL, the ministry that issues
+    codice fiscali, and taking that as the authority for a record number would
+    scope every hospital's numbering under one national namespace — which is
+    the flat index this change exists to remove, reintroduced under a
+    plausible-looking name. A test pins it.
+
+    When the record-number repetition names no authority, the caller falls back
+    to MSH-4, which at least names the institution that sent the message.
+
+    Args:
+        pid: The PID segment.
+
+    Returns:
+        The authority, or an empty string. Never invented.
+    """
+    for components in pid.repetition_components(3):
+        type_code = components[4].strip().upper() if len(components) > 4 else ""
+        if (
+            type_code == MEDICAL_RECORD_TYPE_CODE
+            and len(components) > 3
+            and (authority := components[3].strip())
+        ):
+            return authority
+    return ""
+
+
 def _untyped_identifier(pid: Segment) -> str:
     """Return PID-3's first identifier when the segment declares no type codes.
 
@@ -142,19 +190,20 @@ def read_exact(path: Path) -> str:
         return handle.read()
 
 
-def normalise_identifier(value: str) -> str:
-    """Return the form two systems can be compared on.
-
-    Strips surrounding whitespace and leading zeros, and folds case. Nothing
-    else: a cleverer normaliser would start matching people who are not the same
-    person, and in this direction a false match is far worse than a miss.
-    """
-    return value.strip().lstrip("0").upper()
-
-
 @dataclass(frozen=True, slots=True)
 class LinkageIssue:
-    """One record that could not be attached to a subject, and why."""
+    """One record that could not be attached to a subject, and why.
+
+    ``reason`` is drawn from :class:`~commissura.read.identity.RefusalReason`
+    and reaches the manifest, so it is an interface rather than a message.
+    ``detail`` is for a terminal only: an unlinked report's detail names the
+    identifier it could not match, and that identifier is patient data.
+
+    Attributes:
+        path: The corpus file, relative to the corpus root.
+        reason: Why the record could not be attached.
+        detail: What a human needs in order to go and fix it.
+    """
 
     path: str
     reason: str
@@ -207,7 +256,20 @@ class LabRecord:
     collected_at: datetime | None
     ordering_provider: str
     sending_facility: str
+    assigning_authority: str
     observations: tuple[Observation, ...]
+
+    @property
+    def scope(self) -> AuthorityScope:
+        """Return the institution whose record numbers this message speaks for.
+
+        PID-3 component 4 describes the *identifier*, MSH-4 describes the
+        *message*, so the first is preferred where both are present.
+        """
+        return AuthorityScope(
+            assigning_authority=self.assigning_authority,
+            sending_facility=self.sending_facility,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +302,7 @@ class ImagingRecord:
     path: str
     patient_id: str
     patient_name: str
+    institution_name: str
     institution_address: str
     accession: str
     study_uid: str
@@ -248,15 +311,68 @@ class ImagingRecord:
     modality: str
     burned_in_annotation: bool
 
+    @property
+    def scope(self) -> AuthorityScope:
+        """Return the institution this study came from, for scoping its PatientID.
+
+        ``InstitutionName`` (0008,0080) is the only institutional identifier a
+        DICOM header reliably carries, and it is what makes one hospital's
+        record number distinguishable from another's. A study that names none
+        falls back to the unscoped namespace, where the ambiguity check applies.
+        """
+        return AuthorityScope(sending_facility=self.institution_name)
+
 
 @dataclass(slots=True)
 class Subject:
-    """One person, with everything the three exports say about them."""
+    """One person, with everything the three exports say about them.
 
-    identity: Identity
+    **Every identity is kept, not just the first.** A subject assembled from
+    several laboratory messages has one identity per message, and they can
+    differ: a second institution spells the given name differently, uses its own
+    record number, or sends a middle name. The old model kept whichever arrived
+    first and discarded the rest, which is what let the audit of 2026-11-13 leak
+    a patient's name — targeted redaction removes the identifiers the structured
+    exports declared for a subject, so an identity that was discarded is a name
+    nothing looks for.
+
+    :attr:`identity` remains the primary one, used where a single value is
+    required: the participant row's age and sex. :attr:`identities` is what
+    redaction is built from.
+
+    Attributes:
+        key: What established this subject, and on whose authority.
+        identities: Every identity observed for this subject, first one first.
+        labs: Laboratory messages.
+        reports: Free-text reports.
+        imaging: Imaging metadata.
+    """
+
+    key: IdentityKey
+    identities: list[Identity]
     labs: list[LabRecord] = field(default_factory=list)
     reports: list[ReportRecord] = field(default_factory=list)
     imaging: list[ImagingRecord] = field(default_factory=list)
+
+    @property
+    def identity(self) -> Identity:
+        """Return the primary identity: the first one observed for this subject."""
+        return self.identities[0]
+
+    def observe(self, identity: Identity) -> bool:
+        """Record another identity for this subject.
+
+        Args:
+            identity: What a further record said about the same person.
+
+        Returns:
+            Whether the new identity materially disagrees with the primary one,
+            which the caller reports rather than resolving.
+        """
+        conflicts = identities_conflict(self.identities[0], identity)
+        if identity not in self.identities:
+            self.identities.append(identity)
+        return conflicts
 
     @property
     def baseline(self) -> date | None:
@@ -297,11 +413,18 @@ class RawCorpus:
 def read_lab(path: Path, relative: str) -> LabRecord:
     """Parse one HL7 laboratory message.
 
+    **Parses, and does not judge the identity.** This used to raise when the
+    national identifier was absent, which conflated two different failures: a
+    message this reader cannot parse, and a message that parses perfectly and
+    says nothing usable about who the patient is. The second is not an
+    unreadable message — it is a record whose identity has to be resolved some
+    other way or reported, and that decision belongs to
+    :class:`~commissura.read.identity.IdentityIndex`. So an unusable national
+    identifier now travels in the record and is classified there.
+
     Raises:
-        ValueError: If the message carries no PID or no national identifier.
-            Without those the record cannot be attributed to a person, and a
-            lab record is what *creates* a subject, so there is nothing to
-            attach it to.
+        ValueError: If the message carries no PID segment at all, which is the
+            one case where there is nothing to parse.
     """
     message = parse_message(read_exact(path))
     pid = message.require("PID")
@@ -311,11 +434,6 @@ def read_lab(path: Path, relative: str) -> LabRecord:
     # identifier list with a type code; the fallback stays because deprecated is
     # not the same as absent and plenty of interfaces still send it there.
     national_id = _identifier_of_type(pid, NATIONAL_ID_TYPE_CODES) or pid.field(19).strip()
-    if not national_id:
-        raise ValueError(
-            "no national identifier: PID-3 carries none typed "
-            f"{sorted(NATIONAL_ID_TYPE_CODES)} and PID-19 is empty"
-        )
 
     sex_value = pid.field(8).strip().upper()
     identity = Identity(
@@ -351,6 +469,7 @@ def read_lab(path: Path, relative: str) -> LabRecord:
         panel_name=obr.component(4, 2).strip() if obr else "",
         collected_at=parse_timestamp(obr.field(7)) if obr else None,
         sending_facility=msh.component(4, 1).strip() if msh else "",
+        assigning_authority=_assigning_authority(pid),
         ordering_provider=" ".join(
             part for part in (obr.component(16, 2), obr.component(16, 3)) if part
         ).strip()
@@ -424,6 +543,7 @@ def _signing_clinician(text: str) -> str:
 _TAG_PATIENT_ID = "00100020"
 _TAG_PATIENT_NAME = "00100010"
 _TAG_ACCESSION = "00080050"
+_TAG_INSTITUTION_NAME = "00080080"
 _TAG_INSTITUTION_ADDRESS = "00080081"
 _TAG_STUDY_UID = "0020000D"
 _TAG_SERIES_UID = "0020000E"
@@ -466,6 +586,7 @@ def read_imaging(path: Path, relative: str) -> ImagingRecord:
         path=relative,
         patient_id=_tag_value(first, _TAG_PATIENT_ID),
         patient_name=_tag_value(first, _TAG_PATIENT_NAME),
+        institution_name=_tag_value(first, _TAG_INSTITUTION_NAME),
         institution_address=_tag_value(first, _TAG_INSTITUTION_ADDRESS),
         accession=_tag_value(first, _TAG_ACCESSION),
         study_uid=_tag_value(first, _TAG_STUDY_UID),
@@ -484,17 +605,32 @@ def read_imaging(path: Path, relative: str) -> ImagingRecord:
 def read_corpus(root: Path) -> RawCorpus:
     """Read every export under ``root`` and link the records to subjects.
 
+    Three passes, in an order that is load-bearing. Laboratory messages first,
+    because they are the only source carrying a national identifier and
+    therefore the only source that may *create* a subject. Then reports, which
+    state the national identifier in their header and so prefer it. Then
+    imaging, which has no national identifier at all and must resolve on a
+    record number scoped to the institution that issued it.
+
+    Every decision goes through :class:`~commissura.read.identity.IdentityIndex`
+    and every refusal becomes a :class:`LinkageIssue`. Nothing is resolved by
+    guessing, and nothing is merged because two records were equally silent
+    about who they belonged to.
+
     Args:
         root: The corpus root, holding ``lab/``, ``reports/`` and ``imaging/``.
 
     Returns:
         The linked corpus, with an issue recorded for every record that could
-        not be attached.
+        not be attached and for every identity that could not be trusted.
     """
     root = root.resolve()
-    subjects: dict[str, Subject] = {}
-    by_mrn: dict[str, str] = {}
+    subjects: dict[IdentityKey, Subject] = {}
+    index = IdentityIndex()
     issues: list[LinkageIssue] = []
+
+    def refuse(relative: str, refusal: Refusal) -> None:
+        issues.append(LinkageIssue(relative, refusal.reason.value, refusal.detail))
 
     # --- Laboratory first: it is what establishes a subject. ---
     for path in sorted(root.glob(RAW_SOURCES["lab"])):
@@ -502,17 +638,44 @@ def read_corpus(root: Path) -> RawCorpus:
         try:
             record = read_lab(path, relative)
         except (OSError, ValueError, UnicodeDecodeError) as exc:
-            issues.append(LinkageIssue(relative, "unreadable_lab_message", str(exc)))
+            issues.append(
+                LinkageIssue(relative, RefusalReason.UNREADABLE_LAB_MESSAGE.value, str(exc))
+            )
             continue
 
-        national_id = record.identity.national_id
-        subject = subjects.get(national_id)
+        resolved = index.establish(record.identity, record.scope)
+        if isinstance(resolved, Refusal):
+            refuse(relative, resolved)
+            continue
+        key, classified = resolved
+
+        # An unusable national identifier is reported even when the record
+        # number rescued the linkage. The subject exists, but it is not
+        # relinkable to another institution's export, and whoever reads the
+        # manifest has to know which subjects those are.
+        if classified.status is not IdentifierStatus.VALID:
+            issues.append(
+                LinkageIssue(
+                    relative,
+                    RefusalReason.INVALID_NATIONAL_IDENTIFIER.value,
+                    f"the national identifier is {classified.status.value}; this record "
+                    f"was attached by its record number within {key.authority}",
+                )
+            )
+
+        subject = subjects.get(key)
         if subject is None:
-            subject = Subject(identity=record.identity)
-            subjects[national_id] = subject
-        subject.labs.append(record)
-        if record.identity.mrn:
-            by_mrn[normalise_identifier(record.identity.mrn)] = national_id
+            subjects[key] = Subject(key=key, identities=[record.identity])
+        elif subject.observe(record.identity):
+            issues.append(
+                LinkageIssue(
+                    relative,
+                    RefusalReason.CONFLICTING_IDENTITY.value,
+                    "this record shares an identifier with a record naming a different "
+                    "person; both identities are kept so that both names are redacted",
+                )
+            )
+        subjects[key].labs.append(record)
 
     # --- Reports: the national identifier is in the header, so prefer it. ---
     for path in sorted(root.glob(RAW_SOURCES["reports"])):
@@ -520,44 +683,82 @@ def read_corpus(root: Path) -> RawCorpus:
         try:
             report = read_report(path, relative)
         except (OSError, UnicodeDecodeError) as exc:
-            issues.append(LinkageIssue(relative, "unreadable_report", str(exc)))
+            issues.append(LinkageIssue(relative, RefusalReason.UNREADABLE_REPORT.value, str(exc)))
             continue
 
-        subject_key: str | None = report.national_id if report.national_id in subjects else None
-        if subject_key is None and report.mrn:
-            subject_key = by_mrn.get(normalise_identifier(report.mrn))
-        if subject_key is None:
+        owner_of_report = _resolve_report(report, index, subjects)
+        if owner_of_report is None:
             issues.append(
                 LinkageIssue(
                     relative,
-                    "unlinked_report",
+                    RefusalReason.UNLINKED_REPORT.value,
                     f"no subject for national id {report.national_id!r} "
                     f"or record number {report.mrn!r}",
                 )
             )
             continue
-        subjects[subject_key].reports.append(report)
+        subjects[owner_of_report].reports.append(report)
 
-    # --- Imaging: no national identifier in a DICOM header, so match on MRN. ---
+    # --- Imaging: no national identifier in a DICOM header, so match on a
+    # --- record number scoped to the institution that issued it.
     for path in sorted(root.glob(RAW_SOURCES["imaging"])):
         relative = path.relative_to(root).as_posix()
         try:
             study = read_imaging(path, relative)
         except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            issues.append(LinkageIssue(relative, "unreadable_imaging_metadata", str(exc)))
+            issues.append(
+                LinkageIssue(relative, RefusalReason.UNREADABLE_IMAGING_METADATA.value, str(exc))
+            )
             continue
 
-        owner = by_mrn.get(normalise_identifier(study.patient_id))
-        if owner is None:
-            issues.append(
-                LinkageIssue(
-                    relative,
-                    "unlinked_imaging",
-                    f"no subject with record number {study.patient_id!r}, normalised or otherwise",
-                )
+        owner = index.resolve_record_number(study.patient_id, study.scope)
+        if isinstance(owner, Refusal):
+            reason = (
+                owner.reason
+                if owner.reason is RefusalReason.AMBIGUOUS_RECORD_NUMBER
+                else RefusalReason.UNLINKED_IMAGING
             )
+            issues.append(LinkageIssue(relative, reason.value, owner.detail))
             continue
         subjects[owner].imaging.append(study)
 
     ordered = tuple(subjects[key] for key in sorted(subjects))
     return RawCorpus(root=root, subjects=ordered, issues=tuple(issues))
+
+
+def _resolve_report(
+    report: ReportRecord,
+    index: IdentityIndex,
+    subjects: dict[IdentityKey, Subject],
+) -> IdentityKey | None:
+    """Return the subject a report belongs to, or None if nothing can place it.
+
+    A report header states the national identifier, so that is tried first and
+    is subject to the same validation as a laboratory message's: a header
+    reading ``Codice fiscale: UNKNOWN`` must not attach the report to whichever
+    subject was created from the same placeholder, because under the current
+    policy no such subject exists.
+
+    The record-number fallback has no institution to scope by — a report header
+    carries no facility — so it resolves in the unscoped namespace, where
+    :class:`~commissura.read.identity.IdentityIndex` registered every record
+    number alongside its scoped form. A number that two institutions share is
+    ambiguous there and resolves to nothing, which is the intended refusal.
+
+    Args:
+        report: The parsed report.
+        index: The corpus's identity index.
+        subjects: Subjects established so far.
+
+    Returns:
+        The key, or None.
+    """
+    classified = classify_national_id(report.national_id)
+    if classified.is_usable:
+        key = IdentityKey.national(classified.normalised)
+        if key in subjects:
+            return key
+    found = index.resolve_record_number(report.mrn, AuthorityScope())
+    if isinstance(found, Refusal) or found not in subjects:
+        return None
+    return found

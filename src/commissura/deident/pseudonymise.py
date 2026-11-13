@@ -45,6 +45,7 @@ from hashlib import sha256
 from typing import Final
 
 from commissura.deident.keys import SecretKey
+from commissura.read.identity import IdentityKey, KeyKind
 
 SUBJECT_ID_HEX_CHARS: Final = 12
 """Hex characters kept from the subject digest: 48 bits.
@@ -65,15 +66,33 @@ produces identifiers that are not ours to issue. Anyone may generate under
 ``2.25`` without applying for an OID.
 """
 
-RULE_VERSION: Final = "1.0.0"
+RULE_VERSION: Final = "1.1.0"
 """Version of the derivation rules in this module.
 
 Recorded in the manifest. If any derivation here changes, this must change with
 it: two datasets built from the same key but different rule versions are not
 linkable, and the manifest is the only place that can say so.
+
+**1.1.0, 2026-11-13.** Two changes, and the minor number rather than the major
+is a claim worth being precise about.
+
+A subject established from a *well-formed* codice fiscale derives from the
+normalised identifier, and a well-formed codice fiscale normalises to itself —
+so every label this tool has issued from valid input is unchanged, and a
+1.0.0 dataset remains linkable with a 1.1.0 one. Verified rather than assumed:
+see ``IDENTITY_RESOLUTION.md``.
+
+What does change: a corpus whose identifiers were lowercase, or carried internal
+whitespace, or were compatibility-encoded, previously produced one label per
+spelling and now produces one label per person. Those labels were wrong, and the
+rule version is how a holder tells that a rebuild will move them. Subjects
+established from a record number are new in 1.1.0 and have no 1.0.0 counterpart:
+the records that now form them were previously merged under whatever placeholder
+their export sent.
 """
 
 _DOMAIN_SUBJECT: Final = "subject|"
+_DOMAIN_SUBJECT_RECORD_NUMBER: Final = "subject-mrn|"
 _DOMAIN_OFFSET: Final = "offset|"
 _DOMAIN_UID: Final = "uid|"
 _DOMAIN_ACCESSION: Final = "accession|"
@@ -134,56 +153,101 @@ class Pseudonymiser:
 
     key: SecretKey
     rule_version: str = RULE_VERSION
-    _subject_ids: dict[str, str] = field(default_factory=dict, repr=False)
-    _issued_subjects: dict[str, str] = field(default_factory=dict, repr=False)
+    _witnesses: dict[str, str] = field(default_factory=dict, repr=False)
 
     @property
     def key_fingerprint(self) -> str:
         """Return the key's public identifier, for the manifest."""
         return self.key.fingerprint
 
-    def subject_label(self, national_id: str) -> str:
-        """Return the BIDS subject label for one person.
+    def _label(self, domain: str, value: str) -> str:
+        """Derive one truncated subject label, refusing a truncation collision.
 
-        The label is the bare hex, without the ``sub-`` prefix: the prefix
-        belongs to the filename grammar, not to the identifier, and baking it in
-        here would mean stripping it everywhere the identifier is used as a key.
+        **Retains no identifier.** The collision witness is the *untruncated*
+        digest, which distinguishes two inputs exactly as well as the inputs do
+        and is not patient data. The previous version kept the national
+        identifier in two dictionaries for the lifetime of the build while this
+        module's own docstring said it kept nothing — see the audit of
+        2026-11-13, finding 7.
+
+        There is deliberately no cache. A cache would have to be keyed on the
+        derivation input, which would put the identifier straight back into the
+        object it was just removed from, and an HMAC-SHA256 over a short string
+        costs microseconds against a build that reads files from disk.
 
         Args:
-            national_id: The real identifier, such as a codice fiscale. It is
-                used and discarded; nothing here retains it.
+            domain: The domain separator for this kind of subject key.
+            value: The derivation input.
 
         Returns:
             Twelve lowercase hex characters.
 
         Raises:
-            ValueError: If two different inputs collide on one label. Vanishingly
-                unlikely, and silently merging two people would be far worse than
-                failing.
+            ValueError: If two different inputs collide on one label.
+                Vanishingly unlikely, and silently merging two people would be
+                far worse than failing.
         """
-        cached = self._subject_ids.get(national_id)
-        if cached is not None:
-            return cached
+        full = _derive(self.key, domain, value).hex()
+        label = full[:SUBJECT_ID_HEX_CHARS]
 
-        label = _derive(self.key, _DOMAIN_SUBJECT, national_id).hex()[:SUBJECT_ID_HEX_CHARS]
-
-        previous = self._issued_subjects.get(label)
-        if previous is not None and previous != national_id:
+        previous = self._witnesses.get(label)
+        if previous is not None and previous != full:
             raise ValueError(
                 f"subject label {label!r} derived from two different inputs. "
                 "This is a truncation collision: widen SUBJECT_ID_HEX_CHARS rather than "
                 "letting two people share a record."
             )
 
-        self._subject_ids[national_id] = label
-        self._issued_subjects[label] = national_id
+        self._witnesses[label] = full
         return label
+
+    def subject_label(self, national_id: str) -> str:
+        """Return the BIDS subject label for one national identifier.
+
+        The label is the bare hex, without the ``sub-`` prefix: the prefix
+        belongs to the filename grammar, not to the identifier, and baking it in
+        here would mean stripping it everywhere the identifier is used as a key.
+
+        **The caller must pass the normalised identifier.** Normalisation is
+        :func:`commissura.read.identity.normalise_national_id`'s job, not this
+        module's: deciding what counts as the same identifier is identity
+        policy, while this module is derivation. ``commissura whois`` and
+        ``build`` both go through that function, which is what makes the label
+        an operator derives for an opt-out the same one the dataset carries.
+
+        Args:
+            national_id: The normalised national identifier. Used and
+                discarded: see :meth:`_label` for what is retained instead.
+
+        Returns:
+            Twelve lowercase hex characters.
+        """
+        return self._label(_DOMAIN_SUBJECT, national_id)
+
+    def subject_label_for(self, key: IdentityKey) -> str:
+        """Return the subject label for any kind of identity key.
+
+        The two kinds derive under different domain separators, so a record
+        number can never produce the label a national identifier would. Both
+        are stable across runs and across institutions holding the same key,
+        which is what makes a multimodal dataset linkable at all.
+
+        Args:
+            key: What established the subject.
+
+        Returns:
+            Twelve lowercase hex characters.
+        """
+        domain = (
+            _DOMAIN_SUBJECT if key.kind is KeyKind.NATIONAL_ID else _DOMAIN_SUBJECT_RECORD_NUMBER
+        )
+        return self._label(domain, key.derivation_input)
 
     def subject_directory(self, national_id: str) -> str:
         """Return the subject directory name, prefix included.
 
         Args:
-            national_id: The real identifier.
+            national_id: The normalised national identifier.
 
         Returns:
             A value such as ``sub-a3f9c21b4e07``.
@@ -279,5 +343,5 @@ class Pseudonymiser:
         return _derive(self.key, _DOMAIN_ACCESSION, original).hex()[:16]
 
     def issued_subject_count(self) -> int:
-        """Return how many distinct subjects have been pseudonymised so far."""
-        return len(self._subject_ids)
+        """Return how many distinct labels have been issued so far."""
+        return len(self._witnesses)

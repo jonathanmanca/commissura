@@ -23,7 +23,7 @@ from commissura.read.corpus import (
 from commissura.read.hl7 import parse_message
 
 CR = "\r"
-CODICE_FISCALE = "RSSMRA80A01X000A"
+CODICE_FISCALE = "RSSMRA80A01X000Z"
 RECORD_NUMBER = "0012345"
 
 
@@ -85,23 +85,33 @@ def test_pid_3_wins_when_both_positions_carry_a_value(tmp_path: Path) -> None:
     """An interface in transition sends both; the undeprecated field is authoritative."""
     pid = (
         f"PID|1||{RECORD_NUMBER}^^^SINTETIC HOSP^MR~{CODICE_FISCALE}^^^MINSAL^NNITA"
-        "||ROSSI^MARIO||19800101|M|||||||||||VRDGPP85B02X000B"
+        "||ROSSI^MARIO||19800101|M|||||||||||VRDGPP85B02X000I"
     )
     record = read(tmp_path, pid)
 
     assert record.identity.national_id == CODICE_FISCALE  # type: ignore[attr-defined]
 
 
-def test_a_message_with_no_national_identifier_anywhere_is_refused(tmp_path: Path) -> None:
-    """A lab record creates a subject, so one without an identifier has nothing to be.
+def test_a_message_with_no_national_identifier_still_parses(tmp_path: Path) -> None:
+    """Parsing and judging the identity are two jobs, and this is the parser.
 
-    The message names both positions, because "PID-19 is empty" sent somebody
-    looking in the wrong field for as long as PID-3 went unread.
+    This used to raise. That conflated a message this reader cannot parse with a
+    message that parses perfectly and says nothing usable about who the patient
+    is — and the second is not an unreadable message, it is a record whose
+    identity has to be resolved another way or reported. The reader now hands
+    the value on and
+    :class:`~commissura.read.identity.IdentityIndex` decides, which is what lets
+    the record number rescue the linkage instead of the whole message being
+    dropped.
     """
     pid = f"PID|1||{RECORD_NUMBER}^^^SINTETIC HOSP^MR||ROSSI^MARIO||19800101|M"
 
-    with pytest.raises(ValueError, match=r"PID-3.*PID-19"):
-        read(tmp_path, pid)
+    record = read(tmp_path, pid)
+
+    assert record.identity.national_id == ""  # type: ignore[attr-defined]
+    assert record.identity.mrn == RECORD_NUMBER  # type: ignore[attr-defined]
+    # And the authority is read, because it is what scopes that record number.
+    assert record.assigning_authority == "SINTETIC HOSP"  # type: ignore[attr-defined]
 
 
 def test_the_record_number_is_found_by_type_code_not_by_position(tmp_path: Path) -> None:

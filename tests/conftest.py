@@ -59,7 +59,7 @@ def make_person() -> PersonFactory:
             "given_name": "FRANCESCA",
             "sex": Sex.FEMALE,
             "birth_date": date(1962, 11, 4),
-            "codice_fiscale": "DLCFRN62S44X217T",
+            "codice_fiscale": "DLCFRN62S44X217H",
             "mrn": "0048812",
             "street": "Via dei Tigli 7",
             "city": "Bologna",

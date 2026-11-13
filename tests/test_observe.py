@@ -32,7 +32,7 @@ def lab_message(*, observations: int = 1, with_pv1: bool = False) -> str:
     segments = [
         "MSH|^~\\&|LIS|SINTETIC LAB|EHR|SINTETIC HOSP|20240101120000||ORU^R01|1|P|2.5",
         "PID|1||0012345^^^SINTETIC||ROSSI^MARIO||19800101|M|||VIA FINTA 1^^ROMA"
-        "||555^^^a.b@posta.invalid|||||||RSSMRA80A01X000A",
+        "||555^^^a.b@posta.invalid|||||||RSSMRA80A01X000Z",
         "OBR|1|ACC9|ACC9|PANEL^Pannello|||20240101110000||||||||||DOC^BIANCHI^ANNA",
     ]
     if with_pv1:

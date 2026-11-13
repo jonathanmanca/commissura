@@ -244,7 +244,7 @@ def _identity() -> Identity:
     from commissura.models import Sex
 
     return Identity(
-        national_id="RSSMRA80A01X501U",
+        national_id="RSSMRA80A01X501K",
         mrn="0012345",
         family_name="ROSSI",
         given_name="MARIO",
@@ -256,7 +256,7 @@ def _identity() -> Identity:
 def _scrub(text: str, *, baseline: date = date(2024, 3, 1)) -> tuple[str, object]:
     pseudonymiser = Pseudonymiser(KEY)
     known = KnownIdentifiers(
-        identity=_identity(),
+        identities=(_identity(),),
         providers=frozenset({"MORETTI GIULIA", "MORETTI", "GIULIA"}),
         institutions=frozenset({"OSPEDALE SINTETICO DI COLLEVERDE"}),
     )
@@ -296,7 +296,7 @@ def test_a_date_with_no_baseline_is_removed_rather_than_invented() -> None:
     scrubbed, _ = scrub_text(
         "Esame del 15/03/2024.",
         path="reports/x.txt",
-        known=KnownIdentifiers(identity=_identity()),
+        known=KnownIdentifiers(identities=(_identity(),)),
         pseudonymiser=pseudonymiser,
         subject_label="deadbeefcafe",
         baseline=None,
@@ -307,11 +307,11 @@ def test_a_date_with_no_baseline_is_removed_rather_than_invented() -> None:
 
 def test_the_declared_identifiers_are_removed() -> None:
     scrubbed, report = _scrub(
-        "Paziente: MARIO ROSSI\nCodice fiscale: RSSMRA80A01X501U\n"
+        "Paziente: MARIO ROSSI\nCodice fiscale: RSSMRA80A01X501K\n"
         "Numero nosografico: 0012345\n"
         "Presso OSPEDALE SINTETICO DI COLLEVERDE, dott. MORETTI GIULIA."
     )
-    for leaked in ("MARIO", "ROSSI", "RSSMRA80A01X501U", "0012345", "COLLEVERDE", "MORETTI"):
+    for leaked in ("MARIO", "ROSSI", "RSSMRA80A01X501K", "0012345", "COLLEVERDE", "MORETTI"):
         assert leaked not in scrubbed, leaked
     assert PLACEHOLDER_NAME in scrubbed
     assert PLACEHOLDER_NATIONAL_ID in scrubbed
@@ -357,13 +357,15 @@ def test_a_short_token_is_not_redacted_by_exact_match() -> None:
     from commissura.models import Sex
 
     known = KnownIdentifiers(
-        identity=Identity(
-            national_id="X",
-            mrn="1",
-            family_name="LI",
-            given_name="BO",
-            sex=Sex.MALE,
-            birth_date=None,
+        identities=(
+            Identity(
+                national_id="X",
+                mrn="1",
+                family_name="LI",
+                given_name="BO",
+                sex=Sex.MALE,
+                birth_date=None,
+            ),
         )
     )
     pseudonymiser = Pseudonymiser(KEY)
@@ -650,15 +652,29 @@ def test_an_absent_field_has_no_repetitions() -> None:
     assert pid.repetitions(99) == ()
 
 
-def test_a_message_with_no_national_identifier_is_refused(tmp_path: Path) -> None:
-    """A laboratory message is what creates a subject, so PID-19 is load-bearing."""
-    path = tmp_path / "no-id.hl7"
-    path.write_text(f"MSH|^~\\&|LIS{CR}PID|1||0012345^^^X^MR||ROSSI^MARIO{CR}", encoding="utf-8")
+def test_a_message_with_no_identifier_of_any_kind_is_refused(tmp_path: Path) -> None:
+    """With neither a usable national identifier nor a record number, there is no subject.
 
-    from commissura.read.corpus import read_lab
+    The two halves of the policy meet here. An unusable national identifier is
+    never an identity key — two records that both failed to say who they belong
+    to have told you nothing in common — so the record number is the only way
+    back. A message carrying neither is refused by name rather than attached to
+    whichever placeholder-keyed subject came first, which is what the audit of
+    2026-11-13 found it doing.
+    """
+    lab = tmp_path / "raw" / "lab"
+    lab.mkdir(parents=True)
+    (lab / "nobody.hl7").write_text(
+        f"MSH|^~\\&|LIS|SINTETIC HOSP{CR}PID|1||||ROSSI^MARIO{CR}",
+        encoding="utf-8",
+        newline="",
+    )
 
-    with pytest.raises(ValueError, match="PID-19"):
-        read_lab(path, "lab/no-id.hl7")
+    corpus = read_corpus(tmp_path / "raw")
+
+    assert corpus.subjects == ()
+    assert [issue.reason for issue in corpus.issues] == ["no_usable_identifier"]
+    assert "no medical record number" in corpus.issues[0].detail
 
 
 @pytest.mark.parametrize(
@@ -826,13 +842,15 @@ def test_an_empty_known_identifier_is_skipped() -> None:
     from commissura.models import Sex
 
     known = KnownIdentifiers(
-        identity=Identity(
-            national_id="RSSMRA80A01X501U",
-            mrn="",
-            family_name="ROSSI",
-            given_name="",
-            sex=Sex.MALE,
-            birth_date=None,
+        identities=(
+            Identity(
+                national_id="RSSMRA80A01X501K",
+                mrn="",
+                family_name="ROSSI",
+                given_name="",
+                sex=Sex.MALE,
+                birth_date=None,
+            ),
         )
     )
     pseudonymiser = Pseudonymiser(KEY)
@@ -1038,7 +1056,7 @@ def _hand_built(tmp_path: Path, *, collected: str, authored: str | None) -> Buil
     raw, out = tmp_path / "raw", tmp_path / "dataset"
     (raw / "lab").mkdir(parents=True)
     (raw / "lab" / "a.hl7").write_text(
-        _lab_message(national_id="RSSMRA80A01X000A", mrn="0012345", collected=collected),
+        _lab_message(national_id="RSSMRA80A01X000Z", mrn="0012345", collected=collected),
         encoding="utf-8",
         newline="",
     )
@@ -1087,7 +1105,7 @@ def test_a_dropped_record_reaches_the_manifest(tmp_path: Path) -> None:
     raw, out = tmp_path / "raw", tmp_path / "dataset"
     (raw / "lab").mkdir(parents=True)
     (raw / "lab" / "a.hl7").write_text(
-        _lab_message(national_id="RSSMRA80A01X000A", mrn="0012345", collected="20240101110000"),
+        _lab_message(national_id="RSSMRA80A01X000Z", mrn="0012345", collected="20240101110000"),
         encoding="utf-8",
         newline="",
     )
@@ -1141,7 +1159,7 @@ def test_the_manifest_never_carries_an_identifier_from_an_unlinked_record(
     raw, out = tmp_path / "raw", tmp_path / "dataset"
     (raw / "lab").mkdir(parents=True)
     (raw / "lab" / "a.hl7").write_text(
-        _lab_message(national_id="RSSMRA80A01X000A", mrn="0012345", collected="20240101110000"),
+        _lab_message(national_id="RSSMRA80A01X000Z", mrn="0012345", collected="20240101110000"),
         encoding="utf-8",
         newline="",
     )
@@ -1183,7 +1201,7 @@ def test_the_manifest_never_carries_an_absolute_path_from_an_error(tmp_path: Pat
     raw, out = tmp_path / "raw", tmp_path / "dataset"
     (raw / "lab").mkdir(parents=True)
     (raw / "lab" / "a.hl7").write_text(
-        _lab_message(national_id="RSSMRA80A01X000A", mrn="0012345", collected="20240101110000"),
+        _lab_message(national_id="RSSMRA80A01X000Z", mrn="0012345", collected="20240101110000"),
         encoding="utf-8",
         newline="",
     )
