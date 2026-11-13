@@ -338,6 +338,34 @@ def _secret_in_manifest(root: Path) -> Path:
     return root
 
 
+def _burned_in_imaging(root: Path) -> Path:
+    """Add imaging metadata whose pixels are said to carry text.
+
+    Written rather than mutated: the conformant fixture has no
+    ``derivatives/imaging-metadata/`` tree, and this rule is about what a real
+    export can contain rather than about a field going missing.
+    """
+    directory = root / "derivatives" / "imaging-metadata"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "sub-a3f9c21b4e07_abcdef0123456789_imaging.json").write_text(
+        json.dumps(
+            {
+                "study_uid": "2.25.1",
+                "series_uids": ["2.25.2"],
+                "accession": "abcdef0123456789",
+                "day_offset": 0,
+                "modality": "CT",
+                "burned_in_annotation": True,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="",
+    )
+    return root
+
+
 CASES: tuple[tuple[str, Mutation], ...] = (
     ("DS001", _missing_root),
     ("DS002", _delete_participants),
@@ -378,6 +406,7 @@ CASES: tuple[tuple[str, Mutation], ...] = (
     ("DI006", _drop_manifest_required_key),
     ("DI007", _malformed_key_fingerprint),
     ("DI008", _secret_in_manifest),
+    ("DI009", _burned_in_imaging),
 )
 
 

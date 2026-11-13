@@ -40,12 +40,25 @@ from commissura.build.scrub import CATEGORY_DISPOSITION, ScrubReport
 from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_now
 from commissura.deident.keys import SecretKey
 from commissura.read.corpus import RawCorpus
+from commissura.read.identity import KeyKind
 
-MANIFEST_SCHEMA_VERSION = "4.0.0"
+MANIFEST_SCHEMA_VERSION = "5.0.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
 different clock from the dataset layout.
+
+**5.0.0, 2026-11-13.** ``residual_risk.structural`` was a fixed list of four
+prose strings written into every manifest regardless of the dataset. One of them
+read "no k-anonymity report has been produced for this dataset" while
+``risk_report.json`` sat beside it, digested into this manifest's own integrity
+list — so the document contradicted a file it authenticated. The entries are now
+derived from the dataset and each carries its own count, which means a consumer
+that matched on those sentences will not find them. Hence the major number.
+
+Also in 5.0.0: ``source.subject_keys`` says what established each subject,
+because a subject keyed on an institution's record number is not relinkable
+across institutions and a reader has no other way to tell.
 
 **2.0.0 is a breaking change and the major number is doing real work.**
 ``modalities`` was an object keyed by modality name whose values were three
@@ -219,6 +232,113 @@ def _ledger_payload(
     }
 
 
+def _subject_key_counts(corpus: RawCorpus) -> dict[str, int]:
+    """Return how many subjects each kind of identity key established.
+
+    Both kinds are reported even at zero, the convention the field table
+    established on 2026-11-10: a row that is missing reads as "no such thing",
+    and "no subject rested on a record number" is a fact worth stating rather
+    than an absence to be inferred.
+    """
+    counts = {kind.value: 0 for kind in KeyKind}
+    for subject in corpus.subjects:
+        counts[subject.key.kind.value] += 1
+    return counts
+
+
+def _structural_risks(
+    out: Path, summary: BuildSummary, risk: dict[str, object] | None
+) -> list[str]:
+    """Return the structural limits that apply *to this dataset*, with evidence.
+
+    This used to be four prose strings written unconditionally. Three of them
+    were true of the method in general; one was false of every dataset this
+    tool produced, because it read "no k-anonymity report has been produced for
+    this dataset" while ``risk_report.json`` sat beside it in the same
+    directory, digested into this manifest's own integrity list. The manifest
+    contradicted a file it authenticated.
+
+    That is the same failure the per-modality field table had and shed on
+    2026-11-10: a static list can only account for what somebody remembered to
+    write down, and nobody revisits a list that has stopped being read. So this
+    is derived, and a limit that does not apply to this dataset is not claimed
+    to.
+
+    Args:
+        out: The dataset root, which is read for the evidence.
+        summary: What the build produced.
+        risk: The risk report payload this build computed, or ``None`` if no
+            report was produced. The distinction is reported rather than
+            smoothed over: "not assessed" and "assessed and k is 1" are
+            different facts and only one of them is reassuring.
+
+    Returns:
+        One sentence per limit that applies, each carrying its own number.
+    """
+    risks: list[str] = []
+
+    studies = _imaging_payloads(out)
+    if studies:
+        burned_in = sum(1 for payload in studies if payload.get("burned_in_annotation"))
+        risks.append(
+            f"Pixel data is not inspected. {burned_in} of {len(studies)} studies "
+            "in this dataset carry BurnedInAnnotation=YES, where identifiers may "
+            "be rendered into the image itself."
+        )
+        risks.append(
+            f"No image is defaced. {len(studies)} studies are described here; "
+            "where any is of the head, the skull surface remains re-identifiable "
+            "by facial reconstruction."
+        )
+
+    if summary.scrub_reports:
+        risks.append(
+            f"Free-text redaction matches identifiers declared in structured "
+            f"fields. {len(summary.scrub_reports)} documents were scrubbed this "
+            "way; a person named only in prose is not found."
+        )
+
+    if risk is None:
+        risks.append(
+            "Quasi-identifier combinations were not assessed: no k-anonymity "
+            "report was produced for this dataset."
+        )
+    else:
+        minimum = risk.get("minimum_k")
+        below = risk.get("combinations_below_threshold")
+        count = len(below) if isinstance(below, list) else 0
+        risks.append(
+            f"Quasi-identifier combinations were assessed over "
+            f"{risk.get('quasi_identifiers')}: minimum k is {minimum}, with "
+            f"{count} combination(s) below the threshold of "
+            f"{risk.get('threshold')}. See {layout.RISK_REPORT_JSON}. This is a "
+            "measurement and not a certificate of anonymity."
+        )
+
+    return risks
+
+
+def _imaging_payloads(out: Path) -> list[dict[str, object]]:
+    """Read the imaging metadata this build wrote, for the evidence above.
+
+    Read back from the dataset rather than threaded through the build, because
+    the claim being made is about the dataset: a count derived from anything
+    else could be right about the run and wrong about the files.
+    """
+    found: list[dict[str, object]] = []
+    directory = out / "derivatives" / "imaging-metadata"
+    if not directory.is_dir():
+        return found
+    for path in sorted(directory.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):  # pragma: no cover - we wrote these
+            continue
+        if isinstance(payload, dict):
+            found.append(payload)
+    return found
+
+
 def write_manifest(
     out: Path,
     *,
@@ -226,6 +346,7 @@ def write_manifest(
     summary: BuildSummary,
     key: SecretKey,
     spec: BuildSpec,
+    risk: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Write ``.deident/manifest.json`` and return what it contains.
 
@@ -235,6 +356,9 @@ def write_manifest(
         summary: What the build produced.
         key: The secret, used only for its fingerprint.
         spec: What the data holder supplied.
+        risk: The risk report this build computed, so the manifest can describe
+            it instead of asserting about it. ``None`` means no report was
+            produced, which the manifest says in those words.
 
     Returns:
         The manifest payload.
@@ -270,6 +394,12 @@ def write_manifest(
             # pointing at the username in this field.
             "root_name": corpus.root.name,
             "subjects_linked": len(corpus.subjects),
+            # Which kind of identifier established each subject. A subject keyed
+            # on a national identifier is relinkable to another institution's
+            # export under the same key; one keyed on an institution's own
+            # record number is not, and nothing else in this document would tell
+            # a reader which subjects those are.
+            "subject_keys": _subject_key_counts(corpus),
             "records_linked": corpus.record_count,
             # Counted by reason, and **without the file paths**. An export names
             # its files after the thing they are about, so `lab/6895111_LAB...`
@@ -333,16 +463,7 @@ def write_manifest(
                 "threshold; a list tells them where to look."
             ),
             "observed": list(summary.residual_risks()),
-            "structural": [
-                "Pixel data is not inspected. Where BurnedInAnnotation is YES, "
-                "identifiers may be rendered into the image itself.",
-                "Head imaging is not defaced, so the skull surface remains "
-                "re-identifiable by facial reconstruction.",
-                "Free-text redaction matches identifiers declared in structured "
-                "fields. A person named only in prose is not found.",
-                "Quasi-identifier combinations are not assessed; no k-anonymity "
-                "report has been produced for this dataset.",
-            ],
+            "structural": _structural_risks(out, summary, risk),
         },
         "profile": {
             "name": "HealthDCAT-AP",

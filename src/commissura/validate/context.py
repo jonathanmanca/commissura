@@ -227,6 +227,31 @@ class DatasetContext:
 
     # --- Subjects, sessions, datatypes -------------------------------------
 
+    def imaging_metadata(self) -> tuple[tuple[str, dict[str, object]], ...]:
+        """Return the pseudonymised imaging metadata this dataset carries.
+
+        Lives here rather than in the rule that needs it, like every other read
+        in this class, so that two rules asking the same question cannot reach
+        different conclusions about the same files.
+
+        Returns:
+            One ``(relative path, payload)`` pair per readable JSON object
+            under ``derivatives/imaging-metadata/``. A file that does not parse is
+            left out: reporting that is the job of :class:`JsonFile` through the rules
+            that already do that, and a rule about pixel data has nothing to
+            say about malformed JSON.
+        """
+        found: list[tuple[str, dict[str, object]]] = []
+        directory = self.root / "derivatives" / "imaging-metadata"
+        if not directory.is_dir():
+            return ()
+        for path in sorted(directory.glob("*.json")):
+            relative = self.relative_of(path)
+            parsed = self.read_json(relative)
+            if parsed.is_object and isinstance(parsed.data, dict):
+                found.append((relative, parsed.data))
+        return tuple(found)
+
     @cached_property
     def subject_dirs(self) -> tuple[str, ...]:
         """Return the ``sub-*`` directory names, sorted."""

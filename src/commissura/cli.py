@@ -566,7 +566,9 @@ def build(
         # tree. Written earlier it would describe a dataset that did not exist
         # yet, and `commissura verify` would report the two documents written
         # after it as additions on a dataset nobody had touched.
-        manifest = write_manifest(working, corpus=corpus, summary=summary, key=key, spec=spec)
+        manifest = write_manifest(
+            working, corpus=corpus, summary=summary, key=key, spec=spec, risk=risk
+        )
         # Validated while still staged, so the verdict is about what is being
         # published rather than about what has already replaced the previous
         # dataset.

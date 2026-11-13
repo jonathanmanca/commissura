@@ -250,6 +250,39 @@ def key_fingerprint_is_well_formed(context: DatasetContext) -> Iterator[Finding]
         )
 
 
+@rule("DI009", "Imaging with identifiers burned into the pixels is flagged")
+def burned_in_annotation_is_reported(context: DatasetContext) -> Iterator[Finding]:
+    """Warn for every imaging study whose metadata says the pixels carry text.
+
+    This project does not read pixel data — it orchestrates ``dcm2bids`` rather
+    than reimplementing DICOM — so it cannot remove a name that a scanner
+    rendered into the image. That is a documented limit, and the audit of
+    2026-11-13 found the limit being documented in the same sentence whether a
+    dataset held four such studies or none, while ``validate`` reported
+    ``conforms`` with zero warnings over a dataset in which every study was
+    flagged.
+
+    A warning rather than an error, deliberately. The dataset is not malformed:
+    ``burned_in_annotation`` is *carried on purpose* so that a downstream
+    converter knows to beware, and refusing to build would leave the holder
+    worse off than telling them. But a dataset nobody warned about is one
+    somebody converts without looking.
+    """
+    for relative, payload in context.imaging_metadata():
+        if payload.get("burned_in_annotation") is True:
+            yield Finding(
+                rule_id="DI009",
+                severity=Severity.WARNING,
+                message=f"{relative} records BurnedInAnnotation=YES",
+                path=relative,
+                hint=(
+                    "Identifiers may be rendered into the image itself. This tool "
+                    "does not inspect pixel data, so they are still there. Remove "
+                    "or redact the pixels before release."
+                ),
+            )
+
+
 @rule("DI008", "The secret key has not leaked into the manifest")
 def no_secret_in_manifest(context: DatasetContext) -> Iterator[Finding]:
     """Report manifest keys whose names suggest the secret was written out.
