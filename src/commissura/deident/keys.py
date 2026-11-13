@@ -81,9 +81,17 @@ class InvalidKeyError(KeyMaterialError):
     """A key file exists but does not contain usable key material."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class SecretKey:
     """Key material, wrapped so it is hard to leak by accident.
+
+    ``eq=False``, so ``==`` is identity and :meth:`matches` is the only way to
+    compare two keys. The generated ``__eq__`` compared ``material`` with
+    ordinary bytes equality, which short-circuits on the first differing byte --
+    two ways to ask one question, one of them constant-time and one not, with
+    nothing steering a caller to the safe one. No timing oracle exists in a
+    local command-line tool, which is why this was Informational rather than a
+    vulnerability; removing the unsafe path cost one keyword.
 
     The wrapper exists because a bare ``bytes`` object prints itself. A key that
     reaches a log line, a traceback or a debugger session is compromised, and
@@ -257,7 +265,16 @@ def read_key_file(path: Path) -> SecretKey:
         raise KeyNotFoundError(f"no key file at {path}")
     try:
         text = path.read_text(encoding="ascii").strip()
-    except (OSError, UnicodeDecodeError) as exc:
+    except UnicodeDecodeError:
+        # The decode error names the offending byte and its position, so
+        # interpolating it leaks one byte of the secret -- by value and by
+        # index -- into a terminal, a CI log or a bug report. One byte of 256
+        # does not break the HMAC; this module is still the one place where
+        # "key material must not leak through exceptions" is a stated goal.
+        raise InvalidKeyError(
+            f"key file {path} is not ASCII text; it should hold {KEY_BYTES * 2} hex characters"
+        ) from None
+    except OSError as exc:
         raise InvalidKeyError(f"key file {path} could not be read: {exc}") from exc
 
     try:

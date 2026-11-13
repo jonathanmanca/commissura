@@ -244,8 +244,46 @@ def test_a_key_file_that_is_not_ascii_is_reported_not_raised(tmp_path: Path) -> 
     """A binary file where a key was expected must give a clear message."""
     path = tmp_path / "k.key"
     path.write_bytes(b"\xff\xfe\x00 definitely not ascii")
-    with pytest.raises(InvalidKeyError, match="could not be read"):
+    with pytest.raises(InvalidKeyError, match="not ASCII text"):
         read_key_file(path)
+
+
+def test_a_binary_key_file_error_names_no_byte_of_the_key(tmp_path: Path) -> None:
+    """Audit finding 9: the decode error used to name the first non-ASCII byte.
+
+    ``UnicodeDecodeError`` says which byte failed and where, so interpolating it
+    disclosed one byte of the secret — by value and by index — into whatever
+    caught the message: a terminal, a CI log, a bug report. One byte of 256 does
+    not break the HMAC, and this is still the one module whose stated design
+    goal is that key material must not leave through an exception.
+    """
+    key = generate_key()
+    path = tmp_path / "raw.key"
+    # The plausible operator mistake: raw bytes where hex was expected.
+    path.write_bytes(key.material)
+
+    with pytest.raises(InvalidKeyError) as caught:
+        read_key_file(path)
+
+    message = str(caught.value)
+    assert "not ASCII text" in message
+    assert not [byte for byte in key.material if f"0x{byte:02x}" in message]
+    assert "position" not in message
+
+
+def test_two_keys_cannot_be_compared_with_equality() -> None:
+    """Audit finding 11: ``__eq__`` compared key material in non-constant time.
+
+    :meth:`SecretKey.matches` exists to avoid exactly that, so having both was
+    two ways to ask one question with nothing steering a caller to the safe one.
+    No timing oracle exists in a local command-line tool, which is why this was
+    Informational; removing the unsafe path cost one keyword.
+    """
+    one, two = SecretKey(bytes(32)), SecretKey(bytes(32))
+
+    assert one != two
+    assert one == one
+    assert one.matches(two)
 
 
 def test_the_advice_changes_when_permissions_were_applied(

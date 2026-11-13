@@ -289,6 +289,13 @@ own SHACL, k-anonymity in `risk`. Strict mypy, ruff with docstring rules,
 branch coverage floored at 99%, Apache-2.0. Under git, with a GitHub remote
 and CI on four Python versions on Ubuntu plus 3.14 on Windows.
 
+`read/identity.py` decides who a record belongs to, and refuses what it cannot
+decide: a validated codice fiscale or an institution-scoped record number, never
+a placeholder, never an ambiguity resolved by guessing. `build/publish.py` stages
+every build and publishes it at the end, so a rebuild replaces the dataset
+rather than writing over it. Both exist because of the audit of 2026-11-13; read
+[IDENTITY_RESOLUTION.md](IDENTITY_RESOLUTION.md) before changing either.
+
 No counts in that paragraph on purpose — a rule total and a test total change
 most weeks and no test pins either, so stating them here only schedules the
 next correction. `commissura rules` and `pytest` are the places that know.
@@ -304,10 +311,17 @@ Next, in order:
    this repository and the "deployable by a stranger" constraint. An
    irreversible public act, so the author's call and not a step to take in
    passing.
-2. Nothing else is queued. The three remaining reading jobs are all low value:
-   `health-theme.rdf` and `publisher-type.rdf` for a vocabulary the profile
-   says does not exist yet, and which DCAT-AP version the packaged validator's
-   configuration loads. Pick new work rather than working down this list.
+2. Vendor the four upstream SHACL files under `reference/` so CI can check
+   conformance offline, and make that test fail rather than skip when they are
+   absent. Audit finding 8: the project's headline claim is verified on one
+   machine by a test that skips silently, and the log already records that a
+   skip is a silent failure mode. HealthDCAT-AP is CC BY 4.0, so redistribution
+   with attribution is permitted — which makes this a `NOTICE` decision as much
+   as a code one.
+3. Nothing else is queued. Three audit findings are open and all are cosmetic
+   or one-sentence: symlink reporting under a dataset, the accession collision
+   asymmetry, and the `2.25` arc's UUID semantics. The three remaining reading
+   jobs are still low value. Pick new work rather than working down this list.
 
 ## Decision log
 
@@ -2124,6 +2138,155 @@ never fired is how a corpus that tests nothing comes to look like a corpus that
 passes — so it now has a test. Both new tests were checked by sabotage before
 being trusted, which is this project's rule: a guard nobody has watched fail is
 a guard nobody has tested.
+
+**2026-11-13 — An audit of the whole repository found one critical and three
+high-severity defects, all four upstream of the de-identification, and all four
+in the step that had no layer: deciding who is who.** The findings and the
+remediation have their own documents — [SECURITY_AUDIT.md](SECURITY_AUDIT.md),
+[ENGINEERING_REVIEW.md](ENGINEERING_REVIEW.md),
+[REMEDIATION_REPORT.md](REMEDIATION_REPORT.md),
+[IDENTITY_RESOLUTION.md](IDENTITY_RESOLUTION.md),
+[HARDENING_CHANGELOG.md](HARDENING_CHANGELOG.md) — so this entry records only
+what a future session needs to know and would not otherwise find.
+
+**The lesson that generalises, and it is uncomfortable.** Every instrument this
+project has built measures the *transformation*: `validate` checks the shape of
+the output, `verify` checks its bytes, `measure` checks whether planted
+identifiers survived, the residual-risk list checks what the output still looks
+like. Not one of them measures the *grouping*. "Rules first, measurement always"
+had been applied with real rigour to de-identification and not at all to the
+step de-identification depends on — and 99.11% branch coverage coexisted with a
+dataset containing `Paziente: FRANCESCA FONTANA` in plain text.
+
+The reason a grouping error is not contained is worth stating once, properly:
+**targeted redaction removes the identifiers the structured exports declared for
+that subject.** So two people merged under one key leave one identity in the
+known set, and the second person's name is not a name the method fails to find —
+it is a name the method was never told to look for. The audit's corpus was two
+messages whose national identifier was the string `UNKNOWN`, which is what a
+real interface writes when the field is unavailable. One subject, zero linkage
+issues, and selective redaction that looked like success because the first
+person's name *was* removed.
+
+**Four decisions in the fix, each of which had a wrong-looking alternative.**
+
+*A placeholder is not a key, and the records are not discarded either.* The
+tempting answers were to merge them (what it did) or to refuse them outright.
+Neither is right: the record number still identifies the patient within the
+institution that issued it, so the subject exists, is keyed on
+`(authority, number)`, and is reported as not relinkable across institutions. An
+unusable identifier is a diagnosis, not a dead end.
+
+*A subject keeps every identity, not the first.* This is the actual fix for the
+leak and it is one line of model change. `KnownIdentifiers.identity` became
+`identities`, deliberately without a compatibility property: a caller passing
+one identity where the field takes a tuple is a caller whose redaction would be
+incomplete, and that must not compile.
+
+*An ambiguity is refused, and refused deterministically.* The old code's
+last-write-wins made the result depend on filename sort order. The ambiguity set
+is now monotone, so the answer is a property of the set of records and not of
+their order, and a test reads the same corpus in two orders.
+
+*The authority is read only from the record-number repetition.* The first
+version fell back to "whichever repetition names an authority" — exactly as the
+audit's own recommended mitigation suggested — and picked up `MINSAL`, the
+ministry that issues codice fiscali, from the national identifier's repetition.
+That scopes every hospital under one national namespace: the flat index this
+change exists to remove, reintroduced under a plausible name. **The audit was
+wrong about its own fix, and a test caught it.**
+
+**Pseudonyms are unchanged for valid input, and that was verified rather than
+assumed.** A well-formed codice fiscale normalises to itself, so the derivation
+input is byte-for-byte what it was. Every subject label in the 25-subject
+walkthrough and in a second corpus is identical. `RULE_VERSION` is 1.1.0, a
+minor bump, and the constant documents which inputs do move: lowercase, internal
+whitespace, compatibility encodings, and anything that was merged under a
+placeholder. A rebuild is the only migration and there should not be another —
+a dataset whose subjects were merged wrongly cannot be fixed by relabelling,
+because the records inside a merged subject have to be separated first.
+
+**Adding codice fiscale validation immediately rejected five identifiers in this
+project's own fixtures**, including the default in `conftest.py`. Each had a
+check character that does not check. Corrected across 19 occurrences rather
+than exempted, because the validator is right and the fixtures were invented.
+The generator's own identifiers all pass — the decision of 2026-11-06 had it
+compute the checksum properly "so the values exercise a real validator rather
+than bouncing off it", and this is that validator finally existing. Also worth
+knowing: **omocodia is handled**, because a checksum-only validator rejects
+genuine substituted identifiers, and `whois` now refuses an unusable value
+instead of handing out a label for nobody.
+
+**2026-11-13 — A build is staged and published, and the reason is a withdrawal
+that did not withdraw.** `build` wrote straight into its destination, so a
+second build left the first one's files wherever it did not happen to overwrite
+them. An imaging study was removed from the corpus, the dataset was rebuilt into
+the same directory, and the build reported `conforms` with exit code 0 while the
+withdrawn study was still in `derivatives/` — digested into the new manifest and
+certified `INTACT` by `commissura verify` for as long as the dataset existed. A
+data holder acting on a patient's objection had not acted on it.
+
+`build/publish.py` stages the whole build beside the destination and moves it
+into place at the end. **Not called atomic, and the restraint is the point.**
+Publication is two renames and the destination does not exist between them;
+`os.replace` cannot do better, because POSIX refuses to rename over a non-empty
+directory and Windows over a directory at all. A single swap would need
+`renameat2(RENAME_EXCHANGE)`, which is Linux-only, so the choice was between a
+portable two-step and a platform-specific one-step and a project whose
+cross-platform claim is tested on both took the portable one. A failure in that
+window puts the previous dataset back, and a test drives that path rather than
+trusting it.
+
+**There is no `--force`, and a test asserts the flag does not exist.** A
+destination that exists, is not empty and holds no manifest is refused. The flag
+would exist only so that somebody could aim it at the directory this check
+protects, which is the same reasoning that keeps `--key` off every command.
+
+**Staging broke two things, and tests caught both.** `write_report`'s guard
+compared the report path against `summary.root`, which during a staged build is
+the staging tree — so `--report ./dataset/x.html` stopped being "inside the
+dataset" the moment staging arrived. It now refuses both trees, because writing
+into the staging tree is equally fatal: that tree *becomes* the dataset. And
+`dct:identifier` is `urn:commissura:<directory name>`, which became the staging
+directory's name with its process id, making every build non-reproducible in
+exactly one file — the trap recorded in this log that same morning, walked into
+by the afternoon. The lesson, such as it is: **when a build's working directory
+stops being its output directory, every path-derived value is suspect.**
+
+**2026-11-13 — The residual detector and the manifest's structural risks were
+both calibrated to nothing, and both are derived now.** Two findings with one
+shape.
+
+The detector matched `[A-Z]{4,}`. It reported `FRANCESCA FONTANA` and said
+nothing about `Francesca Fontana`, so a real hospital's title-case template
+would have left a leaked name completely silent. Three layers now: declared
+values (NFKD-folded, case-insensitive, **no false positives possible** — and
+nothing had ever checked the scrubber's output against its own input list),
+position inside a declared name field, and the old heuristic made Unicode-aware.
+Measured: on the walkthrough corpus the three layers together report the same
+two fragments the single layer did. Strictly more sensitive at no cost in noise.
+
+`residual_risk.structural` was four fixed sentences, one of which read "no
+k-anonymity report has been produced for this dataset" while `risk_report.json`
+sat beside it, digested into that manifest's own integrity list and covered by
+its HMAC. **The document contradicted a file it authenticated.** Derived now,
+each claim carrying its own count, and a limit that does not apply is not
+claimed. New rule DI009 warns per study whose pixels are said to carry text,
+where `validate` previously reported `conforms` with zero warnings over a
+dataset in which every study was flagged.
+
+This is the third time the same defect has been found in a different section of
+`manifest.py`: a static list that can only account for what somebody remembered
+to write down, in a section nobody revisits. The field table went this way on
+2026-11-10 and the structural risks were in the same file and not looked at.
+**A derived section does not make its neighbours derived.**
+
+**2026-11-13 — `verify` says what it does not prove.** Integrity, authenticity,
+completeness and correctness are four claims, and the first was doing duty for
+the third. A dataset still holding a withdrawn record verifies perfectly and
+correctly, because its bytes have not changed since the manifest was written.
+The command now prints that, and a test keeps an old dataset with its old
+manifest and shows that verification is entirely happy with it.
 
 ## Conventions
 

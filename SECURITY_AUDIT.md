@@ -1,5 +1,41 @@
 # commissura — security audit
 
+> **Status, 2026-11-13, after remediation.** Eleven of the fourteen findings are
+> fixed and verified; three remain open and are listed in §10. **No finding
+> below has been deleted or rewritten** — the original text stands as it was
+> written, and each one now carries a status line and the evidence that closed
+> it. What the audit got wrong is marked as such rather than quietly corrected.
+>
+> Remediation detail: [REMEDIATION_REPORT.md](REMEDIATION_REPORT.md).
+> Identity policy: [IDENTITY_RESOLUTION.md](IDENTITY_RESOLUTION.md).
+> Every change: [HARDENING_CHANGELOG.md](HARDENING_CHANGELOG.md).
+>
+> | Severity | Found | Fixed | Open |
+> | --- | --- | --- | --- |
+> | Critical | 1 | 1 | 0 |
+> | High | 3 | 3 | 0 |
+> | Medium | 4 | 3 | 1 |
+> | Low | 4 | 3 | 1 |
+> | Informational | 2 | 1 | 1 |
+
+> **Status, 2026-11-13, after remediation.** Eleven of the fourteen findings are
+> fixed and verified; three remain open and are listed in §10. **No finding
+> below has been deleted or rewritten** — the original text stands as it was
+> written, and each one now carries a status line and the evidence that closed
+> it. What the audit got wrong is marked as such rather than quietly corrected.
+>
+> Remediation detail: [REMEDIATION_REPORT.md](REMEDIATION_REPORT.md).
+> Identity policy: [IDENTITY_RESOLUTION.md](IDENTITY_RESOLUTION.md).
+> Every change: [HARDENING_CHANGELOG.md](HARDENING_CHANGELOG.md).
+>
+> | Severity | Found | Fixed | Open |
+> | --- | --- | --- | --- |
+> | Critical | 1 | 1 | 0 |
+> | High | 3 | 3 | 0 |
+> | Medium | 4 | 3 | 1 |
+> | Low | 4 | 3 | 1 |
+> | Informational | 2 | 1 | 1 |
+
 Audit date: 2026-11-13. Commit audited: `27216df`. Audit only: no source file was
 modified. Every finding below was reproduced against the working tree; where a
 claim rests on reading the code rather than on a run, it says so.
@@ -155,6 +191,8 @@ correctly, and nothing downstream can detect that it did not.
 
 ### Finding 1 — A shared or placeholder national identifier merges two people into one subject, and the merge leaks a name
 
+> **FIXED** in `cf57232`. A value that is missing, a placeholder or structurally impossible is never an identity key, and `Subject.identities` keeps every identity so redaction is built from all of them. The reproduction now gives 2 subjects, 2 reported issues, and neither surname anywhere in the published dataset. Fixing it found five invented codice fiscali in this project's own fixtures.
+
 **Severity: Critical.** **Exploitability: no attacker needed — ordinary malformed input.**
 
 **Where:** `src/commissura/read/corpus.py:505-513` (`read_corpus`),
@@ -243,6 +281,8 @@ this direction a false match is far worse than a miss".
 
 ### Finding 2 — The medical record number is a global flat index with silent last-write-wins
 
+> **FIXED** in `cf57232`. The key is `(authority, number)`, and DICOM `InstitutionName` is now read so a study resolves to the patient at the issuing institution — correct attribution rather than merely a refusal. An ambiguity is reported for every record resolving through it, order-independently. A first version of the authority reader fell back to `MINSAL` from the codice fiscale's own repetition, which would have reintroduced the flat index; a test pins its absence.
+
 **Severity: High.** **Exploitability: no attacker needed — the normal multi-institution case.**
 
 **Where:** `src/commissura/read/corpus.py:496` (`by_mrn` declaration), `:515`
@@ -325,6 +365,8 @@ unlinked study is recoverable, a silently mis-attributed one is not.
 ---
 
 ### Finding 3 — A rebuild into an existing dataset directory keeps the old files, reports `conforms`, and is then certified authentic
+
+> **FIXED** in `bd3165a`. Builds are staged beside the destination and published at the end; nothing survives from a previous build. The withdrawal reproduction now gives 2 → 1 derivatives with exit 0, and matches a clean build byte for byte. A foreign non-empty destination is refused outright, with no `--force` to defeat the check. Staging broke the report guard and `dct:identifier`; both were caught by tests rather than review.
 
 **Severity: High.** **Exploitability: no attacker needed — the obvious way to re-run the tool.**
 
@@ -413,6 +455,8 @@ operator who types `--out ~/Documents` must not lose their documents. Hence the
 
 ### Finding 4 — Case or internal-whitespace variation in the national identifier splits one person into several subjects, and an opt-out can then miss them
 
+> **FIXED** in `cf57232`, completed in Milestone E. Normalisation is NFKC, all whitespace, uppercase, applied at parse time. The audit identified the consequence for `whois` and the first fix did not reach it: `whois` passed the raw value through, so it still answered with a label for nobody — and answered for `UNKNOWN` too. It now classifies through the same function `build` uses and exits 2 on an unusable value.
+
 **Severity: High.** **Exploitability: no attacker needed.**
 
 **Where:** `src/commissura/read/corpus.py:313` and `:505-513`.
@@ -477,6 +521,8 @@ and normalising it are the same edit.
 
 ### Finding 5 — `residual_risk.structural` is a fixed list that contradicts the dataset it is written into
 
+> **FIXED** in `63616d8`. Every claim is derived and carries its own count; a limit that does not apply is not claimed; a missing risk report is stated as missing. New rule DI009 warns per study whose pixels are said to carry text. Manifest schema 5.0.0.
+
 **Severity: Medium.** **Exploitability: n/a — a false statement, not an attack.**
 
 **Where:** `src/commissura/build/manifest.py:329-345`.
@@ -529,6 +575,8 @@ file that was not revisited. The fix is the same: derive it.
 
 ### Finding 6 — The residual-risk detector only sees all-capitals tokens, so a name in title case leaves no trace
 
+> **FIXED** in `91dd438`. Three layers: declared values (NFKD, case-folded, no false positives possible — and nothing checked this before), detection by position in a declared name field, and the original heuristic made Unicode-aware. Every required spelling is detected, and on the 25-subject walkthrough the three layers together report the same two fragments the single layer did — strictly more sensitive at no cost in noise.
+
 **Severity: Medium.** **Exploitability: no attacker needed.**
 
 **Where:** `src/commissura/build/scrub.py:412` (`_assess_residual_risk`).
@@ -570,6 +618,8 @@ project rejects it for good reasons. Two cheaper moves:
 ---
 
 ### Finding 7 — `Pseudonymiser` retains every national identifier, and its docstring says it does not
+
+> **FIXED** in `cf57232`, by the mitigation this finding proposed: the collision witness is the untruncated digest. The forward cache was removed rather than re-keyed, because any cache would have to hold the derivation input.
 
 **Severity: Medium** (false claim about a privacy property) / **Low** (actual exposure).
 
@@ -621,6 +671,8 @@ caller profile justifies it. Then fix the docstring to describe whatever remains
 
 ### Finding 8 — The project's headline claim is never checked by CI, and the check skips silently
 
+> **OPEN.** The recommendation stands: vendor the four upstream SHACL files under `reference/`, un-gitignore that path, add a `NOTICE` entry, and make the test fail rather than skip when they are absent. Not done here because it is a licensing and repository-layout decision rather than a code fix. Conformance still passes locally (5 tests) and still skips in CI.
+
 **Severity: Medium.** **Exploitability: n/a — a verification gap.**
 
 **Where:** `.github/workflows/ci.yml:68-70`, `tests/test_shacl_conformance.py`.
@@ -653,6 +705,8 @@ gate, or an environment check), so absence can never read as success.
 ---
 
 ### Finding 9 — `read_key_file` discloses one byte of key material in an exception message
+
+> **FIXED** in Milestone E, with the one-line fix this finding proposed. A test asserts that no byte of the key appears in the message, and that the word `position` does not either.
 
 **Severity: Low.** **Exploitability: requires a malformed key file.**
 
@@ -696,6 +750,8 @@ Keep `from exc` — a chained traceback is local, and the operator benefits.
 
 ### Finding 10 — `digest_tree` follows file symlinks, so the manifest can authenticate bytes the dataset does not contain
 
+> **MITIGATED, NOT CLOSED.** Milestone B removed the dangerous half: `digest_tree` now runs over a staging tree holding only what the build wrote, so a symlink cannot enter `integrity.files` at all. One placed afterwards is reported as `added` by `verify`. What remains is that `is_file()` reads through the link at verify time; closing that properly means reporting symlinks as their own finding, which is more than the one-line change this entry proposed. Still not reproduced on this machine.
+
 **Severity: Low.** **Reproduced: no — see below.**
 
 **Where:** `src/commissura/build/integrity.py:86-88`.
@@ -737,6 +793,8 @@ be copied and archived should not contain one.
 
 ### Finding 11 — `SecretKey` equality is not constant time, while `.matches()` is
 
+> **FIXED** in Milestone E. `eq=False`, so `==` is identity and `matches` is the only way to compare two keys.
+
 **Severity: Informational** under the stated load.
 
 **Where:** `src/commissura/deident/keys.py:86` (`@dataclass(frozen=True, slots=True)`).
@@ -761,6 +819,8 @@ with `==` today (checked), so this is free.
 
 ### Finding 12 — No staging or rollback: an interrupted build leaves a partial dataset
 
+> **FIXED** in `bd3165a`, by finding 3's staging recommendation as this entry predicted. A test drives a mid-build exception and asserts the destination is unchanged and no staging tree is left behind.
+
 **Severity: Low.**
 
 **Where:** `src/commissura/build/writer.py:341`.
@@ -784,6 +844,8 @@ Subsumed by finding 3's staging recommendation.
 
 ### Finding 13 — `accession()` has no collision check, unlike `subject_label()`
 
+> **OPEN.** One docstring sentence. 64 bits makes a collision astronomically unlikely, so this remains what the entry called it: not a defect, an undocumented asymmetry.
+
 **Severity: Informational.**
 
 **Where:** `src/commissura/deident/pseudonymise.py:265-280`.
@@ -799,6 +861,8 @@ docstring closes it.
 ---
 
 ### Finding 14 — `2.25.<112-bit integer>` is not a UUID rendering, which is what the arc is for
+
+> **OPEN.** Using all 128 bits would move every imaging UID and need a rule-version bump for no safety gain, so documenting the intent is the cheaper honest answer. Not done here.
 
 **Severity: Informational.**
 
@@ -1012,3 +1076,47 @@ No test was reported as passing that was not run. The project's own suite stands
 at 806 passed, 1 skipped (`tests/test_keys.py:126`, POSIX file modes on Windows),
 with `tests/test_shacl_conformance.py` passing locally (5 tests) and skipping in
 CI by design — which is finding 8.
+
+---
+
+## 10. What remediation changed about this audit
+
+Three corrections to the audit's own text, recorded rather than edited away.
+
+**Finding 4 understated its own consequence, and the first fix missed it.** The
+entry correctly identified that `whois` returns one label and that an opt-out
+could therefore miss records — and then listed normalisation at parse time as
+the whole mitigation. It is not: `whois` derives its own label and had to be
+changed separately. Milestone A fixed the split and left `whois` answering for
+`UNKNOWN`, which was found only by working through the cross-cutting checklist
+afterwards. **A finding that names a downstream consequence should name the
+downstream fix.**
+
+**Finding 2's recommended mitigation was right about the key and wrong about the
+fallback.** It proposed reading the authority "falling back to any repetition
+that names an authority, because a sender that labels only one identifier still
+tells you which institution it is". Implemented literally, that picks up
+`MINSAL` — the ministry that issues codice fiscali — from the national
+identifier's own repetition, and scopes every hospital's numbering under one
+national namespace. The flat index, reintroduced under a plausible name. Caught
+by a test, not by review.
+
+**Finding 10 is less serious than written, for a reason the audit did not see.**
+The entry reasoned about `digest_tree` running over the dataset root. Staging
+means it runs over a tree containing only what the build wrote, so the "manifest
+authenticates bytes the dataset does not own" path closed as a side effect of an
+unrelated fix. Worth recording because the audit judged two findings
+independently that turned out not to be.
+
+### Still open
+
+| # | Finding | Severity | Why not now |
+| --- | --- | --- | --- |
+| 8 | Conformance unverified in CI, skips silently | Medium | A licensing and repository-layout decision: vendoring CC BY 4.0 shapes needs a `NOTICE` entry and the author's call |
+| 10 | `digest_tree` follows file symlinks at verify time | Low | Reporting symlinks as a finding is more than the one-line change proposed |
+| 13, 14 | Accession collision check, `2.25` arc semantics | Informational | Two docstring sentences, no behaviour change |
+
+The five "potential findings requiring further investigation" in §6 are
+untouched and still stand as questions. §7's residual risks are unchanged:
+every one of them is a property of the design, and remediation did not and
+could not alter any of them.

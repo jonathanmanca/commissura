@@ -44,6 +44,7 @@ from commissura.healthdcat import Tier as HealthTier
 from commissura.measure import RETAINED_BY_DESIGN
 from commissura.measure import measure as run_measure
 from commissura.read.corpus import read_corpus
+from commissura.read.identity import classify_national_id
 from commissura.validate import registered_rules, validate_dataset
 
 app = typer.Typer(
@@ -1054,13 +1055,34 @@ def whois(
         typer.echo("No identifier given, on the command line or on stdin.", err=True)
         raise typer.Exit(1)
 
+    # Classified and normalised exactly as `build` does, through the same
+    # function, because a label this command hands out has to be the label the
+    # dataset carries. Two failures lived here before: `whois` on a lowercase
+    # codice fiscale returned a label for nobody, and `whois UNKNOWN` returned
+    # one too -- so an operator acting on a patient's objection could search a
+    # dataset for a subject that was never in it, and conclude the person was
+    # not there. That is the opt-out the command exists for, failing silently.
+    classified = classify_national_id(value)
+    if not classified.is_usable:
+        typer.echo(
+            f"{value!r} is not a usable national identifier: {classified.status.value}.",
+            err=True,
+        )
+        typer.echo(
+            "No subject is ever keyed on such a value, so there is no label to "
+            "derive. A dataset built from records carrying it keys those "
+            "subjects on their institution's record number instead.",
+            err=True,
+        )
+        raise typer.Exit(2)
+
     try:
         key = resolve_key(key_file)
     except KeyMaterialError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None
 
-    label = Pseudonymiser(key).subject_label(value)
+    label = Pseudonymiser(key).subject_label(classified.normalised)
 
     if as_json:
         typer.echo(
@@ -1068,6 +1090,7 @@ def whois(
                 {
                     "subject_label": label,
                     "subject_directory": f"{layout.SUBJECT_PREFIX}{label}",
+                    "normalised_identifier": classified.normalised,
                     "key_fingerprint": key.fingerprint,
                     "deidentification_rule_version": RULE_VERSION,
                 },
@@ -1078,6 +1101,7 @@ def whois(
 
     typer.echo(f"  subject label                   {label}")
     typer.echo(f"  directory                       {layout.SUBJECT_PREFIX}{label}")
+    typer.echo(f"  identifier, normalised          {classified.normalised}")
     typer.echo(f"  key fingerprint                 {key.fingerprint}")
     typer.echo(f"  de-identification rule version  {RULE_VERSION}")
     typer.echo("")

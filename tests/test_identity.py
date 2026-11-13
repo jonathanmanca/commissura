@@ -19,6 +19,7 @@ anybody.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -907,3 +908,81 @@ def test_an_imaging_study_with_no_date_is_dropped_and_reported(tmp_path: Path) -
     assert corpus.issues == ()
     assert [record.reason for record in summary.dropped] == ["undated_record"]
     assert "StudyDate" in summary.dropped[0].detail
+
+
+# --------------------------------------------------------------------------
+# whois: the opt-out has to agree with the build
+# --------------------------------------------------------------------------
+
+
+def test_whois_gives_the_label_the_dataset_carries(tmp_path: Path) -> None:
+    """The point of the command, and the half of finding 4 that lived here.
+
+    A data holder acting on a patient's objection derives the label from the
+    identifier as their records spell it and searches the dataset for it. If
+    `whois` normalises differently from `build`, the search finds nothing and
+    the holder concludes the person is not there.
+    """
+    from typer.testing import CliRunner
+
+    from commissura.cli import app
+
+    root = tmp_path / "raw"
+    _write(
+        root / "lab" / "a.hl7",
+        _message(national_id=ROSSI, mrn="111", family="ROSSI", given="MARIO"),
+    )
+    corpus = read_corpus(root)
+    summary = build_dataset(
+        corpus,
+        KEY,
+        BuildSpec(dataset_name="d", description="d", hdab="H", publisher="P"),
+        tmp_path / "dataset",
+    )
+    in_dataset = {p.name for p in summary.root.glob("sub-*")}
+
+    key_file = tmp_path / "k.key"
+    key_file.write_text(bytes(range(32)).hex(), encoding="utf-8")
+    runner = CliRunner()
+
+    # Every spelling an operator might type, including the ones that used to
+    # produce a label for nobody.
+    for typed in (ROSSI, ROSSI.lower(), f"  {ROSSI}  ", ROSSI[:6] + " " + ROSSI[6:]):
+        result = runner.invoke(app, ["whois", typed, "--key-file", str(key_file), "--json"])
+        assert result.exit_code == 0, result.output
+        label = json.loads(result.output)["subject_directory"]
+        assert label in in_dataset, f"{typed!r} gave {label}, which is not in the dataset"
+
+
+def test_whois_refuses_a_value_no_subject_can_be_keyed_on() -> None:
+    """`whois UNKNOWN` used to answer, which is worse than refusing.
+
+    No subject is ever keyed on a placeholder, so a label derived from one
+    corresponds to nobody — and handing it to an operator searching for a
+    patient who exercised their right to object is how that search comes back
+    empty for the wrong reason.
+    """
+    from typer.testing import CliRunner
+
+    from commissura.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["whois", "UNKNOWN", "--key-file", "nonexistent.key"])
+
+    assert result.exit_code == 2
+    assert "placeholder" in (result.stderr or result.output)
+    # Refused before the key is even read, so a refusal costs nothing.
+    assert "key" not in (result.stderr or result.output).lower().split("placeholder")[0]
+
+
+def test_whois_refuses_a_checksum_failure_by_name() -> None:
+    """A typo in a transcribed codice fiscale should say so, not hand back a label."""
+    from typer.testing import CliRunner
+
+    from commissura.cli import app
+
+    wrong = ROSSI[:15] + ("B" if ROSSI[15] != "B" else "C")
+    result = CliRunner().invoke(app, ["whois", wrong, "--key-file", "nonexistent.key"])
+
+    assert result.exit_code == 2
+    assert "bad_checksum" in (result.stderr or result.output)

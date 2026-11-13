@@ -134,8 +134,8 @@ Wrote 190 files to ./raw
   Verified: every recorded PHI offset matches the file on disk.
 ```
 
-Three separate exports, as a hospital would hand them over, with 321 injected
-defects and 3,642 identifiers whose exact character positions are on record.
+Three separate exports, as a hospital would hand them over, with 333 injected
+defects and 3,654 identifiers whose exact character positions are on record.
 
 ### 3. Build the dataset
 
@@ -166,12 +166,12 @@ Wrote 191 files to ./dataset
   profile                HealthDCAT-AP 8, non-public tier
 
   Residual risk the method cannot reach:
-    1 unrecognised all-capitals token(s) remain, of 4 characters, which in
-    this corpus is how names are written. Not quoted here: this report
-    travels with the dataset.
-    1 unrecognised all-capitals token(s) remain, of 6 characters, which in
-    this corpus is how names are written. Not quoted here: this report
-    travels with the dataset.
+    1 unrecognised all-capitals token(s) remain, of 4 characters. Nothing
+    declared them, so this is the layer that catches what was not
+    anticipated. Not quoted here: this report travels with the dataset.
+    1 unrecognised all-capitals token(s) remain, of 6 characters. Nothing
+    declared them, so this is the layer that catches what was not
+    anticipated. Not quoted here: this report travels with the dataset.
 
   Validation: conforms - 0 error(s), 0 warning(s)
 ```
@@ -198,11 +198,33 @@ commissura validate ./dataset
 ```
 
 ```
-CONFORMANT: 0 error(s), 0 warning(s), 0 notice(s) from 39 rules
+WARNING DI009: derivatives/imaging-metadata/sub-744ee679b207_...json
+               records BurnedInAnnotation=YES
+        Identifiers may be rendered into the image itself. This tool does
+        not inspect pixel data, so they are still there. Remove or redact
+        the pixels before release.
+... five more of the same ...
+
+CONFORMANT: 0 error(s), 6 warning(s), 0 notice(s) from 40 rules
 ```
 
 `build` already ran this and would have failed if it did not conform. Running it
 separately is for datasets you did not build here.
+
+**The six warnings are the dataset telling you something true about itself.**
+Six of its twenty-seven imaging studies say in their own metadata that
+identifiers are rendered into the pixels — put there by the
+`imaging.burned_in_annotation` defect, which is what a real scanner does when a
+technician types a name onto a screen capture. This tool orchestrates `dcm2bids`
+rather than reading pixel data, so it cannot remove them, and the flag is
+carried on purpose so that whatever converts the images knows to look.
+
+A warning rather than an error, because the dataset is not malformed and
+refusing to build would leave you worse off than telling you. It is a warning
+rather than silence because a dataset nobody warned about is one somebody
+converts without looking — which is how it behaved until the audit of
+2026-11-13 found `conforms — 0 warnings` printed over a dataset in which every
+study was flagged.
 
 ### 5. Read the risk
 
@@ -270,6 +292,47 @@ interval to every other event in this subject's record is still exact. And the
 subject label `sub-0366506f1824` is the same label this person carries in the
 lab branch and in the imaging metadata, which is the only thing tying the three
 together.
+
+## Who a record belongs to
+
+Everything downstream of this question depends on the answer, and nothing
+downstream can tell when it is wrong. Targeted redaction removes the identifiers
+your structured exports *declared for that subject*, so two people grouped under
+one key leave only one set of identifiers to remove — and the other person's name
+is never looked for. Full policy in
+[IDENTITY_RESOLUTION.md](IDENTITY_RESOLUTION.md); the shape of it is:
+
+**A subject is established by a validated national identifier, or by a record
+number scoped to the institution that issued it.** The manifest says which, per
+dataset, under `source.subject_keys`:
+
+```json
+"subject_keys": { "national_id": 25, "scoped_record_number": 0 }
+```
+
+A subject on the first kind is relinkable to another holder's export under the
+same key. One on the second is not — a hospital's record number means nothing
+outside it — so that number is worth looking at before you release.
+
+**A missing identifier is never a shared one.** `UNKNOWN`, `N/A`, a row of
+zeros, a wrong check character, the wrong length: each is reported by name and
+none is ever an identity key. If your export fills an unavailable codice fiscale
+with a sentinel, those records are keyed on their record numbers instead and you
+get one `invalid_national_identifier` issue per record saying so.
+
+**A record number is scoped to its assigning authority**, read from PID-3
+component 4, or MSH-4, or DICOM `InstitutionName`. Two hospitals both number
+their patients from 1, so an unscoped index attributes one site's imaging study
+to another site's patient. Where one number is used by two people and the
+authority cannot tell them apart, every record resolving through it is reported
+as `ambiguous_record_number` rather than attached to a guess.
+
+**The codice fiscale is validated, including omocodia.** When two people would
+be assigned the same code the Agenzia delle Entrate substitutes letters for
+digits, so a validator that only checks the checksum rejects genuine
+identifiers. Any other national scheme — an ENI or STP code, another country's
+identifier — fails validation and falls back to a scoped record number. That is
+a real limitation and is why `subject_keys` is in the manifest.
 
 ## Bringing your own data
 
@@ -467,7 +530,7 @@ ERROR   DI003 sub-a3f9c21b4e07/ses-01/reports/sub-a3f9c21b4e07_ses-01_run-01_rep
         contains what looks like an absolute date: '12/03/2023'
         A date written inside a sentence is invisible to field-based scrubbing.
 
-NOT CONFORMANT: 2 error(s), 0 warning(s), 0 notice(s) from 39 rules
+NOT CONFORMANT: 2 error(s), 0 warning(s), 0 notice(s) from 40 rules
 ```
 
 Exits 0 when the dataset conforms and 1 when it does not. Warnings do not affect
@@ -648,13 +711,67 @@ What the method cannot reach is printed, not scored:
 
 ```
   Residual risk the method cannot reach:
-    1 unrecognised all-capitals token(s) remain, of 4 characters, which in
-    this corpus is how names are written. Not quoted here: this report
-    travels with the dataset.
+    1 unrecognised all-capitals token(s) remain, of 4 characters. Nothing
+    declared them, so this is the layer that catches what was not
+    anticipated. Not quoted here: this report travels with the dataset.
 ```
 
 A score invites a reader to treat de-identification as solved above some
 threshold. A list tells them where to look.
+
+**Three layers, and only the first is certain.** The detector used to match
+``[A-Z]{4,}`` and nothing else, which meant it reported ``FRANCESCA FONTANA``
+and said nothing at all about ``Francesca Fontana`` — so a template writing
+names in title case would have left a leaked name completely silent.
+
+| Layer | Question | False positives |
+| --- | --- | --- |
+| Declared values | Did a string we were told to remove survive? | None possible: these were handed to the scrubber by name |
+| Position | Is something still sitting where a name is *declared* to be, after ``Paziente:`` or ``Dott.`` ? | Bounded by the label table, not by guessing at names |
+| Unanticipated tokens | Is there a word nothing declared that looks like an identifier? | The noisiest layer, and the only one that can see what you did not tell us about |
+
+All three are case-insensitive and accent-insensitive: matching is NFKD-folded,
+so ``Fontanà`` and ``FONTANA`` and ``fontana`` are one needle. None of them
+quotes what it found, because this list travels in the manifest.
+
+**It is a measurement and not a clearance.** A detector that reports nothing has
+reported nothing; it has not established that a document is free of identifiers.
+The counterpart is `commissura measure`, which asks the opposite question —
+whether the identifiers the generator planted survived — and the two fail
+differently on purpose. Layer two depends on a label table, so a hospital
+template using labels this tool does not know gets layers one and three only;
+that is the same dependency `_REPORT_LABELS` has, now stated rather than
+implied.
+
+#### A build publishes exactly what it produced
+
+Everything is assembled in a staging directory beside the destination and moved
+into place at the end. So **a rebuild replaces the dataset rather than writing
+over it**, which is what makes a withdrawal work:
+
+```bash
+# A patient objects. Remove their records from the corpus and rebuild.
+rm raw/lab/1787493_* raw/reports/1787493_* raw/imaging/1787493_*
+commissura build ./raw --out ./dataset --key-file ./commissura.key \
+  --hdab "..." --publisher "..." --contact-point "..." --access-url "..."
+```
+
+The withdrawn records are gone from the dataset and from the manifest. Before
+this was staged, they were not: the build wrote over what it happened to
+overwrite and left the rest, reported `conforms` with exit code 0, and
+`commissura verify` then certified the result as `INTACT` for as long as the
+dataset existed.
+
+**A destination that is not empty and is not a commissura dataset is refused.**
+A directory holding no `.deident/manifest.json` and no
+`dataset_description.json` is somebody else's, and there is no flag to override
+that — the flag would exist only so that a mistyped `--out` could reach your
+documents.
+
+A failed build leaves the destination exactly as it was. Publication itself is
+two renames rather than one atomic operation, because no portable call can
+rename over a non-empty directory; if the second fails, the previous dataset is
+put back and the message says where the finished build is.
 
 #### Two documents, two readers
 
@@ -1032,15 +1149,25 @@ the structured exports already named.
 ### `commissura whois`
 
 ```bash
-commissura whois RSSMRA80A01X000A --key-file ./commissura.key
+commissura whois RSSMRA80A01X000Z --key-file ./commissura.key
 ```
 
 ```
-  subject label                   ee0d8f0315e1
-  directory                       sub-ee0d8f0315e1
-  key fingerprint                 dab6e8f96ecb2386
-  de-identification rule version  1.0.0
+  subject label                   8ac2e8cedbde
+  directory                       sub-8ac2e8cedbde
+  identifier, normalised          RSSMRA80A01X000Z
+  key fingerprint                 bb0be87afcf8eb23
+  de-identification rule version  1.1.0
 ```
+
+**The identifier is validated and normalised first**, with exactly the rules
+`build` uses, through the same function. That matters more than it looks: the
+label this command prints has to be the label the dataset carries, or the search
+it exists for comes back empty for the wrong reason. Case, surrounding and
+internal whitespace, and compatibility-encoded digits all normalise. A value
+that cannot key a subject — a placeholder, a wrong check character, the wrong
+shape — is refused with exit code 2 and the diagnosis, rather than given a label
+that corresponds to nobody.
 
 **This is what an EHDS opt-out needs.** Somebody exercises their right to
 object. You know exactly who they are; the datasets you already released
@@ -1059,7 +1186,7 @@ your shell history. It is patient data, and the argument for keeping the key
 off the command line applies to it too:
 
 ```bash
-echo RSSMRA80A01X000A | commissura whois --key-file ./commissura.key
+echo RSSMRA80A01X000Z | commissura whois --key-file ./commissura.key
 ```
 
 **There is no command that goes the other way, and there will not be.** The
@@ -1094,6 +1221,19 @@ nobody thinks of as identifiers.
 Note the honest result above: on ten participants with exact ages, minimum k is
 1. Ten people cannot reach k=5 on age and sex together — a property of small
 cohorts, not a defect, and the command reports the number rather than a verdict.
+
+**Integrity is not completeness.** `verify` answers one question: do the files
+match the digests the manifest records? A dataset still holding a record you
+withdrew from the corpus verifies perfectly, because its bytes have not changed
+since the manifest was written. The command says so in its own output. Four
+different claims, and only the first two are things `verify` can speak to:
+
+| Claim | Who establishes it |
+| --- | --- |
+| Integrity — the files are unchanged | `verify`, from the digests |
+| Authenticity — the manifest is unedited | `verify --key-file`, from the HMAC |
+| Completeness — the dataset holds what it should | Rebuilding from the current corpus |
+| Correctness — it holds the right things | You, and the linkage issues |
 
 **k-anonymity is a measurement, not a certificate, and this tool pseudonymises
 rather than anonymises.** The distinction carries the whole legal weight:
