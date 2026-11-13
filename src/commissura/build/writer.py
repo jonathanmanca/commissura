@@ -93,6 +93,24 @@ class BuildSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class ReportPair:
+    """Which corpus report became which dataset report.
+
+    Recorded during the build because nothing else can reconstruct it: the
+    output path depends on which session a date fell into and on how many
+    reports that session already held, and re-deriving that afterwards would
+    mean running the same logic twice and hoping the two agreed.
+
+    Attributes:
+        source: The corpus file, relative to the corpus root.
+        output: The dataset file, relative to the dataset root.
+    """
+
+    source: str
+    output: str
+
+
+@dataclass(frozen=True, slots=True)
 class DroppedRecord:
     """One input record that linked to a subject and is not in the dataset.
 
@@ -126,6 +144,7 @@ class BuildSummary:
     scrub_reports: list[ScrubReport] = field(default_factory=list)
     linkage_issues: int = 0
     dropped: list[DroppedRecord] = field(default_factory=list)
+    report_pairs: list[ReportPair] = field(default_factory=list)
     missing_for_conformance: tuple[str, ...] = ()
 
     @property
@@ -503,6 +522,12 @@ def _write_subject_reports(
             baseline=baseline,
         )
         summary.scrub_reports.append(scrub_report)
+        summary.report_pairs.append(
+            ReportPair(
+                source=report.path,
+                output=f"{directory}/{session}/reports/{stem}{layout.REPORT_TEXT_EXTENSION}",
+            )
+        )
 
         _write_text(base / f"{stem}{layout.REPORT_TEXT_EXTENSION}", scrubbed)
         _write_json(

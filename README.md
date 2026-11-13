@@ -679,6 +679,43 @@ until 2027. The command builds anyway and says what is missing:
     Supply them with --hdab and --publisher.
 ```
 
+#### A page to read it with
+
+```bash
+commissura build ./raw --out ./dataset --key-file ./commissura.key \
+    --hdab "..." --publisher "..." --contact-point "..." --access-url "..." \
+    --report ./review.html
+```
+
+Everything the dataset records is already on disk, in JSON, for a machine.
+Comparing a report before and after de-identification is the one check nobody
+can automate — the question is "did the clinical content survive", and a
+scrubber that removed the medicine would protect a useless dataset — and until
+now it meant opening two files in two windows and reading across. `--report`
+writes a single self-contained HTML page: the build summary, a few reports side
+by side, redaction counts by category, the manifest's field table, the residual
+risk and the k table. No server, no state, no key. It opens offline and keeps
+working when this tool is gone.
+
+**It contains patient data, and it is the only output of `commissura` that
+does.** The "before" half of each comparison is an unredacted clinical report.
+That is the point of the page and it makes the file something that must stay
+inside your organisation, so:
+
+- **it is never written inside the dataset directory, and the command refuses
+  rather than warning.** A file there would be digested into the manifest's own
+  integrity list and released with the dataset. `--report ./dataset/report.html`
+  is the obvious thing to type and is exactly the mistake;
+- the page says what it holds in its first screenful;
+- you name the file, because there is no safe default place for something that
+  must not be filed with the dataset;
+- it is opt-in, and stays opt-in.
+
+```
+  html report            /home/you/review.html
+                         CONTAINS PATIENT DATA - do not release it
+```
+
 #### The field table is observed, not declared
 
 The manifest's per-modality table is derived from the run. Every field the input

@@ -1792,6 +1792,50 @@ they meant something structural. Assert on the thing, not on its picture — and
 where the picture is all you have, be suspicious of a negative assertion, which
 is the shape that fails silently.
 
+**2026-11-13 — `build --report` writes a single-file HTML page, and it is the
+only output of this tool that must never be released.** Everything it shows is
+already on disk in JSON. What was missing is a way to *look* at it: comparing a
+report before and after de-identification is the one check nobody can automate,
+because the question is whether the clinical content survived, and it meant
+opening two files in two windows and reading across. A terminal is bad at this
+and always will be.
+
+**The whole design follows from one fact: the "before" half is unredacted
+patient data.** That makes this artefact a different class from the manifest,
+which is written to travel, and the difference had to be impossible to miss
+rather than mentioned in documentation:
+
+- **It is refused, not warned about, if the path is inside the dataset.** A file
+  there is digested into the manifest's integrity list and shipped with the
+  release — and `--report ./dataset/report.html` is precisely what somebody
+  would type. A warning on a build that otherwise succeeded is a warning nobody
+  reads. Tests cover the dataset root and a path nested deeper in it, because
+  "inside" is the property and not "equal to".
+- **The operator names the file.** There is no safe default location for
+  something that must not be filed with the dataset, so there is no default.
+- **It is opt-in and the page says what it is in its first screenful**, with a
+  test asserting the warning appears before the first section heading. A test
+  also asserts the dataset contains no HTML afterwards and that the manifest's
+  digest list names none.
+
+Also worth the entry because it looks like laziness and is not: **the page is
+plain string assembly with escaping, and must not become a template system.** A
+report that needs a build step is a report nobody regenerates. The checks that
+earn that choice are a balanced-HTML parser over the whole document and a test
+that feeds a report containing `<script>` and a stray `</pre>` through the
+renderer — which is not hypothetical for a tool whose entire input is other
+people's documents, where a report containing `<b>` would silently restyle the
+page and one with a stray closing tag would break the comparison it sits in.
+
+**One structural addition.** `BuildSummary` now records `ReportPair`, the
+corpus path and dataset path of each report. Nothing else could reconstruct it:
+the output path depends on which session a date fell into and how many reports
+that session already held, so re-deriving it afterwards would mean running the
+same logic twice and hoping the two agreed.
+
+And one behaviour: a comparison whose source file has since moved is skipped
+rather than raised. A picture of a build must not be able to fail the build.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

@@ -24,6 +24,7 @@ from commissura import __version__, layout
 from commissura import healthdcat as healthdcat_module
 from commissura.build.integrity import verify_dataset
 from commissura.build.manifest import write_healthdcat_description, write_manifest
+from commissura.build.report import DEFAULT_COMPARISONS, write_report
 from commissura.build.risk import K_THRESHOLD, assess, write_risk_report
 from commissura.build.writer import BuildSpec, build_dataset
 from commissura.deident.keys import (
@@ -440,6 +441,25 @@ def build(
             "CHANGE IT when building from real clinical material.",
         ),
     ] = healthdcat_module.DATASET_TYPE_FOR_SYNTHETIC,
+    report_to: Annotated[
+        Path | None,
+        typer.Option(
+            "--report",
+            help=(
+                "Also write a single-file HTML report there, for reading by a human. "
+                "CONTAINS PATIENT DATA: it shows reports before and after, so it must "
+                "not be released. Refused if the path is inside the dataset."
+            ),
+        ),
+    ] = None,
+    comparisons: Annotated[
+        int,
+        typer.Option(
+            "--report-comparisons",
+            min=0,
+            help="How many before/after report pairs the HTML report shows.",
+        ),
+    ] = DEFAULT_COMPARISONS,
     tier: Annotated[
         str,
         typer.Option(
@@ -529,7 +549,22 @@ def build(
     # Written earlier it would describe a dataset that did not exist yet, and
     # `commissura verify` would report the two documents written after it as
     # additions on a dataset nobody had touched.
-    write_manifest(out, corpus=corpus, summary=summary, key=key, spec=spec)
+    manifest = write_manifest(out, corpus=corpus, summary=summary, key=key, spec=spec)
+
+    written_report: Path | None = None
+    if report_to is not None:
+        try:
+            written_report = write_report(
+                report_to,
+                corpus=corpus,
+                summary=summary,
+                manifest=manifest,
+                risk=risk,
+                comparisons=comparisons,
+            )
+        except (ValueError, OSError) as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from None
 
     report = validate_dataset(out) if validate_output else None
 
@@ -545,6 +580,7 @@ def build(
                     "records_dropped": len(summary.dropped),
                     "free_text_redactions": summary.redaction_count,
                     "key_fingerprint": key.fingerprint,
+                    "html_report": str(written_report) if written_report else None,
                     "profile": {
                         "release": HEALTHDCAT_RELEASE,
                         "tier": selected_tier.value,
@@ -592,6 +628,9 @@ def build(
             f"  profile                HealthDCAT-AP {HEALTHDCAT_RELEASE}, "
             f"{selected_tier.value} tier"
         )
+        if written_report is not None:
+            typer.echo(f"  html report            {written_report}")
+            typer.echo("                         CONTAINS PATIENT DATA - do not release it")
         if summary.missing_for_conformance:
             typer.echo("")
             typer.echo("  Not yet conformant. Mandatory properties with no value:")

@@ -967,3 +967,74 @@ def test_measure_names_the_records_that_were_not_included(tmp_path: Path) -> Non
         )["records_not_in_dataset"]
         > 0
     )
+
+
+# --------------------------------------------------------------------------
+# build --report
+# --------------------------------------------------------------------------
+
+
+def test_build_writes_an_html_report_and_warns_about_it(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    target = tmp_path / "review.html"
+
+    result = runner.invoke(app, _build_args(tmp_path, raw, key, "--report", str(target)))
+
+    assert result.exit_code == 0, result.stdout
+    assert target.is_file()
+    assert "CONTAINS PATIENT DATA" in result.stdout
+    assert "Do not release it" in target.read_text(encoding="utf-8")
+
+
+def test_build_refuses_a_report_inside_the_dataset(tmp_path: Path) -> None:
+    """The obvious thing to type, and the one that would ship patient data."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    inside = tmp_path / "dataset" / "review.html"
+
+    result = runner.invoke(app, _build_args(tmp_path, raw, key, "--report", str(inside)))
+
+    assert result.exit_code == 1
+    assert "refusing to write" in (result.stderr or result.output)
+    assert not inside.exists()
+
+
+def test_build_writes_no_report_unless_asked(tmp_path: Path) -> None:
+    """It holds patient data, so it is opt-in and stays opt-in."""
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+
+    result = runner.invoke(app, _build_args(tmp_path, raw, key))
+
+    assert result.exit_code == 0
+    assert not list(tmp_path.rglob("*.html"))
+    assert "CONTAINS PATIENT DATA" not in result.stdout
+
+
+def test_build_reports_the_html_path_as_json(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    target = tmp_path / "review.html"
+
+    result = runner.invoke(app, _build_args(tmp_path, raw, key, "--report", str(target), "--json"))
+    payload = json.loads(result.stdout)
+
+    assert payload["html_report"] == str(target.resolve())
+    assert (
+        json.loads(runner.invoke(app, _build_args(tmp_path, raw, key, "--json")).stdout)[
+            "html_report"
+        ]
+        is None
+    )
+
+
+def test_the_number_of_comparisons_is_an_option(tmp_path: Path) -> None:
+    raw, key = _raw_corpus(tmp_path), _key(tmp_path)
+    target = tmp_path / "review.html"
+
+    assert (
+        runner.invoke(
+            app,
+            _build_args(tmp_path, raw, key, "--report", str(target), "--report-comparisons", "1"),
+        ).exit_code
+        == 0
+    )
+
+    assert target.read_text(encoding="utf-8").count('class="pair"') == 1
