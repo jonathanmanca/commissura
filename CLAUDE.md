@@ -1931,6 +1931,138 @@ identical bytes on every platform. Checked while here — every file in a built
 dataset is LF-terminated on Windows, which is the `newline=""` discipline the
 brief has argued for since the beginning actually holding.
 
+**2026-11-13 — Age generalisation into bands is designed and not implemented,
+and when it arrives the manifest must record the width that was applied.** The
+`risk` report says plainly that twenty-five people with exact ages cannot reach
+k=5 on age and sex, and that banding is the fix. So the obvious next feature is
+`--age-band 5`, replacing `42` with `40-44` in `participants.tsv`.
+
+The design, for whoever builds it:
+
+- **The width is the holder's choice, not a default.** Five years is the
+  convention; ten is what a small cohort actually needs; one is no banding at
+  all. Picking one for the user is the same mistake as picking their access
+  tier, which this project already refuses to do.
+- **The manifest must record the width**, and that is the part worth writing
+  down now, because it is the part that gets forgotten. A dataset whose ages
+  read `40-44` is not self-describing: a reader cannot tell a five-year band
+  from a decade that happens to start on a multiple of five, and cannot tell a
+  banded dataset from one whose source only ever had bands. The per-field table
+  already distinguishes *removed*, *replaced* and *kept*; a banded age is
+  `replaced`, and the note on that row is where the width belongs.
+- **`risk` must then report k over the banded values**, not the originals, or
+  the report describes a dataset nobody has.
+- **The age ceiling stays separate.** Truncating at 89 is a de-identification
+  invariant this project treats as structural; banding is a disclosure-control
+  choice the holder makes. Collapsing the two into one option would make the
+  invariant look optional.
+
+Not implemented because nobody has asked and because the honest sequence is to
+let somebody run `risk`, see k=1, and then say what they want — the width is a
+judgement about their cohort and their permit, and a feature built before that
+conversation is a guess with a flag on it.
+
+**2026-11-13 — The real obstacle to using this on real data is that report
+identity parsing is written against labels this project's own generator
+produces.** `_REPORT_LABELS` maps four exact strings — `Paziente`,
+`Codice fiscale`, `Numero nosografico`, `Data del referto` — and
+`_signature_pattern` looks for a line beginning `Dott.`. Every one of those is a
+convention invented here. A real hospital's template writes `CF`, or
+`Pz.`, or nothing at all, and the consequence is already documented: every
+report lands in `unlinked_report` and the build succeeds with no reports in it.
+
+This is worth naming as *the* obstacle rather than one of several, because
+everything else in the pipeline reads a standard. HL7 v2 field positions are
+HL7's. DICOM tags are DICOM's. The dataset layout is BIDS. The description is
+HealthDCAT-AP. Only the free-text header is ours, and it is the one part that
+cannot be adapted by reading a specification — a new deployment means somebody
+reading a sample document and editing a table.
+
+The mitigation already in place is that it *is* a table, in one place, with a
+docstring saying adaptation is an edit there and not a rewrite of the reader.
+That is the most a layout-matching approach can offer, and it is not much. The
+next entry is about the direction that escapes the problem rather than managing
+it.
+
+**2026-11-13 — There is no national standard for Italian report *prose*, but
+there is one for the structured documents hospitals already have to produce —
+and that, not better layout matching, is the direction for input.** Which
+changes what "supporting real data" means.
+
+What was found, and the provenance matters: **this is read from secondary
+sources, not from the official implementation guides**, so it needs checking
+against HL7 Italia and AgID before anybody builds against it.
+
+- HL7 Italia, the Italian affiliate of HL7 International, develops CDA
+  Release 2 profiles **with the Ministero della Salute, AgID and the Tavolo
+  Tecnico sul Fascicolo Sanitario Elettronico**. The base standard is
+  ANSI/HL7 CDAR2-2005.
+- The profiles cover the documents this project already models: *Referto di
+  Laboratorio*, *Referto di Radiologia*, *Lettera di Dimissione Ospedaliera*,
+  *Verbale di Pronto Soccorso*, *Profilo Sanitario Sintetico*, and a
+  specialist report.
+- AgID made LOINC **mandatory** for identifying examinations in CDA2 laboratory
+  reports in 2014 — which is the same vocabulary `lab/*.tsv` already carries in
+  `loinc_code`.
+- The radiology profile is the CDA form of the textual report, with optional
+  linkage to the related DICOM studies.
+
+**The structural point is the one that matters.** In a CDA document the
+patient's identity is in the structured `recordTarget` header, not in the
+narrative block. So the problem the previous entry describes — guessing which
+line holds the codice fiscale — does not exist: the document *states* it, in a
+defined element, the way HL7 v2 and DICOM already do for the other two
+modalities. Targeted redaction, which is this project's whole method, would
+work on CDA input without any template matching at all.
+
+And hospitals must already produce these documents for the FSE, so supporting
+them asks for nothing a site does not already have.
+
+**One correction to the framing, and it is material.** The direction is not
+simply "support CDA". HL7 Italia has moved much of its work to **FHIR** for
+FSE 2.0, with implementation guides covering the Profilo Sanitario Sintetico,
+laboratory reports, emergency-room reports, discharge letters, specialist
+reports and vaccination records; the laboratory one is published as trial use
+against FHIR R4. So a reader of this entry in a year should check which of the
+two a hospital is actually sending before writing a parser: CDA R2 for the
+documents already in regional FSEs, FHIR for FSE 2.0. One secondary source
+claims a March 2026 deadline for structured delivery to FSE 2.0, which could
+not be confirmed and is recorded here as unverified rather than as a date.
+
+Either way the conclusion is the same and it is the useful one: **the input
+roadmap is structured documents, not better layout matching.** Chasing
+templates is work that never finishes and that no standard will ever reward.
+
+**2026-11-13 — No graphical interface, and the reason is not aesthetics.**
+Three arguments, in order of weight.
+
+**The user works in a terminal and the point is composability.** Every command
+takes `--json` precisely so the tool can sit inside somebody else's pipeline —
+a nightly job, a Makefile, another institution's extract-and-ship script. A GUI
+serves the one-off interactive case, which is the case this tool is least
+needed for, and nothing in a GUI composes.
+
+**It would build a security surface around the key file where there is none
+today.** The key never appears on a command line, never in shell history,
+never in `ps` output — decisions recorded on 2026-11-06 and still enforced by a
+test over every command. A GUI needs somewhere to put the key: a file picker
+that remembers its last directory, a field that might be logged, a session that
+holds it in memory for as long as the window is open, a "remember this key"
+checkbox that somebody will ask for. Each of those is a new way for the one
+secret that matters to end up somewhere it should not be, and none of them buys
+any de-identification that the CLI does not already do.
+
+**And it does not address the real problem.** The honest state of this project
+is that nobody has used it: the package is not on PyPI, the repository is
+private, and the only person who has ever run it wrote it. A GUI would be
+building for an imagined user while the actual gap is that there is no user at
+all. The `--report` page added today is as far toward "visual" as this should
+go: a static artefact, generated by the same command, with no interface to
+maintain and nothing to secure.
+
+Revisit only if somebody who has used the CLI says the interface is what stopped
+them. Nobody has said that, because nobody has used the CLI.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.
