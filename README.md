@@ -299,8 +299,9 @@ Everything downstream of this question depends on the answer, and nothing
 downstream can tell when it is wrong. Targeted redaction removes the identifiers
 your structured exports *declared for that subject*, so two people grouped under
 one key leave only one set of identifiers to remove — and the other person's name
-is never looked for. Full policy in
-[IDENTITY_RESOLUTION.md](IDENTITY_RESOLUTION.md); the shape of it is:
+is never looked for. The policy is in
+[`read/identity.py`](src/commissura/read/identity.py), which states its own
+reasoning; the shape of it is:
 
 **A subject is established by a validated national identifier, or by a record
 number scoped to the institution that issued it.** The manifest says which, per

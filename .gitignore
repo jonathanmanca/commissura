@@ -46,3 +46,16 @@ coverage.xml
 *.swp
 .DS_Store
 Thumbs.db
+
+# Audit and remediation paperwork, kept out of the repository on purpose.
+# These described the findings of 2026-11-13 with working reproduction steps,
+# which is a recipe against any dataset built before they were fixed. They are
+# listed here and not merely deleted because `git add -A` is how two of them
+# got committed in the first place, in a commit whose message did not mention
+# them. The decisions they recorded live in CLAUDE.md's log, which is where
+# this project keeps decisions; the reproductions do not need a home here.
+/SECURITY_AUDIT.md
+/ENGINEERING_REVIEW.md
+/REMEDIATION_REPORT.md
+/IDENTITY_RESOLUTION.md
+/HARDENING_CHANGELOG.md

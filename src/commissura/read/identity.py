@@ -39,8 +39,19 @@ The result depends only on the set of inputs, never on the order they were read.
 **On what this does not change.** A subject established from a valid codice
 fiscale gets the same pseudonymous label it got before, because the derivation
 input is the normalised identifier and a well-formed codice fiscale normalises
-to itself. See :data:`commissura.deident.pseudonymise.RULE_VERSION` and
-``IDENTITY_RESOLUTION.md`` for the cases that do change.
+to itself — verified on two corpora, not assumed. The cases that *do* change,
+and what a holder has to do about them, are in
+:data:`commissura.deident.pseudonymise.RULE_VERSION`.
+
+**What is deliberately not validated**, because the omissions matter as much as
+the rules: only the codice fiscale has a validator, so an ENI or STP code or any
+other country's national identifier falls back to a scoped record number and is
+not relinkable across institutions. The place code is not checked against a
+registry of municipalities — this project's own synthetic identifiers use the
+unassigned ``X`` range precisely so they are well formed and cannot belong to
+anybody, and a registry would also reject identifiers issued before a
+municipality was merged or renamed. ``source.subject_keys`` in the manifest is
+how a reader finds out which subjects rest on which kind of key.
 """
 
 from __future__ import annotations

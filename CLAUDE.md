@@ -293,8 +293,10 @@ and CI on four Python versions on Ubuntu plus 3.14 on Windows.
 decide: a validated codice fiscale or an institution-scoped record number, never
 a placeholder, never an ambiguity resolved by guessing. `build/publish.py` stages
 every build and publishes it at the end, so a rebuild replaces the dataset
-rather than writing over it. Both exist because of the audit of 2026-11-13; read
-[IDENTITY_RESOLUTION.md](IDENTITY_RESOLUTION.md) before changing either.
+rather than writing over it. Both exist because of the audit of 2026-11-13, and
+both carry their reasoning in their own module docstrings — read those before
+changing either, because the invariants they hold are not derivable from the
+code that implements them.
 
 No counts in that paragraph on purpose — a rule total and a test total change
 most weeks and no test pins either, so stating them here only schedules the
@@ -2141,13 +2143,10 @@ a guard nobody has tested.
 
 **2026-11-13 — An audit of the whole repository found one critical and three
 high-severity defects, all four upstream of the de-identification, and all four
-in the step that had no layer: deciding who is who.** The findings and the
-remediation have their own documents — [SECURITY_AUDIT.md](SECURITY_AUDIT.md),
-[ENGINEERING_REVIEW.md](ENGINEERING_REVIEW.md),
-[REMEDIATION_REPORT.md](REMEDIATION_REPORT.md),
-[IDENTITY_RESOLUTION.md](IDENTITY_RESOLUTION.md),
-[HARDENING_CHANGELOG.md](HARDENING_CHANGELOG.md) — so this entry records only
-what a future session needs to know and would not otherwise find.
+in the step that had no layer: deciding who is who.** The audit produced five
+documents and **they are deliberately not in this repository** — see the entry
+below for why. So this log is the only account of it here, and this entry
+records the decisions rather than the reproductions.
 
 **The lesson that generalises, and it is uncomfortable.** Every instrument this
 project has built measures the *transformation*: `validate` checks the shape of
@@ -2287,6 +2286,45 @@ the third. A dataset still holding a withdrawn record verifies perfectly and
 correctly, because its bytes have not changed since the manifest was written.
 The command now prints that, and a test keeps an old dataset with its old
 manifest and shows that verification is entirely happy with it.
+
+**2026-11-13 — The audit's five documents are deliberately not in this
+repository, and a `git rm` is not what removed them.** The remediation brief
+asked for `SECURITY_AUDIT.md`, `ENGINEERING_REVIEW.md`,
+`REMEDIATION_REPORT.md`, `IDENTITY_RESOLUTION.md` and
+`HARDENING_CHANGELOG.md`. They were written, committed and pushed, and then
+taken back out at the author's decision. Three things worth recording, because
+the second is the one a future session will get wrong.
+
+**Why they are out.** `SECURITY_AUDIT.md` carried working reproduction steps —
+two HL7 messages with `UNKNOWN` as the national identifier and a patient's name
+survives into the dataset; a rebuild that does not remove a withdrawn record and
+a `verify` that certifies it. Those are recipes against any dataset built before
+`cf57232`. No such dataset exists outside this machine, so the practical risk was
+nil, which is why this was a decision and not an incident — but the repository
+is one `pip publish` away from being public and the recipes have no reason to be
+in it. The decisions they recorded are here, in this log, which is where this
+project keeps decisions.
+
+**They are untracked, not erased, and the distinction is the whole point.** The
+content remains reachable from `cf57232` through `282bd91`: `git show
+cf57232:SECURITY_AUDIT.md` prints it, in any clone, forever. **A `git rm` is not
+a redaction.** Removing a file in a later commit changes what `HEAD` contains and
+nothing else. Actually removing it would need `git filter-repo` plus a force
+push, which invalidates every clone and still cannot reach copies already taken
+— so if this repository ever goes public, that rewrite has to happen *before*,
+not after. Nobody should read the current tree and conclude the history is clean.
+
+**And how two of them got in is the part that is mine to own.**
+`SECURITY_AUDIT.md` and `ENGINEERING_REVIEW.md` landed in `cf57232`, the Milestone
+A commit, because the staging was `git add -A` — and **that commit's message does
+not mention them.** A thousand lines of security document added by a commit about
+identity resolution. The `.gitignore` now lists all five with a leading slash,
+anchored the way the 2026-11-07 incident taught, so the next `git add -A` cannot
+put them back. The generalisable form, and it is the second entry in this log
+about the same tool: **`git add -A` stages what you were not thinking about, and
+a commit message that does not account for a file is how that file ends up
+somewhere nobody decided to put it.**
+
 
 ## Conventions
 

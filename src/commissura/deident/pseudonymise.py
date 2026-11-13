@@ -80,7 +80,8 @@ A subject established from a *well-formed* codice fiscale derives from the
 normalised identifier, and a well-formed codice fiscale normalises to itself —
 so every label this tool has issued from valid input is unchanged, and a
 1.0.0 dataset remains linkable with a 1.1.0 one. Verified rather than assumed:
-see ``IDENTITY_RESOLUTION.md``.
+every subject label in the twenty-five-subject walkthrough corpus and in a
+second four-subject corpus is identical before and after.
 
 What does change: a corpus whose identifiers were lowercase, or carried internal
 whitespace, or were compatibility-encoded, previously produced one label per
@@ -89,6 +90,12 @@ rule version is how a holder tells that a rebuild will move them. Subjects
 established from a record number are new in 1.1.0 and have no 1.0.0 counterpart:
 the records that now form them were previously merged under whatever placeholder
 their export sent.
+
+A rebuild is the whole of the migration, and there is deliberately no in-place
+upgrade: a dataset whose subjects were merged wrongly cannot be corrected by
+relabelling, because the records inside a merged subject have to be separated
+first. :mod:`commissura.read.identity` is where the policy that decides that
+lives.
 """
 
 _DOMAIN_SUBJECT: Final = "subject|"
