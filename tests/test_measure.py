@@ -24,6 +24,8 @@ from commissura.measure import (
     ANNOTATIONS_PATH,
     MEASURABLE_LENGTH,
     RETAINED_BY_DESIGN,
+    CategoryResult,
+    MeasureReport,
     declared_values,
     excluded_record_count,
     measure,
@@ -369,3 +371,25 @@ def test_declared_values_survives_a_missing_or_damaged_description(tmp_path: Pat
     description.unlink()
     assert declared_values(out) == frozenset()
     assert measure(raw, out).recall is not None
+
+
+def test_a_category_with_nothing_measurable_scores_none_not_perfect() -> None:
+    """A rule that was never exercised has not earned 100%.
+
+    The only way to report a perfect score for an empty category is to compute
+    ``removed / measurable`` and call ``0 / 0`` a win. Printing 100% there is
+    how a corpus that tests nothing comes to look like a corpus that passes,
+    which is the opposite of what this command is for.
+    """
+    empty = CategoryResult(
+        category=PhiCategory.CONTACT,
+        planted=0,
+        measurable=0,
+        removed=0,
+        survived=0,
+        too_short=0,
+        declared=0,
+    )
+
+    assert empty.recall is None
+    assert MeasureReport(categories=(empty,), misses=(), dataset_files=0).recall is None

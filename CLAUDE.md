@@ -2063,6 +2063,68 @@ maintain and nothing to secure.
 Revisit only if somebody who has used the CLI says the interface is what stopped
 them. Nobody has said that, because nobody has used the CLI.
 
+**2026-11-13 — An audit asked the manifest question a fourth time and the answer
+was yes, twice. Breaking change, schema 4.0.0.** The pattern had been found
+three times — an absolute path, quoted residual-risk tokens, an institution
+address — so the instruction was to look for a fourth: *for every field of
+`.deident/manifest.json`, can it carry something derived from the input?*
+
+Two could. `source.linkage_issues` and `source.records_dropped` each carried a
+`detail` sentence assembled from the file that failed, so an unlinked report
+named a codice fiscale and an unreadable file named a path with an exception
+message, in the one document written to be sent to an access body. Both are now
+`{reason, count}` only, and the modality ledgers' `unreadable` is a count rather
+than a list of `path: error` strings. `build` prints the detail to the terminal,
+which does not travel — the same split already decided for `records_dropped`
+paths the day before.
+
+**The shape had been wrong since linkage issues were first recorded, and never
+fired.** Every corpus tested had zero of them, so an empty list hid an unsafe
+shape until `records_dropped` gave it a non-empty case. That is the fourth time
+this project has found a latent problem behind "the list happened to be empty",
+after the conformance test that skipped silently, the contact rule no corpus
+exercised, and the drop reporting itself. The generalisable form: **an empty
+collection is not evidence that what fills it is safe.** The test that now
+guards it is class-level — no planted identifier from the ground truth appears
+anywhere in the manifest, whatever field it would travel in — because a test
+naming the two fields would have passed on the next field somebody added.
+
+Three other findings from the same audit, none of them a leak:
+
+**The one place input reaches a format a browser interprets was escaping all but
+two interpolations.** `build --report` assembles HTML by hand, deliberately, and
+every value goes through `_esc` — except the two `class="tag {...}"` attributes,
+where a disposition reading `removed" onmouseover="alert(1)` closed the
+attribute and attached an event handler. Proven by passing that value through
+the real renderer, not by reading. The existing balanced-HTML test **passed with
+the injection in place**, which is the lesson worth keeping: a balance check
+cannot see an attribute breakout, because the result is still balanced. The new
+test parses the document and asserts on the set of attribute *names*, and the
+dispositions are written by this tool — the manifest is read back from disk, so
+"this value cannot contain a quote" is a statement about the code and not about
+the file.
+
+**`measure` was quadratic in the dataset.** It searched every file for every
+span. Now one joined text answers "is this string anywhere", and only a span
+that survived that is attributed to a file. 60 subjects went from 60.4s to
+14.7s; 8 from 2.0s to 0.6s. Same output, checked by comparing the reports.
+
+**`read_exact` existed three times** — in the corpus reader, the corpus writer
+and the validator's context — identical, 20 lines of docstring apiece. One copy
+now, in `read.corpus`, which has the fewest dependencies, and it keeps the
+docstring that says *why*: `Path.read_text` grew `newline` only in 3.13 and this
+project supports 3.11, and without it a bare carriage return would be
+translated on Windows and every offset after the first would be wrong. Three
+copies of a byte-exactness primitive is three places for one to drift.
+
+And one test gap the coverage report had been showing all along: `recall`
+returns `None` rather than 1.0 for a category with nothing measurable, and no
+test exercised it. The decision is deliberate — printing 100% for a rule that
+never fired is how a corpus that tests nothing comes to look like a corpus that
+passes — so it now has a test. Both new tests were checked by sabotage before
+being trusted, which is this project's rule: a guard nobody has watched fail is
+a guard nobody has tested.
+
 ## Conventions
 
 - English for code, comments, docs, commit messages.

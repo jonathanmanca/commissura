@@ -11,10 +11,10 @@ from commissura.generate.writer import (
     ANNOTATION_SCHEMA_VERSION,
     _write_json,
     _write_text,
-    read_exact,
     verify_corpus,
     write_corpus,
 )
+from commissura.read.corpus import read_exact
 
 
 def test_read_exact_preserves_a_bare_carriage_return(tmp_path: Path) -> None:

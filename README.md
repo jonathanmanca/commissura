@@ -744,6 +744,18 @@ pseudonymiser, which is a fact about the code rather than about the data. A
 `replaced` value is still relinkable by whoever holds the key; a `kept` value is
 the original.
 
+A label this tool does not recognise is reported as a class rather than
+quoted, because a header label from somebody else's template is written beside
+the value it labels and is a line of the input:
+
+```json
+{ "field": "other labelled lines", "disposition": "removed", "files_present": 49 }
+```
+
+That row is how you find out your template carries fields this tool never saw —
+the same signal as reports landing in `records_dropped`, in the table rather
+than in a count.
+
 A report's prose body is not a field, so the reports modality carries a second
 table beside the first, with the same three-way vocabulary:
 
@@ -998,6 +1010,16 @@ Two leaks, neither visible by reading the code:
   other trace of it had been removed — the document saying "I could not remove
   these" was handing them over. It now reports a count and a length range, and
   the file path tells a reviewer where to look.
+
+Two more came later, from an audit that went looking for the same pattern a
+fourth time — *for every field of the manifest, can it carry something derived
+from the input?* It could, twice. A linkage issue and a dropped record each
+carried a `detail` sentence built from the file that failed, so an unlinked
+report put a codice fiscale in the document, and an unreadable file put a path
+and an exception message there. Both are now counted by reason, and `build`
+prints the paths to the terminal, which does not travel. The shape had been
+wrong since linkage issues were first recorded and never fired, because every
+corpus tested had none: an empty list hid an unsafe shape.
 
 A third, found while measuring a smaller corpus: a site that sent laboratory
 messages and wrote reports but produced no imaging study had its street address

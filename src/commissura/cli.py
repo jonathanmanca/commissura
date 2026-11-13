@@ -612,13 +612,19 @@ def build(
         typer.echo(f"  free-text redactions   {summary.redaction_count}")
         typer.echo(f"  linkage issues         {summary.linkage_issues}")
         typer.echo(f"  records dropped        {len(summary.dropped)}  (no readable date)")
-        # Printed here and nowhere else. The manifest records how many and
-        # why but not which, because a filename usually holds the record
-        # number and that document travels. This output does not.
+        # Printed here and nowhere else. The manifest records how many records
+        # are absent and why, but not which and not the detail: a filename holds
+        # a record number, and a detail sentence is built from the input - an
+        # unlinked report's named a codice fiscale. That document travels. This
+        # output does not.
         for record in summary.dropped[:10]:
             typer.echo(f"    {record.path}  ({record.reason})")
         if len(summary.dropped) > 10:
             typer.echo(f"    ... and {len(summary.dropped) - 10} more")
+        for issue in corpus.issues[:10]:
+            typer.echo(f"    {issue.path}  ({issue.reason}: {issue.detail})")
+        if len(corpus.issues) > 10:
+            typer.echo(f"    ... and {len(corpus.issues) - 10} more linkage issue(s)")
         typer.echo(
             f"  minimum k              {risk['minimum_k']}"
             f"  ({len(risk['combinations_below_threshold'])} combination(s) below "  # type: ignore[arg-type]

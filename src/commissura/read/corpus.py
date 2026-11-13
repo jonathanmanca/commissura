@@ -118,7 +118,26 @@ def _untyped_identifier(pid: Segment) -> str:
 
 
 def read_exact(path: Path) -> str:
-    """Read text with no newline translation, on every supported Python."""
+    """Read a file's text with no newline translation, on every supported Python.
+
+    ``Path.read_text`` grew a ``newline`` parameter only in Python 3.13, and this
+    project supports 3.11. Going through :meth:`Path.open`, which has accepted it
+    all along, keeps the behaviour identical across the whole supported range.
+
+    Without this, reading a corpus file on Windows would translate the bare
+    carriage returns that terminate HL7 segments, and every character offset
+    after the first one would be wrong.
+
+    This is the project's only copy. It lived in three modules — here, in the
+    corpus writer and in the validator's context — and three copies of a
+    byte-exactness primitive is three places for one of them to drift.
+
+    Args:
+        path: File to read.
+
+    Returns:
+        The exact characters on disk, decoded as UTF-8.
+    """
     with path.open(encoding="utf-8", newline="") as handle:
         return handle.read()
 

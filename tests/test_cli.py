@@ -944,7 +944,7 @@ def test_build_prints_the_dropped_paths_but_the_manifest_does_not_record_them(
     assert "records dropped" in result.stdout
     dropped = json.loads(manifest)["source"]["records_dropped"]
     assert dropped, "this corpus should trip reports.unreadable_date"
-    assert all(set(row) == {"reason", "count", "detail"} for row in dropped)
+    assert all(set(row) == {"reason", "count"} for row in dropped)
     # The filenames reached the terminal and not the file that ships.
     printed = [line for line in result.stdout.splitlines() if "undated_record" in line]
     assert printed

@@ -9,8 +9,8 @@ import pytest
 
 from commissura.generate.cohort import CohortSpec, build_cohort, child_seed
 from commissura.generate.defects import BY_ID
-from commissura.generate.writer import read_exact, verify_corpus, write_corpus
-from commissura.read.corpus import read_corpus
+from commissura.generate.writer import verify_corpus, write_corpus
+from commissura.read.corpus import read_corpus, read_exact
 
 
 def _corpus(tmp_path: Path, name: str, **kwargs: object) -> Path:

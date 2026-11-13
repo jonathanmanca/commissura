@@ -50,6 +50,7 @@ from commissura.models import (
     PhiSpan,
     ReportKind,
 )
+from commissura.read.corpus import read_exact
 
 ANNOTATION_SCHEMA_VERSION = "1.0.0"
 """Schema version of ``phi_annotations.json``.
@@ -72,27 +73,6 @@ class CorpusSummary:
         """Return the number of clinical files written, excluding metadata."""
         counts = self.manifest.files
         return counts.lab + counts.reports + counts.imaging
-
-
-def read_exact(path: Path) -> str:
-    """Read a file's text with no newline translation, on every supported Python.
-
-    ``Path.read_text`` grew a ``newline`` parameter only in Python 3.13, and this
-    project supports 3.11. Going through :meth:`Path.open`, which has accepted it
-    all along, keeps the behaviour identical across the whole supported range.
-
-    Without this, reading a corpus file on Windows would translate the bare
-    carriage returns that terminate HL7 segments, and every character offset
-    after the first one would be wrong.
-
-    Args:
-        path: File to read.
-
-    Returns:
-        The exact characters on disk, decoded as UTF-8.
-    """
-    with path.open(encoding="utf-8", newline="") as handle:
-        return handle.read()
 
 
 def _write_text(path: Path, content: str) -> None:

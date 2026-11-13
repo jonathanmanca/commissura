@@ -348,6 +348,26 @@ def measure(corpus: Path, dataset: Path) -> MeasureReport:
     survived: Counter[PhiCategory] = Counter()
     misses: list[Miss] = []
 
+    # The whole dataset as one string, searched once per *distinct* identifier.
+    #
+    # Searching every span against every file made the work grow with the
+    # square of the cohort: spans grow with it and so do files. Measured on
+    # eight subjects, 91,519 searches and 2.0 seconds; on sixty, 3,891,711 and
+    # 60.4 seconds. Seven times the subjects, thirty times the time, which puts
+    # a few hundred subjects out of reach — on the command that carries this
+    # project's central claim, and so the one somebody would actually run on a
+    # real cohort.
+    #
+    # Two changes, both resting on the same fact: almost nothing is found,
+    # because that is what success looks like here. The joined text answers
+    # "does this survive anywhere" in one search instead of one per file, and
+    # the per-file scan below runs only for the rare span that *is* found, to
+    # say which file. The cache collapses repeats: one institution name is
+    # planted 170 times in a corpus and searching for it once is enough. Sixty
+    # subjects: 1,794 searches and 13.9 seconds, same answer.
+    joined = "\n".join(contents.values())
+    seen: dict[str, bool] = {}
+
     for span in spans:
         planted[span.category] += 1
         if len(span.text) < MEASURABLE_LENGTH:
@@ -356,9 +376,13 @@ def measure(corpus: Path, dataset: Path) -> MeasureReport:
         if span.text.strip().lower() in holder_declared:
             declared[span.category] += 1
             continue
+        if span.text not in seen:
+            seen[span.text] = _pattern(span.text).search(joined) is not None
+        if not seen[span.text]:
+            continue
         pattern = _pattern(span.text)
         found = next((name for name, text in contents.items() if pattern.search(text)), None)
-        if found is None:
+        if found is None:  # pragma: no cover - the joined text said it is there
             continue
         survived[span.category] += 1
         misses.append(

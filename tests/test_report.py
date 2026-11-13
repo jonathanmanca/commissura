@@ -30,6 +30,9 @@ from commissura.read.corpus import RawCorpus, read_corpus
 
 KEY = SecretKey(bytes(range(32)))
 
+HOSTILE = 'removed" onmouseover="alert(1)'
+"""A disposition that closes its own attribute, if nothing escapes it."""
+
 VOID_ELEMENTS = frozenset(
     {"meta", "br", "hr", "img", "input", "link", "area", "base", "col", "embed"}
 )
@@ -303,3 +306,57 @@ def test_the_dataset_never_contains_the_report(tmp_path: Path) -> None:
 
     assert not [name for name in recorded if name.endswith(".html")]
     assert not list(summary.root.rglob("*.html"))
+
+
+class _Attributes(HTMLParser):
+    """Collect every attribute name the parser actually sees."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.names: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for name, _ in attrs:
+            self.names.add(name)
+
+
+def _hostile_dispositions(manifest: dict) -> dict:  # type: ignore[type-arg]
+    """Return the manifest with every disposition replaced by markup."""
+    poisoned = dict(manifest)
+    modalities = []
+    for entry in manifest["modalities"]:
+        copy = dict(entry)
+        for table in ("fields", "body"):
+            rows = copy.get(table)
+            if isinstance(rows, list):
+                copy[table] = [{**row, "disposition": HOSTILE} for row in rows]
+        modalities.append(copy)
+    poisoned["modalities"] = modalities
+    return poisoned
+
+
+def test_a_disposition_cannot_break_out_of_its_class_attribute(tmp_path: Path) -> None:
+    """Every interpolation goes through the escaper, attributes included.
+
+    The three dispositions are written by this tool, so a value carrying a
+    quote "cannot" happen — but the manifest is read back from disk, and
+    somebody with write access to a share is the threat ``manifest_hmac``
+    exists for. Unescaped, this closed the attribute and attached an event
+    handler to the page, and balanced-HTML checking cannot see it because the
+    result is still balanced.
+    """
+    corpus, summary, manifest, risk = built(tmp_path)
+
+    document = render(
+        corpus=corpus,
+        summary=summary,
+        manifest=_hostile_dispositions(manifest),
+        risk=risk,
+        comparisons=[],
+    )
+
+    parser = _Attributes()
+    parser.feed(document)
+    assert "onmouseover" not in parser.names
+    assert parser.names <= {"charset", "class", "lang", "name", "content"}
+    assert HOSTILE not in document

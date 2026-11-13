@@ -237,7 +237,7 @@ def build_dataset(
                     "modality": "lab",
                     "key_kind": "HL7 v2 field",
                     "files_read": 2,
-                    "unreadable": [],
+                    "unreadable": 0,
                     "fields_observed": {"removed": 1, "replaced": 1, "kept": 1},
                     "fields": [
                         {

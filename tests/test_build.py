@@ -26,6 +26,7 @@ from commissura.build.manifest import (
     write_healthdcat_description,
     write_manifest,
 )
+from commissura.build.risk import write_risk_report
 from commissura.build.scrub import (
     CATEGORY_DISPOSITION,
     PLACEHOLDER_BIRTH_DATE,
@@ -42,6 +43,7 @@ from commissura.deident.keys import SecretKey, generate_key
 from commissura.deident.pseudonymise import Pseudonymiser
 from commissura.generate.cohort import CohortSpec
 from commissura.generate.writer import write_corpus
+from commissura.measure import MEASURABLE_LENGTH, _pattern
 from commissura.read.corpus import Identity, read_corpus
 from commissura.read.hl7 import parse_message, parse_timestamp, unescape
 from commissura.validate import validate_dataset
@@ -501,7 +503,7 @@ def test_the_manifest_records_what_was_done(tmp_path: Path) -> None:
 
     for ledger in ledgers.values():
         assert ledger["files_read"] > 0
-        assert ledger["unreadable"] == []
+        assert ledger["unreadable"] == 0
         for item in ledger["fields"]:
             # A count above the number of files read would mean occurrences were
             # being counted, not files.
@@ -1102,17 +1104,13 @@ def test_a_dropped_record_reaches_the_manifest(tmp_path: Path) -> None:
         (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
     )["source"]
 
-    # Counted by reason and *without the path*: an export names its files after
-    # the record they hold, so a list of paths is a list of record numbers, in
-    # the document written to be sent to an access body.
-    assert source["records_dropped"] == [
-        {
-            "reason": "undated_record",
-            "count": 1,
-            "detail": source["records_dropped"][0]["detail"],
-        }
-    ]
+    # Counted by reason, without the path *and* without the detail. A path is a
+    # record number; a detail is a sentence built from the input. Both were in
+    # this list and both are gone, because this document is read by an access
+    # body.
+    assert source["records_dropped"] == [{"reason": "undated_record", "count": 1}]
     assert "reports/r.txt" not in json.dumps(source)
+    assert "Data del referto" not in json.dumps(source)
     # One number answering "what did I hand over that is not here", across both
     # the records that could not be attached and the ones that were and then
     # had nowhere to go.
@@ -1128,3 +1126,157 @@ def test_a_clean_corpus_drops_nothing(tmp_path: Path) -> None:
         (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
     )
     assert manifest["source"]["records_not_in_dataset"] == 0
+
+
+def test_the_manifest_never_carries_an_identifier_from_an_unlinked_record(
+    tmp_path: Path,
+) -> None:
+    """Found by audit, after two earlier fixes to the same field missed it.
+
+    An unlinked report's detail read "no subject for national id 'FRR...' or
+    record number '999...'" and that sentence was published. The paths were
+    taken out of this list and the detail beside them was left, which was the
+    worse half: a path holds one identifier, a detail holds two and spells them.
+    """
+    raw, out = tmp_path / "raw", tmp_path / "dataset"
+    (raw / "lab").mkdir(parents=True)
+    (raw / "lab" / "a.hl7").write_text(
+        _lab_message(national_id="RSSMRA80A01X000A", mrn="0012345", collected="20240101110000"),
+        encoding="utf-8",
+        newline="",
+    )
+    (raw / "reports").mkdir()
+    # A report belonging to nobody in the corpus: it names its own identifiers.
+    (raw / "reports" / "orphan.txt").write_text(
+        "OSPEDALE SINTETICO\n\nPaziente: GIULIA FERRARA\n"
+        "Codice fiscale: FRRGLI50L55X959F\n"
+        "Numero nosografico: 9998887\n"
+        "Data del referto: 01/02/2024\n",
+        encoding="utf-8",
+        newline="",
+    )
+    corpus = read_corpus(raw)
+    assert [issue.reason for issue in corpus.issues] == ["unlinked_report"]
+
+    spec = _spec()
+    summary = build_dataset(corpus, KEY, spec, out)
+    write_manifest(out, corpus=corpus, summary=summary, key=KEY, spec=spec)
+    text = (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+
+    assert "FRRGLI50L55X959F" not in text
+    assert "9998887" not in text
+    assert "FERRARA" not in text
+    # The count and the reason still reach the reader, which is what an auditor
+    # needs: how many records are absent, and why.
+    source = json.loads(text)["source"]
+    assert source["linkage_issues"] == [{"reason": "unlinked_report", "count": 1}]
+
+
+def test_the_manifest_never_carries_an_absolute_path_from_an_error(tmp_path: Path) -> None:
+    """The other half of the same finding, by a different route.
+
+    `unreadable_*` details were `str(exc)`, and for an OSError that is the
+    file's absolute path — the operator's account name and a record number in
+    one string. Exactly the leak `source.root_name` was changed to stop,
+    arriving through an exception message instead.
+    """
+    raw, out = tmp_path / "raw", tmp_path / "dataset"
+    (raw / "lab").mkdir(parents=True)
+    (raw / "lab" / "a.hl7").write_text(
+        _lab_message(national_id="RSSMRA80A01X000A", mrn="0012345", collected="20240101110000"),
+        encoding="utf-8",
+        newline="",
+    )
+    # A directory where a message should be: opening it raises OSError, and the
+    # message carries the whole path.
+    (raw / "lab" / "9991112_LAB7.hl7").mkdir()
+    corpus = read_corpus(raw)
+    unreadable = [i for i in corpus.issues if i.reason == "unreadable_lab_message"]
+    assert unreadable, "this should produce an unreadable message"
+    assert "9991112" in unreadable[0].detail, "the detail does carry the path"
+
+    spec = _spec()
+    summary = build_dataset(corpus, KEY, spec, out)
+    write_manifest(out, corpus=corpus, summary=summary, key=KEY, spec=spec)
+    text = (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+
+    assert "9991112" not in text
+    assert str(tmp_path) not in text
+    assert str(tmp_path).replace("\\", "\\\\") not in text
+
+
+def test_no_planted_identifier_reaches_the_manifest_at_all(tmp_path: Path) -> None:
+    """The general form of three separate findings, so there is no fourth hunt.
+
+    Each of those was a field that looked like metadata and carried something
+    derived from the input: an absolute path, a quoted token, a detail sentence,
+    a file name, an error message. Rather than check the next candidate field by
+    hand, this checks the property: no identifier the generator planted appears
+    anywhere in `.deident/manifest.json`.
+
+    The corpus is built with defects on, because every one of those leaks only
+    appeared when something in the input went wrong — a clean corpus is exactly
+    the one that misses them.
+    """
+    raw, out = tmp_path / "raw", tmp_path / "dataset"
+    write_corpus(CohortSpec(subjects=8, seed=5, defect_rate=0.6), raw)
+    # Something unreadable, so the error-message paths are exercised too.
+    (raw / "imaging" / "9991112_RAD7.json").write_text("{ not json", encoding="utf-8")
+    # And one subject's laboratory messages removed, which is what a partial
+    # export looks like. Their reports then belong to nobody and are reported as
+    # unlinked — while still carrying that person's planted identifiers, which
+    # is the case the detail string used to publish.
+    #
+    # Found the hard way, twice. With the generated defects alone this corpus
+    # has no linkage issue at all, so the first version of this test passed
+    # while the leak was in place. Adding a hand-written orphan report did not
+    # help either: its identifiers were invented here and so are not in the
+    # ground truth this test checks against. An empty list hides an unsafe
+    # shape, and a test can exercise a path while checking nothing on it.
+    orphaned = sorted((raw / "lab").glob("*.hl7"))[0].name.split("_")[0]
+    for message in (raw / "lab").glob(f"{orphaned}_*.hl7"):
+        message.unlink()
+    assert list((raw / "reports").glob(f"{orphaned}_*.txt")), "that subject needs reports"
+
+    corpus = read_corpus(raw)
+    assert "unlinked_report" in {issue.reason for issue in corpus.issues}
+
+    spec = _spec()
+    summary = build_dataset(corpus, KEY, spec, out)
+    write_healthdcat_description(out, spec=spec, summary=summary)
+    write_risk_report(out)
+    write_manifest(out, corpus=corpus, summary=summary, key=KEY, spec=spec)
+
+    manifest = (out / layout.DEIDENT_DIR / layout.MANIFEST_JSON).read_text(encoding="utf-8")
+    # The values the holder typed are in the dataset because the holder put
+    # them there, not because redaction failed — the same exclusion `measure`
+    # makes, and for the same reason.
+    declared = {
+        value.lower()
+        for value in (spec.publisher, spec.hdab, spec.contact_point)
+        if value is not None
+    }
+    spans = json.loads((raw / "_generator" / "phi_annotations.json").read_text(encoding="utf-8"))[
+        "spans"
+    ]
+
+    # Matched with `measure`'s own pattern, which is bounded by non-alphanumerics.
+    # A plain substring search reports ANNA as leaked because it sits inside the
+    # DICOM keyword PhysicianName - the same false positive `measure` already
+    # guards against, and the test and the measurement should agree on what
+    # counts as an occurrence.
+    leaked = sorted(
+        {
+            span["text"]
+            for span in spans
+            # Four characters is the scrubber's own floor: below it a string is
+            # as likely to be part of an ordinary word as to be the identifier.
+            if len(span["text"]) >= MEASURABLE_LENGTH
+            and span["text"].lower() not in declared
+            and _pattern(span["text"]).search(manifest)
+        }
+    )
+
+    assert not leaked, leaked
+    # And the file names themselves, which carry the record number.
+    assert not [name for name in (p.name for p in raw.rglob("*.hl7")) if name in manifest]

@@ -25,24 +25,7 @@ from functools import cached_property
 from pathlib import Path
 
 from commissura import layout
-
-
-def read_exact(path: Path) -> str:
-    """Read a file's text with no newline translation.
-
-    ``Path.read_text`` accepts ``newline`` only from Python 3.13 and this
-    project supports 3.11, so the read goes through :meth:`Path.open`.
-    Translation would corrupt offsets and line counts in anything carrying bare
-    carriage returns.
-
-    Args:
-        path: File to read.
-
-    Returns:
-        The exact characters on disk, decoded as UTF-8.
-    """
-    with path.open(encoding="utf-8", newline="") as handle:
-        return handle.read()
+from commissura.read.corpus import read_exact
 
 
 @dataclass(frozen=True, slots=True)

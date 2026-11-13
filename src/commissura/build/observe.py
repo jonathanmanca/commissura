@@ -144,6 +144,23 @@ module reported honestly as a field carried in zero files, and which is how the
 omission was noticed.
 """
 
+_REDACTED_REPORT_LABELS: Final[frozenset[str]] = frozenset(
+    {"Paziente", "Codice fiscale", "Numero nosografico", "Nato/a il"}
+)
+"""Report labels this project knows and removes, so they can be named.
+
+Together with the carried labels these are the headers the pipeline actually
+understands. Naming them is safe because they are the *label*, chosen by this
+project's own template, and not the value beside it. Anything else is counted
+under :data:`UNDECLARED_LABELS` rather than printed, because in free text a
+"label" can be a person's name.
+
+Listed here rather than read from `read.corpus._REPORT_LABELS` because that
+table maps labels to the fields linkage needs, while this is the set the field
+table may print. They overlap today and need not: a label can be understood and
+removed without being something linkage uses.
+"""
+
 _EXTENSION_OF: Final[dict[str, str]] = {
     "lab": "HL7 v2 field",
     "reports": "report header label",
@@ -293,6 +310,24 @@ def imaging_fields(path: Path) -> set[str]:
     }
 
 
+UNDECLARED_LABELS: Final = "other labelled lines"
+"""The one row that stands for every label this project did not declare.
+
+A patient's name is not allowed to become a field name, and that is what the
+alternative did. The header pattern matches "word, colon, space", and ordinary
+clinical prose matches it too: a line reading ``Rossi Mario: paziente noto
+per...`` yields the label ``Rossi Mario``, and ``Dott Bianchi Anna: concorda``
+yields a clinician. Both were then published in the manifest's field table —
+the same names the scrubber had just removed from the body of that report, in
+the document written to be sent to an access body.
+
+So an unrecognised label is counted under this name and never quoted. The count
+still does the job the generic matching was for: it tells a reader that the
+template carries labelled lines this build did not understand, and `--report`
+or the file itself is where to go and look at them.
+"""
+
+
 def report_fields(path: Path) -> set[str]:
     """Return the labelled headers one free-text report carries.
 
@@ -300,10 +335,17 @@ def report_fields(path: Path) -> set[str]:
         path: The report file.
 
     Returns:
-        The header labels, without their colons. The body is not a field and is
-        not described here; the scrubber measures what became of it.
+        The declared labels the document carries, plus
+        :data:`UNDECLARED_LABELS` standing for any others. The body is not a
+        field and is not described here; the scrubber measures what became of
+        it.
     """
-    return {label.strip() for label in _HEADER_LABEL.findall(read_exact(path))}
+    declared = set(CARRIED_FIELDS["reports"]) | _REDACTED_REPORT_LABELS
+    found: set[str] = set()
+    for label in _HEADER_LABEL.findall(read_exact(path)):
+        stripped = label.strip()
+        found.add(stripped if stripped in declared else UNDECLARED_LABELS)
+    return found
 
 
 _EXTRACTORS: Final[dict[str, Callable[[Path], set[str]]]] = {

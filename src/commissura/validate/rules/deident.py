@@ -26,7 +26,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from commissura import layout
-from commissura.validate.context import DatasetContext, JsonFile, TsvFile, read_exact
+from commissura.read.corpus import read_exact
+from commissura.validate.context import DatasetContext, JsonFile, TsvFile
 from commissura.validate.findings import Finding, Severity
 from commissura.validate.rules._registry import rule
 

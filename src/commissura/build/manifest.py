@@ -41,7 +41,7 @@ from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_
 from commissura.deident.keys import SecretKey
 from commissura.read.corpus import RawCorpus
 
-MANIFEST_SCHEMA_VERSION = "3.0.0"
+MANIFEST_SCHEMA_VERSION = "4.0.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
@@ -68,28 +68,40 @@ after the record they hold, so they were patient identifiers, in the document
 written to be sent to an access body. The shape had been wrong since linkage
 issues were first recorded and never fired, because every corpus tested had
 none of them.
+
+**4.0.0 drops ``detail`` from both of those lists**, leaving ``reason`` and
+``count``. A reason is a word this project chose; a detail is a sentence built
+from the input, and an unlinked report's named the codice fiscale and the
+record number of the person who could not be matched. Removing the paths in
+3.0.0 and leaving the detail beside them fixed the smaller half.
 """
 
 
-def _by_reason(entries: Iterable[tuple[str, str]]) -> list[dict[str, object]]:
-    """Group records that are absent from the dataset by why they are absent.
+def _by_reason(reasons: Iterable[str]) -> list[dict[str, object]]:
+    """Count records that are absent from the dataset, by why they are absent.
+
+    **The reason token only, never the detail that goes with it.** A reason is a
+    fixed word this project chose; a detail is a sentence built from the input,
+    and the input is patient data. `unlinked_report` details named the codice
+    fiscale and the record number of the person who could not be matched, and
+    `unreadable_lab_message` details were `str(exc)`, which for an OSError is
+    the absolute path of the file — the operator's account name and a record
+    number together. Both were published in the document written to be sent to
+    an access body.
+
+    That is the fourth time the same pattern has been found in this file: a
+    field that looks like metadata and carries something derived from the
+    input. The paths were removed from these lists on 2026-11-12 and the detail
+    beside them was left, which was the worse half.
 
     Args:
-        entries: Pairs of reason token and human-readable detail.
+        reasons: One reason token per absent record.
 
     Returns:
-        One row per reason, with a count and the first detail seen for it,
-        sorted by reason. No paths: see the call site for why.
+        One row per reason with a count, sorted by reason.
     """
-    counts: Counter[str] = Counter()
-    details: dict[str, str] = {}
-    for reason, detail in entries:
-        counts[reason] += 1
-        details.setdefault(reason, detail)
-    return [
-        {"reason": reason, "count": counts[reason], "detail": details[reason]}
-        for reason in sorted(counts)
-    ]
+    counts: Counter[str] = Counter(reasons)
+    return [{"reason": reason, "count": counts[reason]} for reason in sorted(counts)]
 
 
 def _body_payload(reports: Sequence[ScrubReport]) -> list[dict[str, object]]:
@@ -166,7 +178,14 @@ def _ledger_payload(
         "modality": ledger.modality,
         "key_kind": ledger.key_kind,
         "files_read": ledger.files_read,
-        "unreadable": list(ledger.unreadable),
+        # Counted, not named. Found by the test written for the two leaks
+        # above, which is the fifth place in this document where a field that
+        # looks like metadata carried something derived from the input: the
+        # entry was "<relative path>: <exception>", so it held a record number
+        # and, for an OSError, the operator's absolute path as well. The
+        # operator still gets the path, because an unreadable input file also
+        # produces a linkage issue and `build` prints those.
+        "unreadable": len(ledger.unreadable),
         "fields_observed": {
             disposition: ledger.count(disposition)
             for disposition in ("removed", "replaced", "kept")
@@ -268,23 +287,22 @@ def write_manifest(
             # needs to know how many records are absent and why, which is here.
             # The operator needs to know *which* files to go and fix, and gets
             # them from `build`'s own output, which stays on their terminal.
-            "linkage_issues": _by_reason((issue.reason, issue.detail) for issue in corpus.issues),
+            "linkage_issues": _by_reason(issue.reason for issue in corpus.issues),
             # The other half of "what did I hand over that is not here". A
             # linkage issue is a record that could not be attached to anybody;
             # a dropped record was attached and then had nowhere to go, because
             # sessions are dated encounters and it carried no readable date.
             # Separate from the list above, because the two need different fixes
             # and a shared name would misdescribe one of them.
-            "records_dropped": _by_reason(
-                (record.reason, record.detail) for record in summary.dropped
-            ),
+            "records_dropped": _by_reason(record.reason for record in summary.dropped),
             "records_not_in_dataset": len(corpus.issues) + len(summary.dropped),
             "records_not_in_dataset_note": (
-                "Paths are deliberately not recorded. An export names its files "
-                "after the record they hold, so a list of them is a list of "
-                "patient identifiers, and this document is written to be read by "
-                "an access body. `commissura build` prints the paths for the "
-                "operator instead."
+                "Reasons and counts only. Neither the file paths nor the detail "
+                "sentences are recorded: an export names its files after the "
+                "record they hold, and a detail is built from the input, so an "
+                "unlinked report's detail named a codice fiscale and a record "
+                "number. This document is written to be read by an access body. "
+                "`commissura build` prints both for the operator instead."
             ),
         },
         "output": {
