@@ -47,6 +47,15 @@ coverage.xml
 .DS_Store
 Thumbs.db
 
+# The brief, kept out of the repository on purpose. It is an instruction
+# document as much as a project memory, and the author does not want it
+# available to be copied as one. It stays on disk and is still the project's
+# memory; it is simply not versioned here. The consequence is recorded in its
+# own decision log: the command list it carries is no longer mechanically
+# checked, and that guard moved to the README's command table, which is in the
+# repository and is what a stranger reads.
+/CLAUDE.md
+
 # Audit and remediation paperwork, kept out of the repository on purpose.
 # These described the findings of 2026-11-13 with working reproduction steps,
 # which is a recipe against any dataset built before they were fixed. They are

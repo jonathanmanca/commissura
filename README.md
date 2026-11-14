@@ -453,6 +453,12 @@ of the reader.
 Every command that reports anything accepts `--json`, so the tool composes
 inside somebody else's pipeline without being screen-scraped.
 
+A test pins this table against the names the CLI actually registers — both
+directions, so a command missing from it fails and a row claiming one that does
+not exist fails too. A table that lists what the tool does is worth nothing if
+it can quietly stop being true, and this one went stale once in the document it
+used to live in.
+
 ### `commissura generate`
 
 ```bash
