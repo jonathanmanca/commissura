@@ -313,6 +313,42 @@ def _fold_name(value: str) -> str:
     return unicodedata.normalize("NFKD", value).casefold()
 
 
+REASON_KEEPS_RECORD: Final[dict[RefusalReason, bool]] = {
+    RefusalReason.UNREADABLE_LAB_MESSAGE: False,
+    RefusalReason.UNREADABLE_REPORT: False,
+    RefusalReason.UNREADABLE_IMAGING_METADATA: False,
+    RefusalReason.NO_USABLE_IDENTIFIER: False,
+    RefusalReason.AMBIGUOUS_RECORD_NUMBER: False,
+    RefusalReason.UNLINKED_REPORT: False,
+    RefusalReason.UNLINKED_IMAGING: False,
+    RefusalReason.INVALID_NATIONAL_IDENTIFIER: True,
+    RefusalReason.CONFLICTING_IDENTITY: True,
+    RefusalReason.CONFLICTING_REPORT_NAME: True,
+}
+"""Whether a record reported under each reason still reached the dataset.
+
+**This exists because the manifest was overstating how many records were
+absent, and no corpus produced the reasons that made it wrong.**
+``source.records_not_in_dataset`` was defined on 2026-11-12 as the linkage
+issues plus the dropped records, which was correct then: every reason that
+existed meant a record that could not be attached to anybody. Three reasons
+added since attach the record *and* report it — an unusable national identifier
+rescued by a scoped record number, two messages disagreeing about who one
+identifier belongs to, and a report header naming somebody else. For those the
+record is in the dataset and merely suspect.
+
+So the number was wrong from 2026-11-13, and the first corpus to show it was the
+one generated once ``lab.conflicting_identity`` and ``reports.wrong_patient_name``
+existed: 190 records all linked, 3 genuinely absent, and a manifest claiming 32.
+
+Looked up **without a default**, like
+:data:`commissura.build.manifest.CATEGORY_DISPOSITION`, so a reason added
+without declaring which side it falls on raises ``KeyError`` and stops the
+build. A manifest that guessed would be worse than a build that stopped, and
+the guess would be in the one document written to be believed.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class Refusal:
     """A resolution that did not succeed, with the reason and a detail.

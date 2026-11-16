@@ -40,13 +40,21 @@ from commissura.build.scrub import CATEGORY_DISPOSITION, ScrubReport
 from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_now
 from commissura.deident.keys import SecretKey
 from commissura.read.corpus import RawCorpus
-from commissura.read.identity import KeyKind
+from commissura.read.identity import REASON_KEEPS_RECORD, KeyKind, RefusalReason
 
-MANIFEST_SCHEMA_VERSION = "5.0.0"
+MANIFEST_SCHEMA_VERSION = "6.0.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
 different clock from the dataset layout.
+
+**6.0.0, 2026-11-16.** ``source.records_not_in_dataset`` changes meaning: it
+counted every linkage issue plus every dropped record, and three of the reasons
+it was counting attach the record and merely flag it. On the first corpus that
+produced one it claimed 32 records absent where 3 were. Those now land in
+``source.records_flagged_in_dataset``, which is new. A consumer that read the
+old field read a number that was too large, so the major number moves even
+though the field's name did not.
 
 **5.0.0, 2026-11-13.** ``residual_risk.structural`` was a fixed list of four
 prose strings written into every manifest regardless of the dataset. One of them
@@ -88,6 +96,39 @@ from the input, and an unlinked report's named the codice fiscale and the
 record number of the person who could not be matched. Removing the paths in
 3.0.0 and leaving the detail beside them fixed the smaller half.
 """
+
+
+def _absent_record_count(corpus: RawCorpus, summary: BuildSummary) -> int:
+    """Return how many handed-over records are not in the dataset.
+
+    Args:
+        corpus: The linked corpus.
+        summary: What the build produced.
+
+    Returns:
+        The linkage issues whose reason means the record could not be attached,
+        plus every record that was attached and then had nowhere to go.
+    """
+    refused = sum(
+        1 for issue in corpus.issues if not REASON_KEEPS_RECORD[RefusalReason(issue.reason)]
+    )
+    return refused + len(summary.dropped)
+
+
+def _flagged_record_count(corpus: RawCorpus) -> int:
+    """Return how many records are in the dataset and carry a linkage issue.
+
+    A different fact from the one above, and one an auditor needs separately: a
+    record here is published, and something about how it was attributed is
+    worth a second look.
+
+    Args:
+        corpus: The linked corpus.
+
+    Returns:
+        The count.
+    """
+    return sum(1 for issue in corpus.issues if REASON_KEEPS_RECORD[RefusalReason(issue.reason)])
 
 
 def _by_reason(reasons: Iterable[str]) -> list[dict[str, object]]:
@@ -425,14 +466,24 @@ def write_manifest(
             # Separate from the list above, because the two need different fixes
             # and a shared name would misdescribe one of them.
             "records_dropped": _by_reason(record.reason for record in summary.dropped),
-            "records_not_in_dataset": len(corpus.issues) + len(summary.dropped),
+            # Only the reasons that mean the record is *absent*. A reason that
+            # attaches the record and flags it belongs in the field below, and
+            # conflating the two made this number overstate by exactly the
+            # number of flagged records -- 32 claimed where 3 were absent, on
+            # the first corpus that produced a conflict at all.
+            "records_not_in_dataset": _absent_record_count(corpus, summary),
+            "records_flagged_in_dataset": _flagged_record_count(corpus),
             "records_not_in_dataset_note": (
                 "Reasons and counts only. Neither the file paths nor the detail "
                 "sentences are recorded: an export names its files after the "
                 "record they hold, and a detail is built from the input, so an "
                 "unlinked report's detail named a codice fiscale and a record "
                 "number. This document is written to be read by an access body. "
-                "`commissura build` prints both for the operator instead."
+                "`commissura build` prints both for the operator instead. "
+                "`records_not_in_dataset` counts records that are not here; "
+                "`records_flagged_in_dataset` counts records that are here and "
+                "carry a linkage issue anyway, which is a different fact and was "
+                "being added to the first one."
             ),
         },
         "output": {

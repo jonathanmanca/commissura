@@ -305,7 +305,7 @@ def test_the_manifest_is_consistent_after_a_withdrawal(tmp_path: Path) -> None:
     claims = " ".join(_structural(manifest))
 
     assert f"of {len(studies)} studies" in claims
-    assert manifest["schema_version"] == "5.0.0"
+    assert manifest["schema_version"] == "6.0.0"
 
 
 @pytest.mark.parametrize("field", ["modalities", "integrity", "residual_risk", "source"])

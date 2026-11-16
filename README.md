@@ -128,14 +128,14 @@ Wrote 190 files to ./raw
   imaging       27  DICOM JSON Model sidecars
 
   subjects      25  seed 42
-  PHI spans   3654  recorded as ground truth
-  defects      333  injected at rate 0.2
+  PHI spans   3648  recorded as ground truth
+  defects      366  injected at rate 0.2
 
   Verified: every recorded PHI offset matches the file on disk.
 ```
 
-Three separate exports, as a hospital would hand them over, with 333 injected
-defects and 3,654 identifiers whose exact character positions are on record.
+Three separate exports, as a hospital would hand them over, with 366 injected
+defects and 3,648 identifiers whose exact character positions are on record.
 
 ### 3. Build the dataset
 
@@ -148,16 +148,16 @@ commissura build ./raw --out ./dataset --key-file ./commissura.key \
 ```
 
 ```
-Wrote 191 files to ./dataset
-  subjects       25  sessions 80
+Wrote 211 files to ./dataset
+  subjects       25  sessions 90
   lab            94  tables and sidecars
-  reports        70  documents and sidecars
+  reports        90  documents and sidecars
   imaging        27  metadata sidecars in derivatives/
 
   key fingerprint        35eea6fcd0bad4df
-  free-text redactions   702
-  linkage issues         0
-  records dropped        13  (no readable date)
+  free-text redactions   847
+  linkage issues         29
+  records dropped        3  (no readable date)
     reports/5806125_rad_2.txt  (undated_record)
     reports/0976285_dim_1.txt  (undated_record)
     reports/9680416_dim_3.txt  (undated_record)
@@ -203,16 +203,16 @@ WARNING DI009: derivatives/imaging-metadata/sub-744ee679b207_...json
         Identifiers may be rendered into the image itself. This tool does
         not inspect pixel data, so they are still there. Remove or redact
         the pixels before release.
-... five more of the same ...
+... six more of the same ...
 
-CONFORMANT: 0 error(s), 6 warning(s), 0 notice(s) from 40 rules
+CONFORMANT: 0 error(s), 7 warning(s), 0 notice(s) from 40 rules
 ```
 
 `build` already ran this and would have failed if it did not conform. Running it
 separately is for datasets you did not build here.
 
-**The six warnings are the dataset telling you something true about itself.**
-Six of its twenty-seven imaging studies say in their own metadata that
+**The seven warnings are the dataset telling you something true about itself.**
+Seven of its twenty-seven imaging studies say in their own metadata that
 identifiers are rendered into the pixels — put there by the
 `imaging.burned_in_annotation` defect, which is what a real scanner does when a
 technician types a name onto a screen capture. This tool orchestrates `dcm2bids`
@@ -419,7 +419,9 @@ nowhere to go. It is not a linkage issue, because linkage succeeded — so until
 this was fixed nothing said anything at all, and the only evidence was a file
 count lower than the number of files you handed over.
 
-Both are now counted where you will see them:
+Both are now counted where you will see them. On a clean export both are zero;
+the walkthrough above shows 29 and 3, because its corpus has defects injected on
+purpose:
 
 ```
   linkage issues         0
@@ -437,6 +439,36 @@ were attached and then had nowhere to go, and
 because they need different fixes: the first is a labelling problem in your
 export, the second a date format the reader does not recognise. Your terminal
 gets the filenames; the document that travels gets the counts.
+
+**Twenty-nine of those linkage issues are records that *are* in the dataset.**
+A reason either means the record could not be attached to anybody, or it means
+the record was attached and something about the attribution is worth a second
+look. The two are counted separately, because adding them together is a false
+statement about what the dataset contains:
+
+```json
+"linkage_issues": [
+  { "reason": "conflicting_identity",     "count": 17 },
+  { "reason": "conflicting_report_name",  "count": 12 }
+],
+"records_dropped":            [ { "reason": "undated_record", "count": 3 } ],
+"records_not_in_dataset":     3,
+"records_flagged_in_dataset": 29
+```
+
+`conflicting_identity` means two laboratory messages carry one codice fiscale
+with different family names — a mistyped identifier at reception, or one copied
+from another record. `conflicting_report_name` means a report's header names
+somebody other than the subject its identifiers resolve to: a document attached
+to the wrong record, or a template filled in over the previous report. Both
+records stay in the dataset and both names are redacted; what you are told is
+that the attribution is suspect, which is a thing no amount of redacting fixes.
+
+These come from the `lab.conflicting_identity` and
+`reports.wrong_patient_name` defects, injected at the walkthrough's rate. Before
+they existed the corpus reported zero conflicts — not because the data was clean
+but because the generator could not produce one, which left the whole path
+untested end to end.
 
 A dropped record carries one of two reasons. `undated_record` names the field
 that should have held a date. `subject_has_no_dated_event` is worse and is

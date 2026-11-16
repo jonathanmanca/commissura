@@ -38,6 +38,7 @@ from random import Random
 
 from commissura import __version__
 from commissura.annotate import check_spans
+from commissura.generate import vocabulary
 from commissura.generate.cohort import CohortSpec, PlannedSubject, build_cohort, child_seed
 from commissura.generate.defects import DefectInjector
 from commissura.generate.imaging import render_study
@@ -47,8 +48,10 @@ from commissura.models import (
     AppliedDefect,
     GenerationManifest,
     ModalityCounts,
+    Person,
     PhiSpan,
     ReportKind,
+    Sex,
 )
 from commissura.read.corpus import read_exact
 
@@ -73,6 +76,42 @@ class CorpusSummary:
         """Return the number of clinical files written, excluding metadata."""
         counts = self.manifest.files
         return counts.lab + counts.reports + counts.imaging
+
+
+def _another_name(rng: Random, person: Person, *, surname_only: bool = False) -> Person:
+    """Return the same person with somebody else's name on them.
+
+    Everything that identifies the record is kept — the codice fiscale, the
+    record number, the address, the birth date — so the document still links to
+    the subject it was always about. Only the name differs, which is what makes
+    this a *conflict* rather than an unrelated document: two sources agreeing on
+    the identifier and disagreeing on the person.
+
+    The substituted name goes through the same :class:`~commissura.annotate.Phi`
+    wrapping as any other, so it lands in the ground truth automatically. That
+    is the point of doing it this way rather than editing the rendered text: a
+    name planted in a document it does not belong to is a person's identifier
+    where it should not be, and ``commissura measure`` has to be able to check
+    that it was removed.
+
+    Args:
+        rng: Seeded random source.
+        person: The subject the document belongs to.
+        surname_only: Replace the family name alone, which is the shape a
+            mistyped codice fiscale takes — the given name is usually right
+            because whoever typed it was looking at the right patient.
+
+    Returns:
+        A copy with a different name and every identifier unchanged.
+    """
+    family = rng.choice([n for n in vocabulary.FAMILY_NAMES if n != person.family_name])
+    if surname_only:
+        return person.model_copy(update={"family_name": family})
+    pool = (
+        vocabulary.GIVEN_NAMES_FEMALE if person.sex is Sex.FEMALE else vocabulary.GIVEN_NAMES_MALE
+    )
+    given = rng.choice([n for n in pool if n != person.given_name])
+    return person.model_copy(update={"family_name": family, "given_name": given})
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -135,6 +174,21 @@ def _render_subject(
     # --- Laboratory ---
     for position, panel in enumerate(planned.subject.panels):
         relative = f"lab/{person.mrn}_{panel.accession}.hl7"
+        # A conflicting identity is a property of a *pair* of messages, not of
+        # either one alone, so the first message is not an opportunity for one:
+        # there is nothing for it to disagree with. The draw still happens for
+        # every panel, which keeps the random stream stable against the shape
+        # of a cohort, and only a draw that is actually used is recorded.
+        speaking_for = person
+        if injector.should_apply("lab.conflicting_identity") and position > 0:
+            speaking_for = _another_name(render_rng, person, surname_only=True)
+            injector.record(
+                "lab.conflicting_identity",
+                relative,
+                f"PID-5 family name replaced with {speaking_for.family_name!r}: "
+                "this message and the subject's others claim one codice fiscale "
+                "for two people",
+            )
         control_id = (
             planned.control_ids[position]
             if position < len(planned.control_ids)
@@ -142,7 +196,7 @@ def _render_subject(
         )
         content, panel_spans = render_panel(
             panel,
-            person=person,
+            person=speaking_for,
             site=planned.site,
             path=relative,
             control_id=control_id,
@@ -182,9 +236,17 @@ def _render_subject(
         # actually precedes it. Inventing a comparison that never happened would
         # make the corpus internally inconsistent in a way nothing records.
         earlier = [moment for moment in study_dates if moment < report.authored_at]
+        named_in_header = person
+        if injector.apply(
+            "reports.wrong_patient_name",
+            relative,
+            "the Paziente header names somebody other than the subject this "
+            "document links to by codice fiscale and record number",
+        ):
+            named_in_header = _another_name(render_rng, person)
         content, report_spans = render_report(
             report,
-            person=person,
+            person=named_in_header,
             site=planned.site,
             path=relative,
             rng=render_rng,

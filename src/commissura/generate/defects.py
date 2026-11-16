@@ -133,7 +133,28 @@ CATALOGUE: tuple[Defect, ...] = (
         "Local codes outnumber mapped ones in most laboratories. Unmapped "
         "analytes are invisible to any cross-site query.",
     ),
+    Defect(
+        "lab.conflicting_identity",
+        Modality.LAB,
+        DefectClass.LINKAGE,
+        "Two messages carry one codice fiscale with different family names.",
+        "A codice fiscale mistyped at reception, or copied from another record "
+        "in the same family. Either way the export now says one identifier "
+        "belongs to two people, and whichever message is read first decides "
+        "which name the dataset publishes.",
+    ),
     # ----- Reports -----
+    Defect(
+        "reports.wrong_patient_name",
+        Modality.REPORTS,
+        DefectClass.PRIVACY,
+        "The header names a different person from the subject the document links to.",
+        "A document attached to the wrong record, or a template filled in over "
+        "the previous report and saved with the old patient still in the header. "
+        "Classed as privacy rather than linkage because the damage is a name in "
+        "a document it does not belong to -- a second patient's identifier in "
+        "the first one's record, which nothing was looking for.",
+    ),
     Defect(
         "reports.truncated",
         Modality.REPORTS,

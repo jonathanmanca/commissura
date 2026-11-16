@@ -113,14 +113,23 @@ def test_a_defective_corpus_leaks_only_things_nothing_declared(tmp_path: Path) -
     any other kind surviving — a national identifier, an accession, a date —
     would be a defect rather than a limit, and this would catch it.
 
-    The seed is load-bearing and that is worth knowing rather than discovering.
-    Seed 23 stopped leaking when `reports.unreadable_date` was added, because
-    the new defect drops the very reports that used to leak: an identifier in a
-    document that is not in the dataset is not in the dataset. That is the
-    degenerate effect `records_not_in_dataset` exists to make visible, and it
-    is why this test fixes a seed that still exercises the limit.
+    **The seed is load-bearing, and it has now moved twice.** Seed 23 stopped
+    leaking when ``reports.unreadable_date`` was added, because that defect
+    drops the very reports that used to leak — an identifier in a document that
+    is not in the dataset is not in the dataset, which is the degenerate effect
+    ``records_not_in_dataset`` exists to make visible. Seed 5 stopped leaking on
+    2026-11-16, for a duller reason: ``lab.conflicting_identity`` and
+    ``reports.wrong_patient_name`` each draw once per opportunity, so the random
+    stream shifted and seed 5 now generates a different corpus. The limit is
+    unchanged; this seed no longer meets it.
+
+    Checked rather than assumed, because the assertion message below demands it:
+    at eight subjects and rate 0.6 the old seed still leaks, and the survivors
+    are still a clinician named in prose with the signature block removed. The
+    method did not improve and the records were not dropped. Seed 6 is the
+    current one because its single survivor is exactly the documented class.
     """
-    raw, out = corpus_and_dataset(tmp_path, defect_rate=0.4, seed=5)
+    raw, out = corpus_and_dataset(tmp_path, defect_rate=0.4, seed=6)
 
     report = measure(raw, out)
 
