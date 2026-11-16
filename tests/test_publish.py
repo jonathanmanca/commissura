@@ -14,6 +14,9 @@ somebody's files.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -21,9 +24,11 @@ from typer.testing import CliRunner
 
 from commissura import layout
 from commissura.build.publish import (
-    PREVIOUS_SUFFIX,
-    STAGING_SUFFIX,
+    MARKER_NAME,
+    OUTGOING_PREFIX,
+    WORKING_PREFIX,
     PublicationError,
+    Staged,
     abandon,
     begin,
     looks_like_our_dataset,
@@ -285,7 +290,7 @@ def test_an_empty_destination_is_accepted(tmp_path: Path) -> None:
 
     assert staged.destination == destination.resolve()
     assert staged.root.is_dir()
-    assert STAGING_SUFFIX in staged.root.name
+    assert WORKING_PREFIX in staged.holding.name
 
 
 def test_a_missing_destination_is_accepted(tmp_path: Path) -> None:
@@ -353,7 +358,7 @@ def test_publishing_leaves_no_working_directories_behind(tmp_path: Path) -> None
 
     siblings = [p.name for p in tmp_path.iterdir()]
 
-    assert not [n for n in siblings if STAGING_SUFFIX in n or PREVIOUS_SUFFIX in n]
+    assert not [n for n in siblings if WORKING_PREFIX in n or OUTGOING_PREFIX in n]
 
 
 def test_abandoning_a_build_leaves_the_destination_exactly_as_it_was(
@@ -408,7 +413,7 @@ def test_an_interrupted_build_publishes_nothing(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert _tree(out) == before
-    assert not [p for p in tmp_path.iterdir() if STAGING_SUFFIX in p.name]
+    assert not [p for p in tmp_path.iterdir() if WORKING_PREFIX in p.name]
 
 
 def test_a_failed_publication_puts_the_previous_dataset_back(
@@ -445,7 +450,7 @@ def test_a_failed_publication_puts_the_previous_dataset_back(
 
     monkeypatch.undo()
     assert (destination / "precious.txt").read_text(encoding="utf-8") == "the only copy"
-    assert not [p for p in tmp_path.iterdir() if PREVIOUS_SUFFIX in p.name]
+    assert not [p for p in tmp_path.iterdir() if OUTGOING_PREFIX in p.name]
 
 
 def test_a_failed_publication_says_where_the_finished_build_is(
@@ -480,7 +485,7 @@ def test_a_build_that_raises_partway_through_abandons_its_staging(
 
     assert result.exit_code != 0
     assert not (tmp_path / "dataset").exists()
-    assert not [p for p in tmp_path.iterdir() if STAGING_SUFFIX in p.name]
+    assert not [p for p in tmp_path.iterdir() if WORKING_PREFIX in p.name]
 
 
 def test_a_publication_failure_at_the_command_line_exits_non_zero(
@@ -499,3 +504,279 @@ def test_a_publication_failure_at_the_command_line_exits_non_zero(
 
     assert result.exit_code == 1
     assert "read-only share" in (result.stderr or result.output)
+
+
+# --------------------------------------------------------------------------
+# Ownership is a marker, not a name
+# --------------------------------------------------------------------------
+
+
+def test_the_old_predictable_staging_path_is_never_touched(tmp_path: Path) -> None:
+    """The defect this redesign removes, pinned as a regression.
+
+    The first version named its working directory
+    ``<destination>.commissura-staging-<pid>`` and removed whatever sat there
+    with :func:`shutil.rmtree`. Process ids are small and reused, so an
+    unrelated directory could occupy that path — and the removal established
+    ownership from the name alone, which is not evidence of anything. Working
+    directories are created with :func:`tempfile.mkdtemp` now, so the branch
+    does not exist to be guarded.
+    """
+    destination = tmp_path / "dataset"
+    squatter = tmp_path / f"dataset.commissura-staging-{os.getpid()}"
+    squatter.mkdir()
+    (squatter / "somebody-elses-work.txt").write_text("precious", encoding="utf-8")
+
+    staged = begin(destination)
+    (staged.root / "x.txt").write_text("x", encoding="utf-8")
+    publish(staged)
+
+    assert (squatter / "somebody-elses-work.txt").read_text(encoding="utf-8") == "precious"
+
+
+def test_a_working_directory_with_no_marker_is_refused(tmp_path: Path) -> None:
+    """Every removal in this module proves ownership first."""
+    staged = begin(tmp_path / "dataset")
+    (staged.holding / MARKER_NAME).unlink()
+
+    with pytest.raises(PublicationError, match="no readable"):
+        publish(staged)
+
+    assert staged.root.is_dir(), "a refusal must change nothing"
+
+
+def test_a_marker_naming_another_destination_is_refused(tmp_path: Path) -> None:
+    """A working directory for one dataset must not be used for another."""
+    staged = begin(tmp_path / "dataset")
+    (staged.holding / MARKER_NAME).write_text(
+        json.dumps({"destination": str(tmp_path / "elsewhere")}), encoding="utf-8"
+    )
+
+    with pytest.raises(PublicationError, match="does not name"):
+        publish(staged)
+
+
+def test_a_marker_that_is_not_json_is_refused(tmp_path: Path) -> None:
+    """A corrupt marker is not a licence to delete a directory."""
+    staged = begin(tmp_path / "dataset")
+    (staged.holding / MARKER_NAME).write_text("not json at all", encoding="utf-8")
+
+    with pytest.raises(PublicationError, match="no readable"):
+        publish(staged)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs elevation on Windows")
+def test_a_working_directory_that_is_a_symlink_is_refused(tmp_path: Path) -> None:
+    """A marker read through a link says nothing about what removal would reach."""
+    destination = (tmp_path / "dataset").resolve()
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / MARKER_NAME).write_text(json.dumps({"destination": str(destination)}), encoding="utf-8")
+    (real / "payload").mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+
+    staged = Staged(root=link / "payload", holding=link, destination=destination)
+
+    with pytest.raises(PublicationError, match="symbolic link"):
+        publish(staged)
+
+    assert (real / MARKER_NAME).is_file(), "the real directory must be untouched"
+
+
+def test_the_marker_never_reaches_the_published_dataset(tmp_path: Path) -> None:
+    """Which is why the dataset is built in a subdirectory of the working one.
+
+    Putting the marker inside the tree being published and deleting it just
+    before the rename would also work, and would be one more thing to get wrong.
+    """
+    staged = begin(tmp_path / "dataset")
+    (staged.root / "x.txt").write_text("x", encoding="utf-8")
+
+    published = publish(staged)
+
+    assert sorted(p.name for p in published.rglob("*")) == ["x.txt"]
+    assert not list(published.rglob(MARKER_NAME))
+
+
+def test_a_working_directory_cannot_collide_with_another(tmp_path: Path) -> None:
+    """``mkdtemp`` is atomic and random, so two builds never share one."""
+    destination = tmp_path / "dataset"
+
+    first, second = begin(destination), begin(destination)
+
+    assert first.holding != second.holding
+    assert first.root.is_dir()
+    assert second.root.is_dir()
+
+
+# --------------------------------------------------------------------------
+# Two builds at once
+# --------------------------------------------------------------------------
+
+
+def test_two_concurrent_builds_leave_one_complete_dataset(tmp_path: Path) -> None:
+    """Which one wins is undefined; a mixture of the two is impossible.
+
+    Each rename is atomic and each build has its own working directory, so the
+    destination always holds one complete dataset. Serialising them would need
+    a lock, and the expected load is one person running a command-line tool.
+    """
+    destination = tmp_path / "dataset"
+    first, second = begin(destination), begin(destination)
+    (first.root / "from-first.txt").write_text("1", encoding="utf-8")
+    (second.root / "from-second.txt").write_text("2", encoding="utf-8")
+
+    publish(first)
+    publish(second)
+
+    names = sorted(p.name for p in destination.iterdir())
+    assert names in (["from-first.txt"], ["from-second.txt"])
+    assert not [p for p in tmp_path.iterdir() if WORKING_PREFIX in p.name]
+    assert not [p for p in tmp_path.iterdir() if OUTGOING_PREFIX in p.name]
+
+
+def test_a_destination_published_by_another_build_first_is_not_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The loser of the race finds the destination gone between check and rename.
+
+    Nothing is lost — the destination holds a complete dataset either way — and
+    this build still has its own to put there. Handled as an ordinary
+    publication rather than raised as a traceback.
+    """
+    destination = tmp_path / "dataset"
+    (destination / layout.DEIDENT_DIR).mkdir(parents=True)
+    (destination / layout.DEIDENT_DIR / layout.MANIFEST_JSON).write_text("{}", encoding="utf-8")
+    staged = begin(destination)
+    (staged.root / "mine.txt").write_text("mine", encoding="utf-8")
+
+    real_replace = Path.replace
+    raced = {"done": False}
+
+    def racing(self: Path, target: object) -> Path:
+        if self == destination.resolve() and not raced["done"]:
+            raced["done"] = True
+            shutil.rmtree(destination)
+            raise FileNotFoundError(destination)
+        return real_replace(self, target)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "replace", racing)
+    published = publish(staged)
+    monkeypatch.undo()
+
+    assert sorted(p.name for p in published.iterdir()) == ["mine.txt"]
+    assert not [p for p in tmp_path.iterdir() if OUTGOING_PREFIX in p.name]
+
+
+# --------------------------------------------------------------------------
+# Failing, and recovering
+# --------------------------------------------------------------------------
+
+
+def test_a_failure_moving_the_old_dataset_aside_changes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first of the two renames, which the earlier tests did not reach."""
+    destination = tmp_path / "dataset"
+    (destination / layout.DEIDENT_DIR).mkdir(parents=True)
+    (destination / layout.DEIDENT_DIR / layout.MANIFEST_JSON).write_text("{}", encoding="utf-8")
+    (destination / "previous.txt").write_text("still here", encoding="utf-8")
+    staged = begin(destination)
+    (staged.root / "new.txt").write_text("new", encoding="utf-8")
+
+    def refusing(self: Path, target: object) -> Path:
+        raise PermissionError("the share is read-only")
+
+    monkeypatch.setattr(Path, "replace", refusing)
+
+    with pytest.raises(PublicationError, match="aside"):
+        publish(staged)
+
+    monkeypatch.undo()
+    assert (destination / "previous.txt").read_text(encoding="utf-8") == "still here"
+    assert not [p for p in tmp_path.iterdir() if OUTGOING_PREFIX in p.name]
+
+
+def test_an_interruption_before_the_rename_leaves_the_destination_alone(
+    tmp_path: Path,
+) -> None:
+    """Killed mid-build: the previous dataset is still where it was."""
+    destination = tmp_path / "dataset"
+    (destination / layout.DEIDENT_DIR).mkdir(parents=True)
+    (destination / layout.DEIDENT_DIR / layout.MANIFEST_JSON).write_text("{}", encoding="utf-8")
+    before = _tree(destination)
+
+    staged = begin(destination)
+    (staged.root / "half.txt").write_text("incomplete", encoding="utf-8")
+    # The process dies here: nothing calls publish or abandon.
+
+    assert _tree(destination) == before
+    assert staged.holding.is_dir()
+
+
+def test_an_interruption_after_the_rename_leaves_a_recoverable_previous(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The window the module documents, and what it leaves behind.
+
+    Between the two renames the destination does not exist. A process killed
+    there leaves the previous dataset in a working directory whose marker names
+    where it came from, which is what makes it recoverable by hand rather than
+    merely still present somewhere.
+    """
+    destination = tmp_path / "dataset"
+    (destination / layout.DEIDENT_DIR).mkdir(parents=True)
+    (destination / layout.DEIDENT_DIR / layout.MANIFEST_JSON).write_text("{}", encoding="utf-8")
+    (destination / "precious.txt").write_text("the only copy", encoding="utf-8")
+    staged = begin(destination)
+    (staged.root / "new.txt").write_text("new", encoding="utf-8")
+
+    real_replace = Path.replace
+
+    def dying(self: Path, target: object) -> Path:
+        if self == staged.root:
+            raise KeyboardInterrupt
+        return real_replace(self, target)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "replace", dying)
+    with pytest.raises(KeyboardInterrupt):
+        publish(staged)
+    monkeypatch.undo()
+
+    assert not destination.exists(), "this is the documented window"
+    outgoing = [p for p in tmp_path.iterdir() if OUTGOING_PREFIX in p.name]
+    assert len(outgoing) == 1
+    recorded = json.loads((outgoing[0] / MARKER_NAME).read_text(encoding="utf-8"))
+    assert recorded["destination"] == str(destination.resolve())
+    assert (outgoing[0] / "payload" / "precious.txt").read_text(encoding="utf-8") == (
+        "the only copy"
+    )
+
+
+def test_abandon_never_raises_over_a_failed_build(tmp_path: Path) -> None:
+    """It runs on the way out of a failure and must not replace it with its own.
+
+    A working directory left behind is visible, named, and carries a marker
+    saying what it was for.
+    """
+    staged = begin(tmp_path / "dataset")
+    (staged.holding / MARKER_NAME).unlink()
+
+    abandon(staged)
+
+    assert staged.holding.is_dir(), "refused, and left alone"
+
+
+def test_a_destination_whose_parent_cannot_be_written_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clear message rather than an OSError from the middle of the build."""
+
+    def refusing(*args: object, **kwargs: object) -> str:
+        raise PermissionError("read-only filesystem")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", refusing)
+
+    with pytest.raises(PublicationError, match="working directory"):
+        begin(tmp_path / "dataset")

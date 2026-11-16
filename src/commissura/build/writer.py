@@ -337,6 +337,11 @@ def _known_identifiers(corpus: RawCorpus, subject: Subject) -> KnownIdentifiers:
             addresses.update(_address_after_institution(report.text, institutions))
     return KnownIdentifiers(
         identities=tuple(subject.identities),
+        # What the reports themselves declared. Gathered per subject rather than
+        # per document, so a name one of this subject's reports carries is
+        # removed from all of them -- two documents about one patient, and a
+        # name the second spells out is a name the first may abbreviate.
+        declared=tuple(report.declared() for report in subject.reports),
         providers=frozenset(providers),
         institutions=frozenset(institutions),
         addresses=frozenset(addresses),

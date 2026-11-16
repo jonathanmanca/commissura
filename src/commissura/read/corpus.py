@@ -47,6 +47,7 @@ from commissura.read.identity import (
     RefusalReason,
     classify_national_id,
     identities_conflict,
+    report_name_conflicts,
 )
 
 RAW_SOURCES: Final[dict[str, str]] = {
@@ -288,6 +289,59 @@ class ReportRecord:
     signed_by: str
     authored_on: date | None
     text: str
+
+    def declared(self) -> DeclaredIdentity:
+        """Return what this report's header says about who it is about."""
+        return DeclaredIdentity(
+            full_name=self.full_name,
+            national_id=self.national_id,
+            mrn=self.mrn,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DeclaredIdentity:
+    """What a free-text report's header says about who the document is about.
+
+    Separate from :class:`Identity`, and the difference is the point. A
+    laboratory message states the family name and the given name in their own
+    PID-5 components, so :class:`Identity` can hold them apart. A report writes
+    one line — ``Paziente: GIOVANNA ESPOSITO`` — and whether that is
+    *given family* or *family given* depends on the template. **The name is
+    therefore carried as one opaque string and never split**, because splitting
+    it would be a guess, and a guess here would put a surname in the given-name
+    field of the document an auditor reads.
+
+    This exists because what a report declared never reached redaction. Only
+    laboratory messages produced an :class:`Identity`, so a report whose header
+    named a different person — a mis-filed document, which happens in any real
+    export — had that name published in the dataset. The subject's *own* name
+    was removed correctly, which is what made it hard to see.
+
+    Attributes:
+        full_name: The name as the header wrote it, unsplit.
+        national_id: The national identifier the header declared.
+        mrn: The record number the header declared.
+    """
+
+    full_name: str
+    national_id: str
+    mrn: str
+
+    def words(self) -> frozenset[str]:
+        """Return the redactable words of the declared name.
+
+        The whole string and its words both have to go: a header writes
+        ``GIOVANNA ESPOSITO`` while the prose below it writes just
+        ``ESPOSITO``, and replacing only the whole string leaves the second
+        one. The same treatment institution names already get.
+
+        Returns:
+            The words of length four or more. Shorter ones are left to the
+            scrubber, which refuses to replace below that length anyway — a
+            two-letter particle like ``DE`` matches inside ordinary words.
+        """
+        return frozenset(word for word in self.full_name.split() if len(word) >= 4)
 
 
 @dataclass(frozen=True, slots=True)
@@ -697,7 +751,20 @@ def read_corpus(root: Path) -> RawCorpus:
                 )
             )
             continue
-        subjects[owner_of_report].reports.append(report)
+        subject_for_report = subjects[owner_of_report]
+        if report.full_name and report_name_conflicts(
+            report.full_name, [identity.full_name for identity in subject_for_report.identities]
+        ):
+            issues.append(
+                LinkageIssue(
+                    relative,
+                    RefusalReason.CONFLICTING_REPORT_NAME.value,
+                    f"this report's header names {report.full_name!r}, which shares no "
+                    "name with the subject its identifiers resolve to. The document may "
+                    "belong to somebody else; the name is redacted either way",
+                )
+            )
+        subject_for_report.reports.append(report)
 
     # --- Imaging: no national identifier in a DICOM header, so match on a
     # --- record number scoped to the institution that issued it.

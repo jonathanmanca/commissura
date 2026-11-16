@@ -57,12 +57,21 @@ Thumbs.db
 /CLAUDE.md
 
 # Audit and remediation paperwork, kept out of the repository on purpose.
-# These described the findings of 2026-11-13 with working reproduction steps,
-# which is a recipe against any dataset built before they were fixed. They are
-# listed here and not merely deleted because `git add -A` is how two of them
-# got committed in the first place, in a commit whose message did not mention
-# them. The decisions they recorded live in CLAUDE.md's log, which is where
-# this project keeps decisions; the reproductions do not need a home here.
+# Internal working documents, not part of what a stranger reads in order to use
+# the tool -- the same reason CLAUDE.md is excluded above. The decisions they
+# recorded live in that file's log, which is where this project keeps decisions.
+#
+# The first version of this comment gave a security reason instead, and it did
+# not hold: it called the reproduction steps "a recipe against any dataset built
+# before they were fixed", when the findings were already closed, no release
+# exists, no dataset was ever built outside one machine, and the documents remain
+# readable in the history at cf57232 and 282bd91 regardless. A rule whose stated
+# reason does not survive reading is worse than no rule, because the next person
+# to weigh it has to work out that the justification was wrong before they can
+# decide whether the rule is.
+#
+# Listed here rather than merely deleted because `git add -A` is how two of them
+# got committed, in a commit whose message did not mention them.
 /SECURITY_AUDIT.md
 /ENGINEERING_REVIEW.md
 /REMEDIATION_REPORT.md

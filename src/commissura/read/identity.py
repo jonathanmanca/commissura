@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
@@ -251,6 +252,65 @@ class RefusalReason(StrEnum):
     UNLINKED_REPORT = "unlinked_report"
     UNLINKED_IMAGING = "unlinked_imaging"
     CONFLICTING_IDENTITY = "conflicting_identity"
+    CONFLICTING_REPORT_NAME = "conflicting_report_name"
+
+
+def report_name_conflicts(declared: str, known: Iterable[str]) -> bool:
+    """Return whether a report's declared name looks like a different person.
+
+    **The policy, and it is deliberately conservative.** A conflict is reported
+    only when the declared name shares *no* redactable word with any name the
+    subject is known by. Comparison is on the set of words, folded, so order
+    does not matter: a header writing ``ROSSI MARIO`` where the laboratory
+    message said ``MARIO ROSSI`` is the same person written the other way round
+    and must not be reported, and nor is ``MARIA LUISA DE LUCA`` against
+    ``DE LUCA MARIA LUISA``.
+
+    What that deliberately does not report: an abbreviated given name
+    (``M. ROSSI``), a middle name present in one source and not the other, a
+    married name alongside a maiden name. Each shares a surname, and each is
+    far more often one person recorded twice than two people confused. Crying
+    wolf on those would bury the case this exists for — a document filed
+    against the wrong patient, where the two names have nothing in common.
+
+    Redaction does not depend on this answer. The declared name is removed
+    either way; this only decides whether the discrepancy is *reported*, which
+    it must be, because a name that disagrees can mean the document belongs to
+    somebody else and no amount of redacting makes that right.
+
+    Args:
+        declared: The name the report's header carried.
+        known: Every name the subject is known by, from its identities.
+
+    Returns:
+        Whether to report a conflict.
+    """
+    declared_words = {
+        _fold_name(word) for word in declared.split() if len(word) >= _COMPARABLE_NAME_LENGTH
+    }
+    if not declared_words:
+        return False
+    for name in known:
+        shared = declared_words & {
+            _fold_name(word) for word in name.split() if len(word) >= _COMPARABLE_NAME_LENGTH
+        }
+        if shared:
+            return False
+    return True
+
+
+_COMPARABLE_NAME_LENGTH: Final = 4
+"""Below this a name fragment is not worth comparing.
+
+The same floor the scrubber refuses to replace at, for the same reason: a
+two-letter particle matches inside ordinary words, so ``DI`` shared between two
+names is not evidence that they are the same person.
+"""
+
+
+def _fold_name(value: str) -> str:
+    """Return a name fragment in the form two spellings of it compare equal in."""
+    return unicodedata.normalize("NFKD", value).casefold()
 
 
 @dataclass(frozen=True, slots=True)

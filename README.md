@@ -328,6 +328,22 @@ to another site's patient. Where one number is used by two people and the
 authority cannot tell them apart, every record resolving through it is reported
 as `ambiguous_record_number` rather than attached to a guess.
 
+**What a report's header declares is removed too, and a disagreement is
+reported.** A laboratory message states the patient in PID-5; a report states
+them in its own header, and the two can disagree — a mis-filed document, which
+happens in any export. Both now reach redaction, so a report naming somebody
+else does not publish that name. And when the name shares no word with any name
+the subject is known by, you get a `conflicting_report_name` issue, because a
+name that disagrees can mean the document belongs to a different patient and no
+amount of redacting makes that right.
+
+The comparison is on the *set* of words, folded, so `ROSSI MARIO` against
+`MARIO ROSSI` is not a conflict and nor is an abbreviated given name, a middle
+name present in one source only, or a surname written with and without its
+space. Each of those is one person recorded twice far more often than two
+people confused, and crying wolf on them would bury the case the check exists
+for.
+
 **The codice fiscale is validated, including omocodia.** When two people would
 be assigned the same code the Agenzia delle Entrate substitutes letters for
 digits, so a validator that only checks the checksum rejects genuine
@@ -779,6 +795,20 @@ A failed build leaves the destination exactly as it was. Publication itself is
 two renames rather than one atomic operation, because no portable call can
 rename over a non-empty directory; if the second fails, the previous dataset is
 put back and the message says where the finished build is.
+
+**Nothing is removed that this tool did not write.** Both working directories
+are created with `mkdtemp` beside the destination — random name, mode `0700`,
+atomic — and each carries a marker naming the destination it is for. Every
+removal verifies that marker first, so ownership is never established from a
+path. A directory without one is refused and left alone, and a working
+directory left behind by an interrupted build is visible, named, and says in
+its own marker what it was for.
+
+Two builds publishing to the same destination are not serialised: each has its
+own working directory and each rename is atomic, so the destination always holds
+one *complete* dataset and never a mixture, but which one wins is undefined.
+Locking would be the fix if this were a service rather than a command somebody
+runs on a folder.
 
 #### Two documents, two readers
 

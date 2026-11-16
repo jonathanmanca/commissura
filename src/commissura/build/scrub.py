@@ -41,7 +41,7 @@ from typing import Final
 
 from commissura import layout
 from commissura.deident.pseudonymise import Pseudonymiser
-from commissura.read.corpus import Identity
+from commissura.read.corpus import DeclaredIdentity, Identity
 
 PLACEHOLDER_NAME = "[NAME]"
 PLACEHOLDER_NATIONAL_ID = "[NATIONAL-ID]"
@@ -172,13 +172,20 @@ class KnownIdentifiers:
     identifiers and its birth date to the plan.
 
     Attributes:
-        identities: Every identity observed for this subject, primary first.
+        identities: Every identity observed for this subject, primary first,
+            from the laboratory messages that established it.
+        declared: What this subject's *reports* say about who they are about.
+            Separate from ``identities`` because a report writes one unsplit
+            name, and because a report can name somebody else — a mis-filed
+            document — in which case that name still has to be removed. It
+            used to reach nothing, and the name was published.
         providers: Clinician names, gathered across the corpus.
         institutions: Institution names, gathered across the corpus.
         addresses: Institution address fragments, gathered across the corpus.
     """
 
     identities: tuple[Identity, ...]
+    declared: tuple[DeclaredIdentity, ...] = ()
     providers: frozenset[str] = frozenset()
     institutions: frozenset[str] = frozenset()
     addresses: frozenset[str] = frozenset()
@@ -245,6 +252,42 @@ def _identity_entries(
             ("person_name", identity.family_name, PLACEHOLDER_NAME),
             ("person_name", identity.given_name, PLACEHOLDER_NAME),
         ]
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[tuple[str, str, str]] = []
+    for entry in entries:
+        if entry not in seen:
+            seen.add(entry)
+            unique.append(entry)
+    return unique
+
+
+def _declared_entries(
+    declared: tuple[DeclaredIdentity, ...],
+) -> list[tuple[str, str, str]]:
+    """Return the redaction entries for what a subject's reports declared.
+
+    The same three categories a laboratory identity contributes, plus the words
+    of the name: a header writes ``GIOVANNA ESPOSITO`` and the prose below it
+    writes ``ESPOSITO``, so replacing only the whole string leaves the second
+    one standing. The name is never split into given and family, because a
+    report does not say which is which.
+
+    Args:
+        declared: What the subject's reports said about who they are about.
+
+    Returns:
+        ``(category, value, placeholder)`` entries, duplicates removed, whole
+        names before their words so a two-word name is replaced once rather
+        than leaving a doubled placeholder.
+    """
+    entries: list[tuple[str, str, str]] = []
+    for one in declared:
+        entries += [
+            ("person_name", one.full_name, PLACEHOLDER_NAME),
+            ("national_id", one.national_id, PLACEHOLDER_NATIONAL_ID),
+            ("patient_id", one.mrn, PLACEHOLDER_PATIENT_ID),
+        ]
+        entries += [("person_name", word, PLACEHOLDER_NAME) for word in sorted(one.words())]
     seen: set[tuple[str, str, str]] = set()
     unique: list[tuple[str, str, str]] = []
     for entry in entries:
@@ -321,6 +364,7 @@ def scrub_text(
             for rendered in _render_date_forms(one.birth_date)
         ),
         *_identity_entries(known.identities),
+        *_declared_entries(known.declared),
     ]
     ordered += [
         ("institution", name, PLACEHOLDER_INSTITUTION) for name in sorted(known.institutions)
