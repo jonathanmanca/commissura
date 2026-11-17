@@ -23,7 +23,11 @@ import typer
 from commissura import __version__, layout
 from commissura import healthdcat as healthdcat_module
 from commissura.build.integrity import verify_dataset
-from commissura.build.manifest import write_healthdcat_description, write_manifest
+from commissura.build.manifest import (
+    predecessor_of,
+    write_healthdcat_description,
+    write_manifest,
+)
 from commissura.build.publish import PublicationError, abandon, begin, publish
 from commissura.build.report import DEFAULT_COMPARISONS, write_report
 from commissura.build.risk import K_THRESHOLD, assess, write_risk_report
@@ -35,7 +39,7 @@ from commissura.deident.keys import (
     resolve_key,
     write_key_file,
 )
-from commissura.deident.pseudonymise import RULE_VERSION, Pseudonymiser
+from commissura.deident.pseudonymise import RULE_VERSION, Pseudonymiser, scope_to_permit
 from commissura.generate.cohort import DEFAULT_REFERENCE_DATE, CohortSpec
 from commissura.generate.defects import CATALOGUE, Modality, defects_for
 from commissura.generate.writer import verify_corpus, write_corpus
@@ -60,6 +64,35 @@ def _version_callback(requested: bool) -> None:
     if requested:
         typer.echo(__version__)
         raise typer.Exit
+
+
+def _permit_of(dataset: Path) -> str | None:
+    """Return the data permit a dataset was built for, if it names one.
+
+    Read from the manifest rather than taken as an option, so `verify` cannot be
+    pointed at a permit-scoped dataset with the wrong scope. A dataset older than
+    schema 6.1.0, or one built without `--permit`, names none and the key stays
+    unscoped -- which is what those builds used.
+
+    Args:
+        dataset: Dataset root.
+
+    Returns:
+        The permit reference, or ``None``.
+    """
+    path = dataset / layout.DEIDENT_DIR / layout.MANIFEST_JSON
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # Left to `verify_dataset`, which reads the same file and reports a
+        # missing or malformed manifest properly. Failing here would replace
+        # that message with a worse one.
+        return None
+    section = manifest.get("pseudonymisation") if isinstance(manifest, dict) else None
+    if not isinstance(section, dict):
+        return None
+    reference = section.get("permit_reference")
+    return reference if isinstance(reference, str) else None
 
 
 @app.callback()
@@ -109,6 +142,15 @@ def generate(
         int,
         typer.Option("--max-encounters", min=1, help="Upper bound on encounters per subject."),
     ] = 3,
+    cda: Annotated[
+        bool,
+        typer.Option(
+            "--cda/--no-cda",
+            help="Write laboratory data as HL7 Italia CDA R2 documents under cda/ "
+            "instead of HL7 v2 messages under lab/. Models a site that has "
+            "migrated to the Fascicolo Sanitario Elettronico.",
+        ),
+    ] = False,
     verify: Annotated[
         bool,
         typer.Option(
@@ -138,6 +180,7 @@ def generate(
         defect_rate=defect_rate,
         reference_date=DEFAULT_REFERENCE_DATE,
         max_encounters=max_encounters,
+        cda=cda,
     )
     summary = write_corpus(spec, out)
     if verify:
@@ -151,6 +194,7 @@ def generate(
     counts = manifest.files
     typer.echo(f"Wrote {summary.file_count} files to {summary.root}")
     typer.echo(f"  lab       {counts.lab:6d}  HL7 v2 ORU^R01 messages")
+    typer.echo(f"  cda       {counts.cda:6d}  HL7 Italia CDA R2 laboratory reports")
     typer.echo(f"  reports   {counts.reports:6d}  free-text documents")
     typer.echo(f"  imaging   {counts.imaging:6d}  DICOM JSON Model sidecars")
     typer.echo("")
@@ -443,6 +487,16 @@ def build(
             "CHANGE IT when building from real clinical material.",
         ),
     ] = healthdcat_module.DATASET_TYPE_FOR_SYNTHETIC,
+    permit: Annotated[
+        str | None,
+        typer.Option(
+            "--permit",
+            help="The data permit this build answers. Scopes every pseudonym to it, "
+            "so another permit built from the same key gets different subject "
+            "labels. TEHDAS2 D7.2 says pseudonyms MUST NOT be reused across "
+            "permits; without this they are.",
+        ),
+    ] = None,
     report_to: Annotated[
         Path | None,
         typer.Option(
@@ -509,10 +563,16 @@ def build(
         raise typer.Exit(2) from None
 
     try:
-        key = resolve_key(key_file)
+        root_key = resolve_key(key_file)
     except KeyMaterialError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None
+
+    # Everything below derives from `key`. With no permit it *is* the root key,
+    # so the output is byte-identical to what this command produced before the
+    # option existed -- which a test pins. With one, it is a subkey, and the
+    # whole label space moves with it.
+    key = scope_to_permit(root_key, permit) if permit is not None else root_key
 
     if not source.is_dir():
         typer.echo(f"No raw corpus at {source}.", err=True)
@@ -568,7 +628,17 @@ def build(
         # yet, and `commissura verify` would report the two documents written
         # after it as additions on a dataset nobody had touched.
         manifest = write_manifest(
-            working, corpus=corpus, summary=summary, key=key, spec=spec, risk=risk
+            working,
+            corpus=corpus,
+            summary=summary,
+            key=key,
+            spec=spec,
+            risk=risk,
+            permit_reference=permit,
+            root_fingerprint=root_key.fingerprint if permit is not None else None,
+            # Read from the destination, which during a staged build still holds
+            # the dataset this one replaces. After `publish` it is gone.
+            predecessor=predecessor_of(staged.destination),
         )
         # Validated while still staged, so the verdict is about what is being
         # published rather than about what has already replaced the previous
@@ -810,6 +880,15 @@ def verify(
         except KeyMaterialError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(1) from None
+        # A permit-scoped build authenticated its manifest with the subkey, so
+        # the root key alone fails the tag. The permit is deliberately NOT an
+        # option here: the dataset records which permit it answers, so reading
+        # it from the manifest makes verification self-describing and removes a
+        # flag an operator could get wrong. A manifest that names no permit
+        # leaves the key unscoped, which is what unscoped builds used.
+        permit = _permit_of(dataset)
+        if permit is not None:
+            key = scope_to_permit(key, permit)
 
     try:
         report = verify_dataset(dataset, key=key)
@@ -1025,6 +1104,15 @@ def whois(
         Path | None,
         typer.Option("--key-file", help="The key the dataset was built with."),
     ] = None,
+    permit: Annotated[
+        str | None,
+        typer.Option(
+            "--permit",
+            help="The data permit the dataset was built with. Must match the "
+            "--permit `build` was given, or the label will be the wrong one. "
+            "The manifest's pseudonymisation.permit_reference records it.",
+        ),
+    ] = None,
     as_json: Annotated[
         bool, typer.Option("--json", help="Print the result as JSON instead of text.")
     ] = False,
@@ -1077,10 +1165,18 @@ def whois(
         raise typer.Exit(2)
 
     try:
-        key = resolve_key(key_file)
+        root_key = resolve_key(key_file)
     except KeyMaterialError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None
+
+    # A permit-scoped dataset has its own label space, so the same person has a
+    # different label in each permit's dataset. Deriving under the wrong scope
+    # produces a label for nobody, which looks exactly like a person who is not
+    # in the dataset -- the opt-out failing silently, which is the thing this
+    # command's own guards above exist to prevent. The fingerprint printed below
+    # is how an operator checks they got it right.
+    key = scope_to_permit(root_key, permit) if permit is not None else root_key
 
     label = Pseudonymiser(key).subject_label(classified.normalised)
 
@@ -1092,6 +1188,7 @@ def whois(
                     "subject_directory": f"{layout.SUBJECT_PREFIX}{label}",
                     "normalised_identifier": classified.normalised,
                     "key_fingerprint": key.fingerprint,
+                    "permit_reference": permit,
                     "deidentification_rule_version": RULE_VERSION,
                 },
                 indent=2,
@@ -1103,6 +1200,7 @@ def whois(
     typer.echo(f"  directory                       {layout.SUBJECT_PREFIX}{label}")
     typer.echo(f"  identifier, normalised          {classified.normalised}")
     typer.echo(f"  key fingerprint                 {key.fingerprint}")
+    typer.echo(f"  permit                          {permit or '(none -- unscoped key)'}")
     typer.echo(f"  de-identification rule version  {RULE_VERSION}")
     typer.echo("")
     typer.echo("  Derived, not looked up: this says nothing about whether that")

@@ -36,6 +36,28 @@ to two different people, every record that would resolve through it becomes a
 finding. Not the first, not the last, not the one whose filename sorted higher.
 The result depends only on the set of inputs, never on the order they were read.
 
+**An identifier is one of several kinds, keyed by who issued it.** The codice
+fiscale is the Italian case and not the only one. HL7 Italia's CDA R2 laboratory
+report names five mutually exclusive possibilities for `patientRole/id` — the
+codice fiscale, a TEAM card plus personal number for somebody insured abroad, an
+ENI code for a European not enrolled in the SSN, an STP code for a foreigner
+temporarily present, and an ANA code — each distinguished by the OID in
+`id/@root`. FHIR expresses the same model with `identifier.system`. So
+:class:`PatientIdentifierKind` and :func:`classify_patient_identifier` live here,
+beside :func:`classify_national_id`, while the table mapping a *root OID* to a
+kind lives in the reader for the format that spells it that way. That split is
+deliberate: the kinds and their structural rules are identity policy, and the
+spelling is a property of the document format.
+
+**Only the codice fiscale has a checksum, and the others are checked for what
+their own specification states and nothing more.** An ENI or STP code is sixteen
+characters and must begin with those three letters, which is a rule worth
+applying because it recognises the kind even when the issuing OID is a regional
+one this tool cannot know. A TEAM extension is an ISO 3166-1 alpha-3 country
+code, a dot, and a number. An ANA code has no published structure at all, so it
+is checked for presence and for not being a placeholder, and nothing is invented
+beyond that.
+
 **On what this does not change.** A subject established from a valid codice
 fiscale gets the same pseudonymous label it got before, because the derivation
 input is the normalised identifier and a well-formed codice fiscale normalises
@@ -141,16 +163,50 @@ class IdentifierStatus(StrEnum):
     BAD_CHECKSUM = "bad_checksum"
 
 
+class PatientIdentifierKind(StrEnum):
+    """Which of the recognised kinds of patient identifier a value is.
+
+    The five named kinds are the cases HL7 Italia's CDA R2 laboratory report
+    enumerates for ``recordTarget/patientRole/id``, and they are mutually
+    exclusive by that specification's own wording. TEAM is two kinds rather than
+    one because the specification requires **two** ``id`` elements for it and
+    they are not interchangeable: the card number identifies a card, which can
+    be reissued, and only the personal number identifies the person. Keying a
+    subject on a card number would split one patient across two cards.
+
+    :attr:`UNRECOGNISED` is a verdict and not a failure. An export may carry a
+    regional identifier under an OID this tool has never seen, and saying so is
+    more useful than refusing to classify it.
+    """
+
+    CODICE_FISCALE = "codice_fiscale"
+    TEAM_CARD = "team_card"
+    TEAM_PERSONAL = "team_personal"
+    ENI = "eni"
+    STP = "stp"
+    ANA = "ana"
+    UNRECOGNISED = "unrecognised"
+
+
 class KeyKind(StrEnum):
     """Which kind of identifier established a subject.
 
     Recorded in the manifest per subject, because a reader needs to know whether
     a subject is relinkable across institutions — a national identifier is, an
     institution-scoped record number is not.
+
+    :attr:`ASSIGNED_IDENTIFIER` is the middle case and exists because collapsing
+    it into either neighbour would state something false. An ENI code assigned
+    nationally *is* relinkable across every institution in Italy, so calling it
+    an institution-scoped record number would understate it; it carries no
+    checksum and its namespace may be one region's, so calling it a national
+    identifier would overstate it. The authority is the issuing namespace as the
+    document declared it.
     """
 
     NATIONAL_ID = "national_id"
     SCOPED_RECORD_NUMBER = "scoped_record_number"
+    ASSIGNED_IDENTIFIER = "assigned_identifier"
 
 
 UNSCOPED_AUTHORITY: Final = "(unscoped)"
@@ -218,6 +274,24 @@ class IdentityKey:
             value=value,
         )
 
+    @classmethod
+    def assigned_identifier(cls, authority: str, value: str) -> IdentityKey:
+        """Return a key for an identifier issued under a declared namespace.
+
+        Args:
+            authority: The issuing namespace exactly as the document declared
+                it — for CDA, the OID in ``id/@root``. Never invented: an
+                identifier of this kind is meaningless without the namespace
+                that scopes it, so a caller with no namespace to offer must not
+                use this constructor.
+            value: The normalised identifier.
+        """
+        return cls(
+            kind=KeyKind.ASSIGNED_IDENTIFIER,
+            authority=authority or UNSCOPED_AUTHORITY,
+            value=value,
+        )
+
     @property
     def derivation_input(self) -> str:
         """Return the string the pseudonymiser derives a subject label from.
@@ -227,10 +301,19 @@ class IdentityKey:
         fiscale unchanged. For a scoped record number the authority is part of
         the input, because the same number at two hospitals is two people and
         must not produce one label.
+
+        **A third kind has to name itself, and the reason is the other two.**
+        Those two forms are fixed by the labels already issued from them, so a
+        new kind cannot adopt either without moving existing labels. An assigned
+        identifier therefore prefixes its kind, which also makes it impossible
+        for an OID-scoped code to collide with a record number at a facility
+        whose name happened to be that OID.
         """
         if self.kind is KeyKind.NATIONAL_ID:
             return self.value
-        return f"{self.authority}|{self.value}"
+        if self.kind is KeyKind.SCOPED_RECORD_NUMBER:
+            return f"{self.authority}|{self.value}"
+        return f"{self.kind.value}|{self.authority}|{self.value}"
 
 
 class RefusalReason(StrEnum):
@@ -246,8 +329,10 @@ class RefusalReason(StrEnum):
     UNREADABLE_LAB_MESSAGE = "unreadable_lab_message"
     UNREADABLE_REPORT = "unreadable_report"
     UNREADABLE_IMAGING_METADATA = "unreadable_imaging_metadata"
+    UNREADABLE_CDA_DOCUMENT = "unreadable_cda_document"
     NO_USABLE_IDENTIFIER = "no_usable_identifier"
     INVALID_NATIONAL_IDENTIFIER = "invalid_national_identifier"
+    MISDECLARED_IDENTIFIER_NAMESPACE = "misdeclared_identifier_namespace"
     AMBIGUOUS_RECORD_NUMBER = "ambiguous_record_number"
     UNLINKED_REPORT = "unlinked_report"
     UNLINKED_IMAGING = "unlinked_imaging"
@@ -317,11 +402,13 @@ REASON_KEEPS_RECORD: Final[dict[RefusalReason, bool]] = {
     RefusalReason.UNREADABLE_LAB_MESSAGE: False,
     RefusalReason.UNREADABLE_REPORT: False,
     RefusalReason.UNREADABLE_IMAGING_METADATA: False,
+    RefusalReason.UNREADABLE_CDA_DOCUMENT: False,
     RefusalReason.NO_USABLE_IDENTIFIER: False,
     RefusalReason.AMBIGUOUS_RECORD_NUMBER: False,
     RefusalReason.UNLINKED_REPORT: False,
     RefusalReason.UNLINKED_IMAGING: False,
     RefusalReason.INVALID_NATIONAL_IDENTIFIER: True,
+    RefusalReason.MISDECLARED_IDENTIFIER_NAMESPACE: True,
     RefusalReason.CONFLICTING_IDENTITY: True,
     RefusalReason.CONFLICTING_REPORT_NAME: True,
 }
@@ -331,11 +418,19 @@ REASON_KEEPS_RECORD: Final[dict[RefusalReason, bool]] = {
 absent, and no corpus produced the reasons that made it wrong.**
 ``source.records_not_in_dataset`` was defined on 2026-11-12 as the linkage
 issues plus the dropped records, which was correct then: every reason that
-existed meant a record that could not be attached to anybody. Three reasons
+existed meant a record that could not be attached to anybody. Four reasons
 added since attach the record *and* report it — an unusable national identifier
 rescued by a scoped record number, two messages disagreeing about who one
-identifier belongs to, and a report header naming somebody else. For those the
-record is in the dataset and merely suspect.
+identifier belongs to, a report header naming somebody else, and a CDA document
+declaring its codice fiscale under the wrong namespace. For those the record is
+in the dataset and merely suspect.
+
+A reason on this side of the table never implies the record is present on its
+own: it says that *this* diagnosis did not remove it. A document whose namespace
+was misdeclared and which nothing else could key then also produces
+:attr:`RefusalReason.NO_USABLE_IDENTIFIER`, which is on the other side and is
+what counts the absence. So the two reasons co-exist on one file without
+double-counting it.
 
 So the number was wrong from 2026-11-13, and the first corpus to show it was the
 one generated once ``lab.conflicting_identity`` and ``reports.wrong_patient_name``
@@ -488,6 +583,171 @@ def _structure_is_valid(plain: str) -> bool:
     return 1 <= day <= 31 or 41 <= day <= 71
 
 
+ASSIGNED_CODE_LENGTH: Final = 16
+"""Length of an ENI or STP code, per the CDA R2 laboratory specification.
+
+Both tables state sixteen characters. The same length as a codice fiscale, which
+is a coincidence and not a shared rule, so the two are checked separately.
+"""
+
+ASSIGNED_CODE_PREFIX: Final[dict[PatientIdentifierKind, str]] = {
+    PatientIdentifierKind.ENI: "ENI",
+    PatientIdentifierKind.STP: "STP",
+}
+"""The three letters an ENI or STP code must begin with, and what it means.
+
+**This is what makes a regionally-assigned code usable.** The specification
+fixes a national OID for each kind but allows "l'OID locale assegnato
+dall'organizzazione che ha rilasciato il codice identificativo" when the code is
+assigned regionally, so a reader cannot recognise those by namespace. It can
+recognise them by this prefix, because the specification requires it in the same
+table: the extension "Deve iniziare con la stringa" ``ENI`` or ``STP``.
+
+So this is reading a stated rule, not guessing from a pattern. The alternative
+would be refusing every regionally-assigned code, which is to say refusing
+exactly the population these codes exist for.
+"""
+
+_TEAM_COUNTRY_LENGTH: Final = 3
+"""An ISO 3166-1 alpha-3 country code prefixes every TEAM extension."""
+
+
+@dataclass(frozen=True, slots=True)
+class PatientIdentifier:
+    """One ``patientRole/id``, classified: what kind it is and whether it works.
+
+    Two axes rather than one, because they answer different questions. The
+    *kind* says which of the specification's five cases this is, which decides
+    how it may key a subject. The *status* says whether this particular value is
+    fit to be used at all, and reuses the same vocabulary a national identifier
+    is judged by, so that a placeholder is a placeholder whatever kind it was
+    offered as.
+
+    Attributes:
+        kind: Which recognised kind of identifier this is.
+        authority: The issuing namespace as the document declared it, which for
+            CDA is ``id/@root``. Never invented.
+        raw: Exactly what the document carried, kept for targeted redaction.
+        normalised: The canonical form, or an empty string.
+        status: Whether the value may establish a subject.
+    """
+
+    kind: PatientIdentifierKind
+    authority: str
+    raw: str
+    normalised: str
+    status: IdentifierStatus
+
+    @property
+    def is_usable(self) -> bool:
+        """Return whether this value may establish a subject."""
+        return self.status is IdentifierStatus.VALID
+
+    @property
+    def keys_a_person(self) -> bool:
+        """Return whether this kind identifies a person rather than a document.
+
+        False for a TEAM card number. The specification requires both TEAM ids
+        and only the personal one names the holder: a card is reissued on expiry
+        or loss, so two cards for one patient would become two subjects, and two
+        patients handed the same recycled serial would become one. The card
+        number is still read, still redacted, and never a key.
+        """
+        return self.kind is not PatientIdentifierKind.TEAM_CARD
+
+
+def classify_patient_identifier(
+    kind: PatientIdentifierKind, authority: str, raw: str
+) -> PatientIdentifier:
+    """Decide whether a value offered as ``kind`` is fit to establish a subject.
+
+    The order of the tests mirrors :func:`classify_national_id` and for the same
+    reason: absence, then a known stand-in, then whatever structure the kind's
+    own specification states. A placeholder is caught before any structural rule
+    because an export writing ``UNKNOWN`` into an ENI field has told us nothing
+    about the patient, and the diagnosis an operator can act on is that the
+    field was never filled in.
+
+    Args:
+        kind: Which kind the document declared this value to be.
+        authority: The issuing namespace, as declared.
+        raw: The value as the document carried it.
+
+    Returns:
+        The classified identifier.
+    """
+    normalised = normalise_national_id(raw)
+    if not normalised:
+        return PatientIdentifier(kind, authority, raw, normalised, IdentifierStatus.MISSING)
+    if _is_placeholder(normalised):
+        return PatientIdentifier(kind, authority, raw, normalised, IdentifierStatus.PLACEHOLDER)
+    return PatientIdentifier(kind, authority, raw, normalised, _assigned_status(kind, normalised))
+
+
+def _assigned_status(kind: PatientIdentifierKind, normalised: str) -> IdentifierStatus:
+    """Return whether a normalised value satisfies its own kind's structure.
+
+    Only what each specification actually states. **ANA is deliberately checked
+    for nothing beyond presence**: the laboratory specification fixes its root
+    OID and defers every further detail to a later release, so there is no
+    published rule to apply and inventing one would reject genuine codes. Same
+    for an unrecognised namespace, where by definition no rule is known.
+    """
+    if kind is PatientIdentifierKind.CODICE_FISCALE:
+        return _codice_fiscale_status(normalised)
+    expected = ASSIGNED_CODE_PREFIX.get(kind)
+    if expected is not None:
+        if len(normalised) != ASSIGNED_CODE_LENGTH or not normalised.startswith(expected):
+            return IdentifierStatus.MALFORMED
+        return IdentifierStatus.VALID
+    if kind in {PatientIdentifierKind.TEAM_CARD, PatientIdentifierKind.TEAM_PERSONAL}:
+        return _team_status(normalised)
+    return IdentifierStatus.VALID
+
+
+def _team_status(normalised: str) -> IdentifierStatus:
+    """Return whether a TEAM extension has the shape the specification states.
+
+    An ISO 3166-1 alpha-3 country code, a dot, then the number. **Split on the
+    first dot only**: the specification's own worked example of a card number is
+    ``NLD.096074309.80528070070000000001``, whose serial contains a further dot,
+    so splitting on every dot would reject the example the specification gives.
+
+    The country code is checked for shape and not against the ISO list. A
+    registry would reject a code issued before a country was renamed, which is
+    the same reason the codice fiscale's place code is not checked against a
+    list of municipalities.
+    """
+    country, dot, number = normalised.partition(".")
+    if not dot or len(country) != _TEAM_COUNTRY_LENGTH or not country.isalpha():
+        return IdentifierStatus.MALFORMED
+    return IdentifierStatus.VALID if number else IdentifierStatus.MALFORMED
+
+
+def kind_from_assigned_code(raw: str) -> PatientIdentifierKind | None:
+    """Return the kind a value declares by its own prefix, if it declares one.
+
+    For the case the specification creates and does not solve: an ENI or STP
+    code assigned regionally carries a local OID, so the namespace cannot
+    identify the kind and the value has to. Returns ``None`` when nothing is
+    declared, which is the honest answer for a code under a namespace this tool
+    does not know.
+
+    Args:
+        raw: The value as the document carried it.
+
+    Returns:
+        The kind, or ``None``.
+    """
+    normalised = normalise_national_id(raw)
+    if len(normalised) != ASSIGNED_CODE_LENGTH:
+        return None
+    for kind, prefix in ASSIGNED_CODE_PREFIX.items():
+        if normalised.startswith(prefix):
+            return kind
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class AuthorityScope:
     """Where a record number came from, as the source stated it.
@@ -619,17 +879,33 @@ class IdentityIndex:
     _findings: list[Refusal] = field(default_factory=list)
 
     def establish(
-        self, identity: PatientFacts, scope: AuthorityScope
+        self,
+        identity: PatientFacts,
+        scope: AuthorityScope,
+        *,
+        assigned: Iterable[PatientIdentifier] = (),
     ) -> tuple[IdentityKey, NationalIdentifier] | Refusal:
-        """Decide which subject a laboratory record belongs to.
+        """Decide which subject a laboratory record or CDA document belongs to.
 
-        A laboratory message is what creates a subject, because it is the only
-        source that carries a national identifier. This is therefore the one
-        place a new key may be minted.
+        A laboratory message or a CDA laboratory report is what creates a
+        subject, because those are the sources that carry a national
+        identifier. This is therefore the one place a new key may be minted, and
+        it stays one place so that the preference order cannot differ between
+        input formats.
+
+        The order is national identifier, then any other identifier the document
+        declared under a named namespace, then the institution-scoped record
+        number. That ranks relinkability: a codice fiscale links across Italy, an
+        ENI or STP code links within whatever namespace issued it, and a record
+        number links within one hospital. Taking them in any other order would
+        key a subject on something narrower than what the document offered.
 
         Args:
-            identity: What the message said about the patient.
-            scope: The institution the message came from.
+            identity: What the record said about the patient.
+            scope: The institution the record came from.
+            assigned: Other identifiers the document declared, in the order the
+                reader found them. Only those that identify a *person* and are
+                usable are considered; a TEAM card number is neither.
 
         Returns:
             The key and the classified national identifier, or a refusal.
@@ -640,10 +916,20 @@ class IdentityIndex:
             self._register_record_number(identity.mrn, scope, key)
             return key, classified
 
-        # The national identifier is unusable. It is never a key -- two records
-        # that both failed to say who they belong to have nothing in common --
-        # but the record number may still identify the patient within the
-        # institution that issued it.
+        # No usable codice fiscale. An ENI, STP, TEAM personal or ANA code is
+        # the next best thing: it has no checksum to verify, but the document
+        # named the namespace that issued it, so it is a real key within that
+        # namespace rather than a value two silent records would share.
+        for candidate in assigned:
+            if candidate.is_usable and candidate.keys_a_person:
+                key = IdentityKey.assigned_identifier(candidate.authority, candidate.normalised)
+                self._register_record_number(identity.mrn, scope, key)
+                return key, classified
+
+        # Nothing national and nothing assigned. The identifier we were handed
+        # is never a key -- two records that both failed to say who they belong
+        # to have nothing in common -- but the record number may still identify
+        # the patient within the institution that issued it.
         number = normalise_record_number(identity.mrn)
         if not number:
             return Refusal(

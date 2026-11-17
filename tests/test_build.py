@@ -501,10 +501,19 @@ def test_the_manifest_records_what_was_done(tmp_path: Path) -> None:
     assert manifest["schema_version"] == MANIFEST_SCHEMA_VERSION
     assert manifest["key_fingerprint"] == KEY.fingerprint
     ledgers = {entry["modality"]: entry for entry in manifest["modalities"]}
-    assert set(ledgers) == {"lab", "reports", "imaging"}
+    assert set(ledgers) == {"lab", "cda", "reports", "imaging"}
+
+    # A source the corpus does not carry is reported at zero rather than left
+    # out, the same rule the field table follows. This corpus is HL7, so the
+    # CDA ledger exists and read nothing -- which is what tells a reader that
+    # the build looked and found none, rather than leaving them to infer it
+    # from an absence.
+    assert ledgers["cda"]["files_read"] == 0
+    assert all(item["files_present"] == 0 for item in ledgers["cda"]["fields"])
 
     for ledger in ledgers.values():
-        assert ledger["files_read"] > 0
+        if ledger["modality"] != "cda":
+            assert ledger["files_read"] > 0
         assert ledger["unreadable"] == 0
         for item in ledger["fields"]:
             # A count above the number of files read would mean occurrences were

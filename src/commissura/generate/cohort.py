@@ -79,6 +79,20 @@ class CohortSpec:
             hostile to a validator.
         reference_date: The notional present. All activity precedes it.
         max_encounters: Upper bound on encounters per subject.
+        cda: Emit each laboratory panel as an HL7 Italia CDA R2 document under
+            ``cda/`` instead of an HL7 v2 message under ``lab/``.
+
+            **Off by default, and that is deliberate rather than cautious.** A
+            CDA document carries its own narrative, so turning this on changes
+            which files a corpus holds and therefore every captured number in
+            the README's worked example. Defaulting to off keeps a corpus
+            generated from a given seed byte-identical to one generated before
+            this flag existed, which is the reproducibility contract the seed
+            is for. Turning it on produces the corpus a site that has migrated
+            to the Fascicolo Sanitario Elettronico would hand over: structured
+            laboratory data as CDA, with the radiology reports and discharge
+            letters still arriving as plain text, because those have their own
+            CDA profiles that this project does not read yet.
     """
 
     subjects: int = 10
@@ -86,6 +100,7 @@ class CohortSpec:
     defect_rate: float = 0.15
     reference_date: date = DEFAULT_REFERENCE_DATE
     max_encounters: int = 3
+    cda: bool = False
 
     def __post_init__(self) -> None:
         """Validate the specification.

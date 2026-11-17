@@ -456,7 +456,7 @@ def _write_subject_labs(
     by_session: dict[str, list[list[str]]] = {}
     for lab in subject.labs:
         if lab.collected_at is None or baseline is None:
-            summary.dropped.append(_undated(lab.path, baseline, "OBR-7 collection time"))
+            summary.dropped.append(_undated(lab.path, baseline, lab.date_field))
             continue
         session = session_of[lab.collected_at.date()]
         offset = pseudonymiser.day_offset(baseline, lab.collected_at.date())
@@ -515,7 +515,7 @@ def _write_subject_reports(
     counters: dict[str, int] = {}
     for report in subject.reports:
         if report.authored_on is None or baseline is None:
-            summary.dropped.append(_undated(report.path, baseline, "the 'Data del referto' header"))
+            summary.dropped.append(_undated(report.path, baseline, report.date_field))
             continue
         session = session_of[report.authored_on]
         counters[session] = counters.get(session, 0) + 1

@@ -353,22 +353,29 @@ a real limitation and is why `subject_keys` is in the manifest.
 
 ## Bringing your own data
 
-Nothing in `build` depends on the generator. `read_corpus` does three globs and
+Nothing in `build` depends on the generator. `read_corpus` does four globs and
 reads whatever it finds, so a corpus exported from a real system works — if it
 is laid out the way the reader looks for it, and if the documents carry the
-labels linkage needs. Both are undocumented until this section, which is a
-problem, because getting them wrong fails *quietly*.
+identity the linkage needs.
 
 ```
 raw/
   lab/        *.hl7    HL7 v2 messages, one per file
+  cda/        *.xml    HL7 Italia CDA R2 laboratory reports, one per file
   reports/    *.txt    free text, UTF-8
   imaging/    *.json   DICOM JSON Model (PS3.18) metadata, one array per study
 ```
 
-Those three patterns are the whole contract. Subdirectories are not searched,
-other extensions are ignored, and the `_generator/` directory a generated
-corpus carries is only read by `commissura measure`.
+Those four patterns are the whole contract. None of the directories is
+required — hand over what you have. Subdirectories are not searched, other
+extensions are ignored, and the `_generator/` directory a generated corpus
+carries is only read by `commissura measure`.
+
+**If you have a choice, send CDA.** `lab/` and `cda/` are two forms of the same
+thing, and the plain-text `reports/` path needs your template's header labels to
+match a table inside this tool. A CDA document states the patient's identity in
+defined elements instead, so there is nothing to match and nothing to get
+quietly wrong. The section below says what that does and does not buy you.
 
 ### What each kind of file has to carry
 
@@ -402,6 +409,69 @@ with leading zeros stripped. `(0008,0020)` StudyDate decides the session.
 
 Dates are accepted as `YYYYMMDD`, `YYYYMMDDHHMM`, `YYYYMMDDHHMMSS`,
 `DD/MM/YYYY`, `DD.MM.YYYY` or `YYYY-MM-DD`.
+
+### HL7 Italia CDA R2 laboratory reports
+
+`cda/*.xml` is read against *Specifiche HL7 CDA R2 del Referto di Medicina di
+Laboratorio v.1.3*, one of the national document standards the Ministry
+publishes with HL7 Italia and AgID. One document produces two records — the
+LOINC-coded results and the human-readable narrative — so it replaces a
+`lab/*.hl7` message and a `reports/*.txt` file together, and nothing downstream
+changes.
+
+What the reader takes, and where each value comes from:
+
+| Element | Used for |
+| --- | --- |
+| `recordTarget/patientRole/id` | the patient's identity, by the OID in `@root` |
+| `patient/name/family`, `given` | the name, stated separately and never guessed |
+| `patient/birthTime`, `administrativeGenderCode` | the participant row |
+| `componentOf/encompassingEncounter/id` | the numero nosologico — what imaging links on |
+| `custodian/.../representedCustodianOrganization/name` | the institution, and the scope of that record number |
+| `legalAuthenticator/.../assignedPerson/name` | who signed it |
+| `author/.../assignedPerson/name` | who wrote it |
+| `ClinicalDocument/effectiveTime` | which session the document belongs to |
+| `section/code` | the laboratory specialty, in the `panel_code` column |
+| `section/text` | the narrative, which goes through the scrubber |
+| `observation/code`, `value`, `referenceRange` | the results |
+
+**Five kinds of patient identifier, because the specification allows five.** The
+codice fiscale under `2.16.840.1.113883.2.9.4.3.2` is the ordinary case and is
+obligatory for anyone enrolled in the SSN. A patient insured abroad carries two
+TEAM identifiers, and only the personal one keys a subject — a card is reissued,
+a person is not. An ENI or STP code is sixteen characters beginning `ENI` or
+`STP`, and its OID is national *or* the local one of whichever organisation
+issued it, so the reader recognises those by the prefix the specification
+requires rather than by a namespace it cannot know. An ANA code uses one fixed
+OID. Anything else is keyed within the namespace the document names, never
+merged into the national one. `.deident/manifest.json` reports which kind
+established each subject, under `source.subject_keys`.
+
+**One warning you may see, and it is worth acting on.** The specification's own
+worked example prints the codice fiscale root with an extra `.2`:
+`2.16.840.1.113883.2.9.2.4.3.2`. If your export was built from that example
+rather than from the table three lines above it, every document is reported as
+`misdeclared_identifier_namespace`. The reader still links the patient, provided
+the same element names the Ministero dell'Economia e delle Finanze as its
+assigning authority — but fix the export, because that OID lies in HL7 Italia's
+regional and organisation arc and could be somebody's real local namespace.
+
+**What CDA does not do is remove the free text.** Chapter 5.1 of the
+specification is titled "human-readable body", and the narrative inside
+`section/text` is written by a person. So the scrubber, the residual-risk list
+and `commissura measure` all still apply, and so does everything below about
+what targeted redaction can and cannot reach. What disappears is having to
+guess which line of a template holds the codice fiscale.
+
+A document that declares a DTD is refused. CDA R2 is defined by an XML Schema
+and has no use for one, while `xml.etree.ElementTree` expands internal entities
+— so a document carrying a DTD is a denial of service rather than a report.
+
+To see the whole thing on CDA input, generate a corpus in that form:
+
+```bash
+commissura generate --out raw-cda --subjects 25 --seed 42 --defect-rate 0.2 --cda
+```
 
 ### The two silent failures, and how to see them
 
@@ -526,6 +596,14 @@ raw/
     generation_manifest.json   seed, counts, tool versions, defects applied
     phi_annotations.json       every identifier, with file and character offsets
 ```
+
+`--cda` writes the laboratory data as HL7 Italia CDA R2 documents in `cda/`
+instead of HL7 v2 messages in `lab/`, which is the corpus a site that has
+migrated to the Fascicolo Sanitario Elettronico would hand over: structured
+results as CDA, with radiology reports and discharge letters still arriving as
+plain text, because those have their own CDA profiles that this tool does not
+read yet. Off by default, so a given seed produces the same corpus it produced
+before the flag existed.
 
 The generated material **deliberately contains synthetic identifiers** — names,
 codici fiscali, absolute dates, addresses, referring physicians. That is the
@@ -672,6 +750,46 @@ That is the only thing linking three separate hospital exports.
 Subject labels keep 48 bits of the digest. Collisions are a theoretical concern
 rather than a practical one, but the pseudonymiser records what it has issued
 and **raises** on a collision rather than silently merging two people.
+
+#### One permit, one set of labels
+
+TEHDAS2 D7.2 puts it in capitals: *pseudonyms MUST NOT be reused across
+different data permits.* One key gives one label space for ever, so without
+being told otherwise this tool hands the same `sub-` labels to every data user
+who ever receives one of your datasets — and two of them, or one secure
+environment holding both, can then join two datasets nobody assessed together.
+
+```bash
+commissura build ./raw --out ./dataset --permit IT-HDAB-2029-00417
+```
+
+```
+permit_key = HMAC-SHA256(key, "permit|" + permit_reference)
+subject_id = HMAC-SHA256(permit_key, "subject|" + national_id)[:12]
+```
+
+Everything derives from the subkey instead: labels, date offsets, DICOM UIDs,
+accessions, the manifest's own tag. **You still hold one key in one file** —
+nothing about key custody changes, and the root key is not recoverable from a
+subkey.
+
+Two consequences worth knowing before you use it:
+
+- **The fingerprint in the manifest becomes the subkey's.** That is the point:
+  a fingerprint is how an access body tells whether two datasets are relinkable,
+  and under this scheme two datasets for one permit are and two for different
+  permits are not. The root key's fingerprint is recorded beside it.
+- **`whois` needs the same `--permit`.** Deriving under the wrong scope gives a
+  label for nobody, which looks exactly like a person who is not in the dataset.
+  Check the printed fingerprint against the manifest's.
+  `commissura verify` needs no flag: the dataset records which permit it
+  answers, so verification reads it.
+
+It is opt-in, and a build without `--permit` is byte-identical to one from
+before the option existed — pinned by a test, because a change to pseudonym
+derivation that moved existing datasets would need a migration plan and this one
+cannot be reached by accident. The manifest states which of the two you got,
+in those words, rather than leaving it to be inferred.
 
 #### The key is never a command-line argument
 
@@ -1290,6 +1408,27 @@ nobody thinks of as identifiers.
 Note the honest result above: on ten participants with exact ages, minimum k is
 1. Ten people cannot reach k=5 on age and sex together — a property of small
 cohorts, not a defect, and the command reports the number rather than a verdict.
+
+**The report also names the channels k cannot score, and that is the part worth
+reading.** `risk_report.json` carries a `quasi_identifier_channels` list naming
+every route out of this dataset that a quasi-identifier could take: the
+participant demographics, the laboratory measurement values, the imaging
+acquisition metadata, and — the one that matters most — the **event interval
+sequence**.
+
+Intervals between a subject's events are exact. One true calendar date for that
+subject, from any other source, dates every other event in their record. That is
+the most likely route from a dataset built here back to a person, and
+k-anonymity cannot put a number on it: k counts people sharing a combination of
+attribute values, and a sequence of day offsets is not an attribute with a value
+domain.
+
+Which is exactly why it has to be *listed*. Dropping a channel for being
+unscoreable is how the strongest one in the dataset becomes the one your report
+does not mention. Each entry says whether a k was computed, and when none was,
+why not and what mitigating it would cost. TEHDAS2 D7.2 makes the hand-over an
+explicit step for whoever pseudonymises, and gives hospital visit dates as its
+own worked example of the kind this file has to carry.
 
 **Integrity is not completeness.** `verify` answers one question: do the files
 match the digests the manifest records? A dataset still holding a record you

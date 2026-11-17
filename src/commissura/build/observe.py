@@ -37,11 +37,13 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
+from xml.etree.ElementTree import Element
 
+from commissura.read.cda import parse_document_tree
 from commissura.read.corpus import RAW_SOURCES, read_exact
 from commissura.read.hl7 import parse_message
 
@@ -92,6 +94,45 @@ CARRIED_FIELDS: Final[dict[str, dict[str, Carried]]] = {
         "OBX-7": Carried("kept", "reference range, split into low and high"),
         "OBX-8": Carried("kept", "abnormal flag"),
     },
+    # Keyed by element path rather than by field number, because that is how
+    # CDA names things and a reader has to be able to go and look. The paths are
+    # written relative to ``ClinicalDocument`` and without the namespace prefix,
+    # which is how the specification itself writes them in its conformance
+    # rules.
+    "cda": {
+        "ClinicalDocument/effectiveTime": Carried(
+            "replaced", "document creation time, as day_offset from the subject's baseline"
+        ),
+        "observation/code": Carried("kept", "LOINC code and display name"),
+        "observation/interpretationCode": Carried("kept", "abnormal flag"),
+        "observation/value": Carried(
+            "kept", "the measured value and its unit, as the laboratory reported them"
+        ),
+        "observationRange/value": Carried("kept", "reference range, as an interval"),
+        "patient/administrativeGenderCode": Carried(
+            "kept", "administrative sex, in participants.tsv"
+        ),
+        "patient/birthTime": Carried(
+            "replaced",
+            "date of birth, as an age band in participants.tsv truncated at the age ceiling",
+        ),
+        "patientRole/id": Carried(
+            "replaced",
+            "the patient's identifier, as the HMAC-derived subject label; the key "
+            "never enters the dataset",
+        ),
+        "section/code": Carried(
+            "kept", "the laboratory specialty, in the lab table's panel_code column"
+        ),
+        "text/paragraph": Carried(
+            "kept",
+            "narrative prose, carried whole with its identifiers redacted; the "
+            "body table beside this one records what was removed from it",
+        ),
+        "tr/td": Carried("kept", "narrative table cells, carried on the same terms as the prose"),
+        "value/high": Carried("kept", "upper reference bound"),
+        "value/low": Carried("kept", "lower reference bound"),
+    },
     "reports": {
         "Data del referto": Carried(
             "replaced", "report date, as day_offset from the subject's baseline"
@@ -124,8 +165,20 @@ equally unlike their originals and only one of them be relinkable.
 ``PID-3`` is deliberately absent. The medical record number is what links an
 imaging study to a person; it is read for exactly that and then dropped, so it
 is removed rather than replaced. ``00100020`` PatientID is absent for the same
-reason. Both were described the other way round in the static table this
+reason, and so is ``encompassingEncounter/id``, which is where CDA puts the same
+number. All three were described the other way round in the static table this
 replaces.
+
+**The CDA rows were calibrated by running the extractor, not by reading the
+specification**, and the first attempt was wrong in a way worth recording: the
+keys were written as full element paths from ``ClinicalDocument``, which is how
+the specification writes its conformance rules and is not how the same document
+is observed. Every declared row came back present in zero files while the
+fields the build really carries were all reported as removed — a table saying
+the pipeline carried nothing, from a build that carried everything. Declaring
+against observed keys is the only way to get this right, which is the point of
+:func:`observe_modality` reporting a declared-but-absent field at zero rather
+than hiding it.
 """
 
 _HEADER_LABEL: Final = re.compile(r"(?:^|(?<=  ))([A-Za-z][\w/ ]{0,28}?):[ \t]", re.MULTILINE)
@@ -163,6 +216,7 @@ removed without being something linkage uses.
 
 _EXTENSION_OF: Final[dict[str, str]] = {
     "lab": "HL7 v2 field",
+    "cda": "CDA element, as parent/name",
     "reports": "report header label",
     "imaging": "DICOM tag",
 }
@@ -289,6 +343,59 @@ def lab_fields(path: Path) -> set[str]:
     }
 
 
+def cda_fields(path: Path) -> set[str]:
+    """Return the populated element keys of one CDA document.
+
+    Args:
+        path: The document.
+
+    Returns:
+        One key per populated element, written ``parent/name`` without
+        namespace prefixes.
+
+    Raises:
+        commissura.read.cda.CdaParseError: If the document cannot be parsed.
+    """
+    root = parse_document_tree(read_exact(path))
+    return set(_element_keys(root, _local_name(root.tag)))
+
+
+def _local_name(tag: str) -> str:
+    """Return an element tag without its namespace, which is noise in a key."""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _element_keys(element: Element, parent: str) -> Iterator[str]:
+    """Yield ``parent/name`` for every populated element beneath ``element``.
+
+    **``parent/name`` rather than the full path, and that is a measured choice
+    rather than a shortcut.** The specification lets a leaf section nest its
+    observations under a ``BATTERY`` organizer, under a ``CLUSTER`` organizer or
+    directly, with ``entryRelationship`` links between them, so the full path to
+    an ``observation/code`` differs between two conformant documents that mean
+    the same thing. Keying on the full path would report the same field under
+    several names, scatter its coverage count across them, and leave every
+    declared row at zero — a table that looked like a build which carried
+    nothing.
+
+    The parent is kept because the element name alone is ambiguous in CDA, where
+    ``id``, ``code``, ``name``, ``value`` and ``effectiveTime`` each appear in a
+    dozen places that mean different things. ``patientRole/id`` is a patient and
+    ``order/id`` is a requisition, and a table that called both ``id`` would be
+    claiming the pipeline did one thing to both.
+
+    An element is **populated** when it carries text or at least one attribute.
+    CDA puts most of its content in attributes, so a test for text alone would
+    miss nearly everything; and pure containers are skipped because reporting
+    ``component`` as a removed field says nothing a reader can act on.
+    """
+    for child in element:
+        name = _local_name(child.tag)
+        if (child.text or "").strip() or child.attrib:
+            yield f"{parent}/{name}"
+        yield from _element_keys(child, name)
+
+
 def imaging_fields(path: Path) -> set[str]:
     """Return the populated tag keys of one DICOM JSON Model sidecar.
 
@@ -350,6 +457,7 @@ def report_fields(path: Path) -> set[str]:
 
 _EXTRACTORS: Final[dict[str, Callable[[Path], set[str]]]] = {
     "lab": lab_fields,
+    "cda": cda_fields,
     "reports": report_fields,
     "imaging": imaging_fields,
 }

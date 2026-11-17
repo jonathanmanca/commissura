@@ -104,6 +104,177 @@ _DOMAIN_OFFSET: Final = "offset|"
 _DOMAIN_UID: Final = "uid|"
 _DOMAIN_ACCESSION: Final = "accession|"
 _DOMAIN_MANIFEST: Final = "manifest|"
+_DOMAIN_PERMIT: Final = "permit|"
+
+DOMAIN_PURPOSES: Final[dict[str, str]] = {
+    _DOMAIN_SUBJECT: "subject label, from a validated national identifier",
+    _DOMAIN_SUBJECT_RECORD_NUMBER: (
+        "subject label, from an institution-scoped medical record number"
+    ),
+    _DOMAIN_OFFSET: "per-subject date shift, for values that must stay valid dates",
+    _DOMAIN_UID: "DICOM unique identifier",
+    _DOMAIN_ACCESSION: "laboratory accession number",
+    _DOMAIN_MANIFEST: "authentication tag over the manifest's own content",
+    _DOMAIN_PERMIT: "subkey scoping every other derivation to one data permit",
+}
+"""What each domain prefix derives, for the manifest's declaration.
+
+Exported rather than kept private because D7.2 section 4.4 (p. 40) asks that the
+"exact specification of inputs" be saved alongside a cryptographically generated
+pseudonym, and a reader of the manifest alone cannot otherwise reconstruct the
+derivation. Keeping the mapping beside the prefixes means a new prefix added
+without a purpose is a visible omission rather than a silent one.
+"""
+
+
+def scope_to_permit(key: SecretKey, permit_reference: str) -> SecretKey:
+    """Return a subkey whose whole label space belongs to one data permit.
+
+    TEHDAS2 D7.2 section 4.4 (p. 41) states, in capitals, that "Pseudonyms MUST
+    NOT be reused across different data permits, to minimise risks of
+    intentional or unintentional linkage of data by the data user". One key
+    gives one label space for ever, so a holder who builds two permits' datasets
+    from the same key hands the same subject labels to two data users -- which
+    is exactly the unevaluated linkage that requirement exists to prevent.
+    Section 4.3 (p. 38) makes the same point from the other side: the holder's
+    output can reach the data user without the access body re-pseudonymising it
+    *only* if the holder "can implement per project pseudonym generation".
+
+    A subkey rather than a wider input, and the distinction is the whole reason
+    this is safe to add. Folding the permit into the ``"subject|"`` input would
+    change every label in every dataset ever built here. Deriving a subkey is
+    reached only when a permit is named, so a build without one is byte-for-byte
+    what it was before, which a test pins.
+
+    The subkey is a full-length HMAC-SHA256 digest, which is exactly
+    :data:`commissura.deident.keys.KEY_BYTES`, so it is an ordinary
+    :class:`SecretKey` and every derivation downstream is unchanged. Its
+    fingerprint differs from the root key's, and that is the point: a fingerprint
+    is how an access body tells whether two datasets are relinkable, and under
+    this scheme two datasets for one permit are and two for different permits
+    are not.
+
+    The root key is not recoverable from the subkey, so a subkey is also the
+    safest thing to hand to a step that does not need the root secret. Nothing
+    does that today; it is a property worth knowing before somebody needs it.
+
+    Args:
+        key: The root secret, from the key file.
+        permit_reference: The data permit this build is answering. Not
+            validated: a permit identifier's shape is for a health data access
+            body to define, and Italy has not designated one.
+
+    Returns:
+        A derived key, usable anywhere the root key is.
+    """
+    return SecretKey(_derive(key, _DOMAIN_PERMIT, permit_reference))
+
+
+def declare(
+    key: SecretKey,
+    *,
+    permit_reference: str | None = None,
+    root_fingerprint: str | None = None,
+) -> dict[str, object]:
+    """Describe this derivation for the manifest, without carrying the secret.
+
+    D7.2 section 4.4 (p. 40) asks a controller generating cryptographic
+    pseudonyms to save the "function used, exact specification of inputs, value
+    of salt", with the salt "kept separate and secure"; section 4.3 (p. 37) asks
+    the catalogue record to state whether the method is reversible; and section
+    4.3 (p. 38) has the access body *approve* the algorithm. None of that was
+    reconstructable from a manifest carrying a key fingerprint and a rule
+    version, so a reader could not assess an algorithm they are expected to
+    approve.
+
+    The salt is named and never carried, which is the same rule the rest of this
+    module follows: :attr:`SecretKey.fingerprint` identifies the secret without
+    being it.
+
+    ``reversible`` is ``False`` in D7.2's own sense -- section 4.2 (p. 36) makes
+    a scheme reversible exactly when the secrets mapping pseudonyms back to
+    identifiers are kept, and no such mapping is ever written. The document
+    discourages irreversible pseudonymisation, so the consequences are spelled
+    out in the payload rather than left for a reader to work out: an opt-out
+    still works, because it starts from a named person and `commissura whois`
+    derives forward from one, and a significant finding does not, because it
+    starts from a row.
+
+    Args:
+        key: The key that produced this dataset's pseudonyms -- the subkey when
+            the build is permit-scoped.
+        permit_reference: The permit this dataset answers, or ``None``.
+        root_fingerprint: The root key's fingerprint, when ``key`` is a subkey.
+
+    Returns:
+        The payload for the manifest's ``pseudonymisation`` section.
+    """
+    scoped = permit_reference is not None
+    return {
+        "algorithm": "HMAC-SHA256",
+        # `salt_custody` and not `secret`, and the name was chosen by a guard
+        # rather than by taste: `layout.FORBIDDEN_MANIFEST_KEYS` reserves
+        # "secret" precisely because a manifest property of that name is what a
+        # leaked key would look like, and nobody should have to read the value to
+        # find out. The guard failed the build immediately, which is what it is
+        # for -- the second time it has renamed a field here, after `key` became
+        # `field` in the per-input table on 2026-11-10.
+        "salt_custody": (
+            "A 32-byte key, held by the data holder, kept outside the dataset and "
+            "named here only by the fingerprint above. D7.2 section 4.4 (p. 40) "
+            "requires the salt be kept separate and secure."
+        ),
+        "key_fingerprint": key.fingerprint,
+        "root_key_fingerprint": root_fingerprint,
+        "rule_version": RULE_VERSION,
+        "subject_label_hex_chars": SUBJECT_ID_HEX_CHARS,
+        "domain_separation": "the prefix below is part of the HMAC input, never of the output",
+        "domains": dict(DOMAIN_PURPOSES),
+        "policy": "deterministic",
+        "policy_note": (
+            "The same identifier and key always give the same label, across runs, "
+            "machines and modalities. That is what links the three exports to one "
+            "person, and D7.2 section 4.4 advises it for the EHDS because it lets a "
+            "data user recognise the same patient within a dataset."
+        ),
+        # Not the bare word "key": `layout.FORBIDDEN_MANIFEST_KEYS` is a text
+        # search over the whole manifest, so a *value* of "key" trips the guard
+        # that exists to catch a *property* named that. The guard is crude
+        # because that is the only thing a text search can be, and weakening it
+        # to parse property names would weaken a guard protecting the one
+        # secret this project has. These names are clearer anyway.
+        "scope": "permit-scoped" if scoped else "key-wide",
+        "permit_reference": permit_reference,
+        "scope_note": (
+            (
+                "Every pseudonym here derives from a subkey of the holder's key and "
+                "this permit reference, so another permit built from the same key "
+                "produces different labels. D7.2 section 4.4 requires that. The "
+                "fingerprint above is the subkey's: two datasets sharing it answer "
+                "the same permit and are relinkable."
+            )
+            if scoped
+            else (
+                "Not scoped to a data permit. Every dataset built from this key "
+                "carries the same subject labels, so two permits answered with this "
+                "key would hand the same labels to two data users -- which D7.2 "
+                "section 4.4 says MUST NOT happen. Pass --permit to scope a build."
+            )
+        ),
+        "reversible": False,
+        "reversibility_note": (
+            "Irreversible in the sense of D7.2 section 4.2: no mapping from "
+            "pseudonym back to identifier is stored anywhere, so no party can "
+            "reverse a label, the holder included. The document discourages this, so "
+            "what follows is stated rather than left to be discovered. An opt-out "
+            "works: it starts from a named person, and `commissura whois` derives "
+            "that person's label forward from their identifier and this key. The "
+            "return of a significant finding does not: it starts from a row, and "
+            "reaching the person needs the holder to re-derive labels across their "
+            "own population and match. A stored mapping would make that a lookup "
+            "and would be the enumerable table this scheme exists to avoid."
+        ),
+    }
 
 
 def _derive(key: SecretKey, domain: str, value: str) -> bytes:

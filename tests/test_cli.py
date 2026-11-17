@@ -83,7 +83,7 @@ def test_defect_catalogue_json_carries_the_cause_of_each_defect() -> None:
     assert len(catalogue) >= 16
     for entry in catalogue:
         assert entry["why_it_happens"], entry["id"]
-        assert entry["modality"] in {"lab", "reports", "imaging"}
+        assert entry["modality"] in {"lab", "cda", "reports", "imaging"}
         assert entry["class"] in {"structural", "semantic", "linkage", "privacy"}
 
 

@@ -67,6 +67,151 @@ rather than a mistake in the dataset.
 """
 
 
+def channels(root: Path, *, scored: tuple[str, ...]) -> list[dict[str, object]]:
+    """Name every quasi-identifier channel this dataset carries.
+
+    TEHDAS2 D7.2 section 4.5 (p. 41) makes two things an explicit activity for
+    whoever pseudonymises: "identification of quasi-identifiers and handing over
+    information on them to the data minimisation process", and providing
+    "health-data specific quasi-identifiers beyond what is in the EDPB
+    guidelines (e.g., dates of visits in the hospital also become quickly
+    identifying)". Section 3.2 (p. 17) lists "a sequence of hospital visit
+    dates" among its own examples.
+
+    This file is that hand-over, and it was under-reporting. ``quasi_identifiers``
+    named the participant columns and the laboratory assessment covered analyte
+    values, so a reader taking the machine-readable artefact at its word -- which
+    is what a machine-readable artefact is for -- would conclude the set was age
+    and sex, generalise those, and ship a dataset whose every subject still
+    carries an exactly aligned event timeline. One true date for one subject,
+    from any other source, then recovers that subject's whole history. The README
+    has said so in prose since 2026-11-11; this file did not say it at all.
+
+    **A channel with no computable k is still a channel.** The interval sequence
+    is the one that matters here and k-anonymity cannot score it: the measure
+    counts how many people share a combination of attribute values, and a
+    sequence of offsets is not an attribute with a value domain. Omitting it for
+    being unscoreable is how the strongest channel in the dataset became the one
+    the report did not mention, so each entry carries ``scored`` and, when that
+    is false, why not and what the holder would have to do about it.
+
+    Derived from the dataset, not declared: a channel is listed when the files
+    that would carry it are present. A static list would report the interval
+    channel for a dataset of nothing but single-session subjects, where there is
+    no sequence to align.
+
+    Args:
+        root: Dataset root.
+        scored: The quasi-identifier columns k was actually computed over, so
+            the entry for them can say so rather than claiming a measurement
+            that was skipped.
+
+    Returns:
+        One entry per channel present, most identifying first.
+    """
+    context = DatasetContext(root)
+    found: list[dict[str, object]] = []
+
+    sessions = sorted({path.parent.parent.name for path in root.glob("sub-*/ses-*/*/*")})
+    if sessions:
+        found.append(
+            {
+                "channel": "event interval sequence",
+                "where": "day_offset, in every lab and report sidecar",
+                "kind": "health-specific quasi-identifier (D7.2 section 3.2, p. 17)",
+                "scored": False,
+                "why_not_scored": (
+                    "k-anonymity counts people sharing a combination of attribute "
+                    "values. A sequence of day offsets is not an attribute with a "
+                    "value domain, so no k describes it."
+                ),
+                "risk": (
+                    "Intervals between a subject's events are exact. One true "
+                    "calendar date for that subject, from any other source, dates "
+                    "every other event in their record. This is the most likely "
+                    "route from a dataset built here back to a person."
+                ),
+                "kept_because": (
+                    "The interval is what makes the data clinically usable; the "
+                    "calendar anchor is what had to go. Blurring the intervals "
+                    "would destroy the thing the offsets exist to preserve, so this "
+                    "is a documented trade-off and not an oversight. Mitigating it "
+                    "is the data minimisation step's decision, which is why it is "
+                    "handed over here."
+                ),
+            }
+        )
+
+    if scored:
+        found.append(
+            {
+                "channel": "participant demographics",
+                "where": f"participants.tsv: {', '.join(scored)}",
+                "kind": "quasi-identifier (D7.2 section 3.2, p. 17)",
+                "scored": True,
+                "risk": (
+                    "A combination shared by one participant identifies them to "
+                    "anyone who knows they took part."
+                ),
+                "mitigation_available": (
+                    "Generalisation. D7.2 section 3.3.1 (p. 22) asks that age be "
+                    "exact only when indispensable and that extreme values be "
+                    "categorised. Ages above 89 are already carried as 90+; banding "
+                    "the rest is not implemented, and the width is the holder's "
+                    "judgement about their cohort and their permit."
+                ),
+            }
+        )
+
+    if any(root.glob("sub-*/ses-*/lab/*.tsv")):
+        found.append(
+            {
+                "channel": "laboratory measurement values",
+                "where": "lab/*.tsv, analyte and value",
+                "kind": "quasi-identifier, continuous",
+                "scored": True,
+                "risk": (
+                    "A measured value is a near-unique quantity rather than a "
+                    "category, so most analyte-and-value pairs are shared by very "
+                    "few subjects. Counted in laboratory_values below."
+                ),
+                "mitigation_available": (
+                    "Suppression, top and bottom coding, banding or noise -- each of "
+                    "which removes or alters the unusual value that is "
+                    "simultaneously the risk and the reason somebody asked for the "
+                    "dataset. None is applied, and the choice depends on the permit."
+                ),
+            }
+        )
+
+    if context.imaging_metadata():
+        found.append(
+            {
+                "channel": "imaging acquisition metadata",
+                "where": "derivatives/imaging-metadata/*.json",
+                "kind": "quasi-identifier, and possibly a direct identifier",
+                "scored": False,
+                "why_not_scored": (
+                    "No k is computed over imaging metadata. Device, protocol and "
+                    "series descriptions are free of a fixed value domain."
+                ),
+                "risk": (
+                    "Identifiers can survive in vendor private tags, in series "
+                    "descriptions, in burned-in pixel annotations and in the head "
+                    "volume itself. This tool reads metadata and never pixels, so a "
+                    "study whose own metadata reports burned-in annotation is "
+                    "reported by validate rule DI009 and is not fixed here."
+                ),
+                "kept_because": (
+                    "The acquisition parameters are what makes imaging metadata "
+                    "worth carrying at all."
+                ),
+            }
+        )
+
+    return found
+
+
 def assess_laboratory(root: Path, *, threshold: int = K_THRESHOLD) -> dict[str, object]:
     """Measure how many subjects share each analyte-and-value combination.
 
@@ -178,6 +323,7 @@ def assess(root: Path, *, threshold: int = K_THRESHOLD) -> dict[str, object]:
         return {
             "schema_version": layout.SCHEMA_VERSION,
             "quasi_identifiers": [],
+            "quasi_identifier_channels": channels(root, scored=()),
             "threshold": threshold,
             "participants": len(table.rows),
             "minimum_k": None,
@@ -203,6 +349,7 @@ def assess(root: Path, *, threshold: int = K_THRESHOLD) -> dict[str, object]:
     return {
         "schema_version": layout.SCHEMA_VERSION,
         "quasi_identifiers": columns,
+        "quasi_identifier_channels": channels(root, scored=tuple(columns)),
         "threshold": threshold,
         "participants": sum(combinations.values()),
         "minimum_k": min(combinations.values()) if combinations else None,

@@ -242,7 +242,11 @@ def test_the_manifest_says_what_established_each_subject(tmp_path: Path) -> None
     source = manifest["source"]
     assert isinstance(source, dict)
     counts = source["subject_keys"]
-    assert counts == {"national_id": len(corpus.subjects), "scoped_record_number": 0}
+    assert counts == {
+        "national_id": len(corpus.subjects),
+        "scoped_record_number": 0,
+        "assigned_identifier": 0,
+    }
 
 
 def test_both_kinds_of_subject_key_are_reported_even_at_zero(tmp_path: Path) -> None:
@@ -255,7 +259,7 @@ def test_both_kinds_of_subject_key_are_reported_even_at_zero(tmp_path: Path) -> 
     assert isinstance(source, dict)
     keys = source["subject_keys"]
     assert isinstance(keys, dict)
-    assert sorted(keys) == ["national_id", "scoped_record_number"]
+    assert sorted(keys) == ["assigned_identifier", "national_id", "scoped_record_number"]
 
 
 # --------------------------------------------------------------------------
@@ -305,7 +309,10 @@ def test_the_manifest_is_consistent_after_a_withdrawal(tmp_path: Path) -> None:
     claims = " ".join(_structural(manifest))
 
     assert f"of {len(studies)} studies" in claims
-    assert manifest["schema_version"] == "6.0.0"
+    # Spelled out rather than read from the constant, deliberately: a schema
+    # version is part of a schema change, and a test that imported the constant
+    # would agree with any value somebody put there.
+    assert manifest["schema_version"] == "6.2.0"
 
 
 @pytest.mark.parametrize("field", ["modalities", "integrity", "residual_risk", "source"])

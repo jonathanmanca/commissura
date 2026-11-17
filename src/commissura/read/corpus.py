@@ -37,12 +37,20 @@ from pathlib import Path
 from typing import Final
 
 from commissura.models import Sex
+from commissura.read.cda import (
+    CODICE_FISCALE_ROOT,
+    CODICE_FISCALE_ROOT_MISPRINT,
+    CdaParseError,
+    parse_clinical_document,
+)
 from commissura.read.hl7 import Segment, parse_day, parse_message, parse_timestamp
 from commissura.read.identity import (
     AuthorityScope,
     IdentifierStatus,
     IdentityIndex,
     IdentityKey,
+    KeyKind,
+    PatientIdentifier,
     Refusal,
     RefusalReason,
     classify_national_id,
@@ -52,6 +60,7 @@ from commissura.read.identity import (
 
 RAW_SOURCES: Final[dict[str, str]] = {
     "lab": "lab/*.hl7",
+    "cda": "cda/*.xml",
     "reports": "reports/*.txt",
     "imaging": "imaging/*.json",
 }
@@ -60,6 +69,14 @@ RAW_SOURCES: Final[dict[str, str]] = {
 Laboratory first, because a laboratory message is what creates a subject and
 the other two can only attach to one that exists. The dictionary order carries
 that, and :func:`read_corpus` depends on it.
+
+**``cda`` is second because it also creates subjects**, and it is a source
+rather than a modality: one HL7 Italia CDA R2 laboratory report is both a set of
+structured results and a human-readable document, so it yields a laboratory
+record *and* a report record from the same file. A holder may hand over either
+form or both — a site part-way through migrating to the Fascicolo Sanitario
+Elettronico has both — and nothing here requires a corpus to carry any
+particular subset of the four.
 
 Declared here rather than written at each call site because two modules now walk
 the same corpus -- this one to link it, :mod:`commissura.build.observe` to
@@ -245,6 +262,28 @@ class Observation:
     observed_at: datetime | None
 
 
+DATE_FIELD_OBR_7: Final = "OBR-7 collection time"
+"""Where an HL7 laboratory message states the time its specimen was collected.
+
+Carried on the record rather than written at the point a date turns out to be
+missing, because that message tells an operator which field of which document to
+go and look at — and the answer is different for a CDA document, which has no
+OBR segment at all. A hardcoded field name is a true sentence about one input
+format printed over every other.
+"""
+
+DATE_FIELD_REPORT_HEADER: Final = "the 'Data del referto' header"
+"""Where a plain-text report states its date, in this project's own template."""
+
+DATE_FIELD_CDA_EFFECTIVE_TIME: Final = "ClinicalDocument/effectiveTime"
+"""Where a CDA document states when it was created.
+
+Obligatory in the specification and precise at least to the second, so a CDA
+document with no readable date here is a malformed document rather than an
+ordinary gap.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class LabRecord:
     """One laboratory message, parsed."""
@@ -259,6 +298,7 @@ class LabRecord:
     sending_facility: str
     assigning_authority: str
     observations: tuple[Observation, ...]
+    date_field: str = DATE_FIELD_OBR_7
 
     @property
     def scope(self) -> AuthorityScope:
@@ -289,6 +329,7 @@ class ReportRecord:
     signed_by: str
     authored_on: date | None
     text: str
+    date_field: str = DATE_FIELD_REPORT_HEADER
 
     def declared(self) -> DeclaredIdentity:
         """Return what this report's header says about who it is about."""
@@ -594,6 +635,123 @@ def _signing_clinician(text: str) -> str:
     return matches[-1].strip() if matches else ""
 
 
+@dataclass(frozen=True, slots=True)
+class CdaRecords:
+    """What one CDA R2 laboratory report yields: two records from one file.
+
+    **Two records and not one, because the document genuinely is two things.**
+    A CDA laboratory report carries LOINC-coded results in its Level 3 entries
+    and a human-written narrative in its Level 2 sections, and this project
+    already has a shape for each. Mapping it onto both means ``build`` needs no
+    branch for a new document type: the results go down the laboratory branch
+    and the narrative down the scrubbing branch, exactly as they do for a
+    hospital that sends HL7 messages and text files separately.
+
+    Both records carry the same corpus-relative path. That is correct rather
+    than a collision — one input file contributing two records — and it is what
+    lets the manifest say that a CDA document was read once while two records
+    came out of it.
+
+    Attributes:
+        lab: The structured results, as a laboratory record.
+        report: The narrative, as a report record, or ``None`` when the
+            document carried no human-readable text at all.
+        identifiers: Every classified ``patientRole/id``, so that identity
+            resolution can consider the ones that are not a codice fiscale.
+        misdeclared_codice_fiscale: Whether the document declared its codice
+            fiscale under the root the specification's own example misprints.
+    """
+
+    lab: LabRecord
+    report: ReportRecord | None
+    identifiers: tuple[PatientIdentifier, ...]
+    misdeclared_codice_fiscale: bool
+
+
+def read_cda(path: Path, relative: str) -> CdaRecords:
+    """Parse one CDA R2 laboratory report into the records this pipeline reads.
+
+    **The scope a record number is read in is the custodian's name, not the
+    encounter identifier's OID**, and that choice is the one worth defending.
+    ``componentOf/encompassingEncounter/id`` carries the numero nosologico and
+    its ``@root`` would be a far better identifier for the issuing authority
+    than any name — but the other two modalities do not have it. HL7 states the
+    authority as a facility name in MSH-4 and DICOM as ``InstitutionName``, and
+    a record number is only comparable across modalities if all three name the
+    authority the same way. Scoping by the OID would make every CDA-established
+    subject invisible to its own imaging studies, silently, with every count
+    still looking right.
+
+    Raises:
+        commissura.read.cda.CdaParseError: If the document cannot be parsed or
+            carries no ``patientRole``.
+    """
+    document = parse_clinical_document(read_exact(path))
+    specialty = document.specialty
+
+    sex = document.sex
+    identity = Identity(
+        national_id=document.codice_fiscale,
+        mrn=document.record_number,
+        family_name=document.family_name,
+        given_name=document.given_name,
+        sex=Sex(sex) if sex in {"M", "F"} else None,
+        birth_date=document.birth_date,
+    )
+
+    lab = LabRecord(
+        path=relative,
+        identity=identity,
+        accession=document.order_id or document.document_id,
+        panel_code=specialty.code if specialty else "",
+        panel_name=specialty.display or specialty.title if specialty else "",
+        collected_at=document.effective_time,
+        ordering_provider=document.author_name,
+        sending_facility=document.custodian_name,
+        # Deliberately empty: see this function's docstring. The custodian's
+        # name reaches the scope through ``sending_facility``.
+        assigning_authority="",
+        observations=tuple(
+            Observation(
+                loinc_code=item.code,
+                display=item.display,
+                value=item.value,
+                unit=item.unit,
+                reference_range=f"{item.reference_low}-{item.reference_high}"
+                if item.reference_low and item.reference_high
+                else "",
+                abnormal_flag=item.interpretation,
+                observed_at=item.observed_at,
+            )
+            for item in document.observations
+        ),
+        date_field=DATE_FIELD_CDA_EFFECTIVE_TIME,
+    )
+
+    narrative = document.narrative
+    report = (
+        ReportRecord(
+            path=relative,
+            mrn=document.record_number,
+            national_id=document.codice_fiscale,
+            full_name=identity.full_name,
+            signed_by=document.signed_by,
+            authored_on=document.effective_time.date() if document.effective_time else None,
+            text=narrative,
+            date_field=DATE_FIELD_CDA_EFFECTIVE_TIME,
+        )
+        if narrative
+        else None
+    )
+
+    return CdaRecords(
+        lab=lab,
+        report=report,
+        identifiers=document.identifiers,
+        misdeclared_codice_fiscale=document.misdeclared_codice_fiscale,
+    )
+
+
 _TAG_PATIENT_ID = "00100020"
 _TAG_PATIENT_NAME = "00100010"
 _TAG_ACCESSION = "00080050"
@@ -656,12 +814,46 @@ def read_imaging(path: Path, relative: str) -> ImagingRecord:
 # --------------------------------------------------------------------------
 
 
+_CONFLICTING_IDENTITY: Final[tuple[str, str]] = (
+    RefusalReason.CONFLICTING_IDENTITY.value,
+    "this record shares an identifier with a record naming a different "
+    "person; both identities are kept so that both names are redacted",
+)
+"""The reason and detail for a record whose identity disagrees with a sibling's.
+
+A constant because two sources can now establish a subject — an HL7 message and
+a CDA document — and the sentence an auditor reads must not depend on which one
+found the disagreement. The condition is the same condition.
+"""
+
+
+def _attach(subjects: dict[IdentityKey, Subject], key: IdentityKey, identity: Identity) -> bool:
+    """Create the subject this key names, or add another identity to it.
+
+    Args:
+        subjects: Subjects established so far, mutated in place.
+        key: What established this subject.
+        identity: What the record said about the person.
+
+    Returns:
+        Whether the new identity materially disagrees with the subject's
+        primary one, which the caller reports rather than resolving.
+    """
+    subject = subjects.get(key)
+    if subject is None:
+        subjects[key] = Subject(key=key, identities=[identity])
+        return False
+    return subject.observe(identity)
+
+
 def read_corpus(root: Path) -> RawCorpus:
     """Read every export under ``root`` and link the records to subjects.
 
-    Three passes, in an order that is load-bearing. Laboratory messages first,
-    because they are the only source carrying a national identifier and
-    therefore the only source that may *create* a subject. Then reports, which
+    Four passes, in an order that is load-bearing. The two sources that carry a
+    national identifier go first, because they are the only ones that may
+    *create* a subject: HL7 laboratory messages, then CDA R2 laboratory
+    reports, which state identity in a defined header element and so also
+    contribute their own narrative directly. Then plain-text reports, which
     state the national identifier in their header and so prefer it. Then
     imaging, which has no national identifier at all and must resolve on a
     record number scoped to the institution that issued it.
@@ -672,7 +864,10 @@ def read_corpus(root: Path) -> RawCorpus:
     about who they belonged to.
 
     Args:
-        root: The corpus root, holding ``lab/``, ``reports/`` and ``imaging/``.
+        root: The corpus root, holding any of ``lab/``, ``cda/``, ``reports/``
+            and ``imaging/``. None of them is required: a holder hands over
+            what they have, and a directory that is absent contributes nothing
+            rather than failing.
 
     Returns:
         The linked corpus, with an issue recorded for every record that could
@@ -717,19 +912,73 @@ def read_corpus(root: Path) -> RawCorpus:
                 )
             )
 
-        subject = subjects.get(key)
-        if subject is None:
-            subjects[key] = Subject(key=key, identities=[record.identity])
-        elif subject.observe(record.identity):
+        if _attach(subjects, key, record.identity):
+            issues.append(LinkageIssue(relative, *_CONFLICTING_IDENTITY))
+        subjects[key].labs.append(record)
+
+    # --- CDA: one document, two records, and it establishes subjects too. ---
+    #
+    # Processed here rather than with the reports, because a CDA laboratory
+    # report carries a national identifier in a defined element and may
+    # therefore *create* a subject. Its narrative attaches directly to the key
+    # that the same document established: going back through `_resolve_report`
+    # would re-derive an answer this document already gave, and would fail for
+    # a patient keyed on an ENI code or a record number, whose narrative would
+    # then be dropped from a dataset built out of its own structured half.
+    for path in sorted(root.glob(RAW_SOURCES["cda"])):
+        relative = path.relative_to(root).as_posix()
+        try:
+            records = read_cda(path, relative)
+        except (OSError, CdaParseError, UnicodeDecodeError) as exc:
+            issues.append(
+                LinkageIssue(relative, RefusalReason.UNREADABLE_CDA_DOCUMENT.value, str(exc))
+            )
+            continue
+
+        if records.misdeclared_codice_fiscale:
             issues.append(
                 LinkageIssue(
                     relative,
-                    RefusalReason.CONFLICTING_IDENTITY.value,
-                    "this record shares an identifier with a record naming a different "
-                    "person; both identities are kept so that both names are redacted",
+                    RefusalReason.MISDECLARED_IDENTIFIER_NAMESPACE.value,
+                    "this document declares a codice fiscale under "
+                    f"{CODICE_FISCALE_ROOT_MISPRINT}, which is the root the "
+                    "specification's own worked example misprints; the correct root is "
+                    f"{CODICE_FISCALE_ROOT}. Fix the export: that OID lies in the "
+                    "regional and organisation arc, so it is only read as a codice "
+                    "fiscale where the same element names the Ministero dell'Economia "
+                    "e delle Finanze as its assigning authority",
                 )
             )
-        subjects[key].labs.append(record)
+
+        resolved = index.establish(
+            records.lab.identity, records.lab.scope, assigned=records.identifiers
+        )
+        if isinstance(resolved, Refusal):
+            refuse(relative, resolved)
+            continue
+        key, classified = resolved
+
+        # Reported only when nothing identified the *person*. An ENI, STP, TEAM
+        # or ANA code is a legitimate identity for a patient who has no codice
+        # fiscale, and reporting it as an invalid national identifier would
+        # file a whole class of lawful patients as a data-quality problem.
+        # `source.subject_keys` is where the kind of key is accounted for.
+        if key.kind is KeyKind.SCOPED_RECORD_NUMBER:
+            issues.append(
+                LinkageIssue(
+                    relative,
+                    RefusalReason.INVALID_NATIONAL_IDENTIFIER.value,
+                    f"the national identifier is {classified.status.value} and no other "
+                    "declared identifier could key a person; this document was attached "
+                    f"by its record number within {key.authority}",
+                )
+            )
+
+        if _attach(subjects, key, records.lab.identity):
+            issues.append(LinkageIssue(relative, *_CONFLICTING_IDENTITY))
+        subjects[key].labs.append(records.lab)
+        if records.report is not None:
+            subjects[key].reports.append(records.report)
 
     # --- Reports: the national identifier is in the header, so prefer it. ---
     for path in sorted(root.glob(RAW_SOURCES["reports"])):

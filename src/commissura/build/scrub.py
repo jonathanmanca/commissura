@@ -194,15 +194,19 @@ class KnownIdentifiers:
 _PROSE_HEADINGS: frozenset[str] = frozenset(
     {
         "ALLA",
+        "CHIMICA",
         "CLINICO",
         "CONCLUSIONI",
         "DECORSO",
         "DELLA",
         "DIAGNOSTICA",
         "DIMISSIONE",
+        "EMATOLOGIA",
         "ESAME",
+        "ESAMI",
         "IMMAGINI",
         "INDICAZIONI",
+        "LABORATORIO",
         "LETTERA",
         "MOTIVO",
         "NELLA",
@@ -214,11 +218,21 @@ _PROSE_HEADINGS: frozenset[str] = frozenset(
         "TERAPIA",
     }
 )
-"""Section headings the generated reports use, in capitals like the names.
+"""Section headings a document's own structure contributes, in capitals.
 
 Listed so the risk detector does not report a heading as an identifier it
 failed to remove. A real corpus would need its own list, which is why this
 is a named constant rather than a literal buried in the detector.
+
+``CHIMICA``, ``EMATOLOGIA``, ``ESAMI`` and ``LABORATORIO`` come from a different
+place than the rest and are the ones a real deployment is most likely to keep:
+they are words from Tabella 44 of the HL7 Italia laboratory specification, the
+LOINC laboratory specialties, which a CDA document carries as the title of its
+specialty section. The others are this project's own report template. Both
+reached the detector the same way — measured on a built dataset, where a
+specialty title was being reported as an unrecognised all-capitals token on
+every single document, which is how a useful list of residual risks becomes a
+list nobody reads.
 """
 
 

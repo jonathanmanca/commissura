@@ -46,9 +46,18 @@ class DefectClass(StrEnum):
 
 
 class Modality(StrEnum):
-    """Which modality a defect applies to."""
+    """Which modality a defect applies to.
+
+    :attr:`CDA` is a *source* rather than a modality — one CDA R2 laboratory
+    report is both structured results and a human-readable document — but a
+    defect belongs to the format that can carry it, and the defects a CDA
+    document can carry are not the defects an HL7 message can carry. Keeping it
+    separate is what lets ``commissura defects --modality`` answer a question an
+    operator actually has: what can go wrong with the files I am sending.
+    """
 
     LAB = "lab"
+    CDA = "cda"
     REPORTS = "reports"
     IMAGING = "imaging"
 
@@ -142,6 +151,21 @@ CATALOGUE: tuple[Defect, ...] = (
         "in the same family. Either way the export now says one identifier "
         "belongs to two people, and whichever message is read first decides "
         "which name the dataset publishes.",
+    ),
+    # ----- CDA -----
+    Defect(
+        "cda.misdeclared_cf_namespace",
+        Modality.CDA,
+        DefectClass.LINKAGE,
+        "The codice fiscale is declared under the root the specification misprints.",
+        "Table 16 of the HL7 Italia laboratory specification gives the Ministero "
+        "dell'Economia e delle Finanze OID as 2.16.840.1.113883.2.9.4.3.2, and the "
+        "worked example three lines below it writes "
+        "2.16.840.1.113883.2.9.2.4.3.2. An implementer who built from the example "
+        "sends the second. It is not a harmless difference: that OID lies in HL7 "
+        "Italia's regional and organisation arc, so it may be some organisation's "
+        "real local namespace, and reading it as the national one would merge "
+        "people across namespaces.",
     ),
     # ----- Reports -----
     Defect(

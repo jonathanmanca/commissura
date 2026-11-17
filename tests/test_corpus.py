@@ -151,10 +151,19 @@ def test_a_clean_corpus_is_still_hard_to_de_identify(tmp_path: Path) -> None:
 
 
 def test_full_defect_rate_exercises_the_whole_catalogue(tmp_path: Path) -> None:
-    """Every catalogued defect must be reachable, or it is dead documentation."""
-    spec = CohortSpec(subjects=40, seed=4, defect_rate=1.0)
-    summary = write_corpus(spec, tmp_path / "h")
-    seen = {defect.defect_id for defect in summary.manifest.defects}
+    """Every catalogued defect must be reachable, or it is dead documentation.
+
+    **Both laboratory forms, because no single corpus can reach the catalogue.**
+    A CDA document and an HL7 message carry different defects and a corpus holds
+    one or the other, so running only the default form would leave
+    ``cda.misdeclared_cf_namespace`` unreachable while this test still passed —
+    which is the failure it exists to prevent, one level up.
+    """
+    seen: set[str] = set()
+    for index, cda in enumerate((False, True)):
+        spec = CohortSpec(subjects=40, seed=4, defect_rate=1.0, cda=cda)
+        summary = write_corpus(spec, tmp_path / f"h{index}")
+        seen |= {defect.defect_id for defect in summary.manifest.defects}
     assert seen == set(BY_ID), f"never injected: {sorted(set(BY_ID) - seen)}"
 
 

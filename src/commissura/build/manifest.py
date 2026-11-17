@@ -39,14 +39,53 @@ from commissura.build.observe import ModalityLedger, observe_corpus
 from commissura.build.scrub import CATEGORY_DISPOSITION, ScrubReport
 from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_now
 from commissura.deident.keys import SecretKey
+from commissura.deident.pseudonymise import declare
 from commissura.read.corpus import RawCorpus
 from commissura.read.identity import REASON_KEEPS_RECORD, KeyKind, RefusalReason
+from commissura.validate.context import DatasetContext
 
-MANIFEST_SCHEMA_VERSION = "6.0.0"
+MANIFEST_SCHEMA_VERSION = "6.2.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
 different clock from the dataset layout.
+
+**6.2.0, 2026-11-17.** Two additions, from the HL7 Italia CDA R2 reader.
+Additive, so a reader of 6.1.0 still parses this.
+
+``modalities`` gains a ``cda`` ledger, which accounts for the elements a CDA R2
+laboratory document carried and what became of each. It is present even for a
+corpus with no CDA in it, reporting zero files read, because the convention the
+field table established is that an absent row reads as "no such thing" and a
+zero row reads as "looked, found none".
+
+``source.subject_keys`` gains ``assigned_identifier``, for a subject established
+from an ENI, STP, TEAM or ANA code — an identifier issued under a namespace the
+document names, which is relinkable within that namespace and is neither a
+national identifier nor an institution's own record number. A reader comparing
+two holders' datasets needs that distinction to know what can be joined.
+
+**6.1.0, 2026-11-17.** Three additions, from the TEHDAS2 reading in ``docs/``.
+Nothing is removed and nothing changes meaning, so a reader of 6.0.0 still
+parses this; the minor number moves because there is something new to read.
+
+``pseudonymisation`` states the function, the exact specification of its inputs,
+the policy and the reversibility, which D7.2 section 4.4 (p. 40) and section 4.3
+(p. 37) ask a controller to save alongside cryptographically generated
+pseudonyms. It was reconstructable only from this project's own source before.
+
+``pseudonymisation.permit_reference`` and ``.scope`` record whether the build
+was scoped to a data permit. D7.2 section 4.4 (p. 41) says pseudonyms MUST NOT
+be reused across permits, and an unscoped build reuses them by construction, so
+the field says which of the two this is rather than leaving it to be inferred
+from a fingerprint.
+
+``predecessor`` names the manifest this one replaced -- its timestamp, its
+authentication tag and its schema version -- because D7.2 section 4.4's
+documentation requirements (section 5.5.1, p. 51) ask for "mechanisms… to
+maintain traceability across documentation updates". A rebuild used to leave no
+trace that a previous dataset existed, which is exactly the withdrawal case of
+2026-11-13.
 
 **6.0.0, 2026-11-16.** ``source.records_not_in_dataset`` changes meaning: it
 counted every linkage issue plus every dropped record, and three of the reasons
@@ -380,6 +419,54 @@ def _imaging_payloads(out: Path) -> list[dict[str, object]]:
     return found
 
 
+def predecessor_of(destination: Path) -> dict[str, object] | None:
+    """Return the identity of the manifest a build is about to replace.
+
+    D7.2 section 5.5.1 (p. 51) asks that "appropriate mechanisms shall be in
+    place to maintain traceability across documentation updates, enabling
+    verification of how the documentation has evolved over time". A rebuild left
+    no trace that there had been a previous dataset. That is the withdrawal case
+    of 2026-11-13 from the documentation side: the holder acts on an objection,
+    the new dataset is correct, and nothing says why the counts moved or that
+    anything moved at all.
+
+    Three fields and no more. The timestamp says when, the authentication tag
+    identifies *which* document (and lets the key holder check a retained copy
+    against it), and the schema version says how to read that copy. Carrying the
+    predecessor's counts would ship numbers describing data this dataset no
+    longer contains, in the file written to be believed.
+
+    Read before publication, while the destination still holds the previous
+    build. A destination with no manifest -- a first build, or a directory this
+    tool did not produce -- gives ``None``, which the manifest states in those
+    words, because "there was none" and "we did not look" are different facts.
+
+    Args:
+        destination: Where the build will be published, which during a staged
+            build still holds the dataset being replaced.
+
+    Returns:
+        The predecessor's identity, or ``None`` when there is no readable one.
+    """
+    path = destination / layout.DEIDENT_DIR / layout.MANIFEST_JSON
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # Unreadable is treated as absent on purpose. A malformed or
+        # inaccessible manifest in the destination must not fail a build whose
+        # own output is fine, and the alternative -- recording "there was
+        # something here but we could not read it" -- is a field nobody can act
+        # on.
+        return None
+    if not isinstance(previous, dict):
+        return None
+    return {
+        "generated_at": previous.get("generated_at"),
+        HMAC_FIELD: previous.get(HMAC_FIELD),
+        "schema_version": previous.get("schema_version"),
+    }
+
+
 def write_manifest(
     out: Path,
     *,
@@ -388,6 +475,9 @@ def write_manifest(
     key: SecretKey,
     spec: BuildSpec,
     risk: dict[str, object] | None = None,
+    permit_reference: str | None = None,
+    root_fingerprint: str | None = None,
+    predecessor: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Write ``.deident/manifest.json`` and return what it contains.
 
@@ -395,11 +485,19 @@ def write_manifest(
         out: Dataset root.
         corpus: The corpus that was built from.
         summary: What the build produced.
-        key: The secret, used only for its fingerprint.
+        key: The secret, used only for its fingerprint. When the build is
+            permit-scoped this is the subkey, so the fingerprint recorded is the
+            one that identifies this permit's label space.
         spec: What the data holder supplied.
         risk: The risk report this build computed, so the manifest can describe
             it instead of asserting about it. ``None`` means no report was
             produced, which the manifest says in those words.
+        permit_reference: The data permit this build answers, or ``None`` for an
+            unscoped build -- which the manifest states, because D7.2 forbids
+            reusing pseudonyms across permits and an unscoped build does.
+        root_fingerprint: The root key's fingerprint when ``key`` is a subkey.
+        predecessor: The identity of the manifest this one replaces, from
+            :func:`predecessor_of`.
 
     Returns:
         The manifest payload.
@@ -422,6 +520,25 @@ def write_manifest(
         ),
         "tool_versions": tool_versions(),
         "generated_at": utc_now().isoformat(),
+        # The function, its inputs and its policy, which a reader of this file
+        # alone could not reconstruct before: they were in a module docstring.
+        # D7.2 section 4.4 (p. 40) asks a controller generating cryptographic
+        # pseudonyms to save exactly this, and section 4.3 (p. 38) has the
+        # access body approve the algorithm -- which it cannot do from a
+        # fingerprint and a rule version.
+        "pseudonymisation": declare(
+            key, permit_reference=permit_reference, root_fingerprint=root_fingerprint
+        ),
+        # What this manifest replaced, so a chain of rebuilds is followable.
+        # `None` is written rather than omitted: a reader must be able to tell a
+        # first build from one whose predecessor went unrecorded.
+        "predecessor": predecessor,
+        "predecessor_note": (
+            "The manifest this one replaced, identified by its timestamp and its "
+            "authentication tag. Its counts are deliberately not carried: they "
+            "describe data this dataset may no longer contain. `null` means this "
+            "build published into an empty destination."
+        ),
         "source": {
             # The directory's name, not its path. An absolute path carries the
             # operator's account name and local layout -- "C:\\Users\\<someone>\\..."
@@ -561,6 +678,57 @@ def _non_negative(value: int) -> dict[str, str]:
     return {"@value": str(value), "@type": "xsd:nonNegativeInteger"}
 
 
+def _typical_age_range(out: Path) -> dict[str, object]:
+    """Return ``minTypicalAge`` and ``maxTypicalAge``, read off the dataset.
+
+    Two recommended profile properties, derived rather than asked for, and the
+    reason they are worth emitting is in D7.2 section 3.1 (p. 18): a holder
+    should "specify any standard data minimisation rules that are applicable by
+    default to the datasets offered", the worked example being that a birth date
+    is normally available only as a year. Section 3.3.1 (p. 22) then treats age
+    as a quasi-identifier that should be exact only when indispensable. An
+    applicant deciding whether they need exact ages has to know the range first,
+    and this is the one place a catalogue reader can learn it without row access.
+
+    Both carry ``xsd:nonNegativeInteger``, which the profile's own value
+    constraints require and which needs no IRI -- unlike ``dpv:hasPersonalData``,
+    which D7.2 also asks for and whose vocabulary the Release 8 shapes do not
+    constrain at all. Writing a plausible concept IRI there is the trap this
+    project recorded when it found one authority list served over https and
+    another over http, so that property is left to the reading job in
+    ``docs/TEHDAS2_REMEDIATION_PLAN.md`` rather than guessed at.
+
+    Ages above the ceiling are carried as ``90+`` and are not integers, so a
+    cohort of nothing but those yields no range and the properties are omitted.
+    Omitted rather than reported as zero: both are recommended, and a
+    ``maxTypicalAge`` of 0 would be a false statement where absence is merely
+    silence. That is the opposite of the convention the per-field table follows,
+    and the difference is that the table's readers need to know a declared field
+    was absent, while a catalogue reader needs no claim at all.
+
+    Args:
+        out: Dataset root, which already holds ``participants.tsv`` by the time
+            the description is written.
+
+    Returns:
+        Zero or two properties, ready to merge into the dataset node.
+    """
+    ages: list[int] = []
+    for value in DatasetContext(out).participants.column("age"):
+        try:
+            ages.append(int(value))
+        except ValueError:
+            # `90+` above the ceiling, or `n/a`. Neither is a number and
+            # neither is an error.
+            continue
+    if not ages:
+        return {}
+    return {
+        "healthdcatap:minTypicalAge": _non_negative(min(ages)),
+        "healthdcatap:maxTypicalAge": _non_negative(max(ages)),
+    }
+
+
 def _typed(iri: str, rdf_type: str, label: str = "") -> dict[str, object]:
     """Reference an authority-list IRI as a node that carries its own class.
 
@@ -672,6 +840,7 @@ def write_healthdcat_description(
         "healthdcatap:hasStructuredData": True,
         "healthdcatap:numberOfUniqueIndividuals": _non_negative(summary.subject_count),
         "healthdcatap:numberOfRecords": _non_negative(summary.file_count),
+        **_typical_age_range(out),
         "dcat:keyword": list(spec.keywords),
         "dct:type": _typed(
             healthdcat.dataset_type_iri(spec.dataset_type),

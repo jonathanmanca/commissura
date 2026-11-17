@@ -39,6 +39,7 @@ from random import Random
 from commissura import __version__
 from commissura.annotate import check_spans
 from commissura.generate import vocabulary
+from commissura.generate.cda import render_lab_cda
 from commissura.generate.cohort import CohortSpec, PlannedSubject, build_cohort, child_seed
 from commissura.generate.defects import DefectInjector
 from commissura.generate.imaging import render_study
@@ -75,7 +76,7 @@ class CorpusSummary:
     def file_count(self) -> int:
         """Return the number of clinical files written, excluding metadata."""
         counts = self.manifest.files
-        return counts.lab + counts.reports + counts.imaging
+        return counts.lab + counts.cda + counts.reports + counts.imaging
 
 
 def _another_name(rng: Random, person: Person, *, surname_only: bool = False) -> Person:
@@ -112,6 +113,28 @@ def _another_name(rng: Random, person: Person, *, surname_only: bool = False) ->
     )
     given = rng.choice([n for n in pool if n != person.given_name])
     return person.model_copy(update={"family_name": family, "given_name": given})
+
+
+def _another_clinician(rng: Random, besides: str) -> str:
+    """Return a clinician name that is not the one given.
+
+    A CDA document names the clinician who created it and the clinician who
+    legally signed it, in two different elements, and the signer is the one a
+    plain-text report declares nowhere except its signature line. If the two
+    coincided, a corpus could not show whether the reader found the second
+    element at all — the same reasoning that gave one generated site a legacy
+    PID-19 interface.
+
+    Args:
+        rng: Seeded random source.
+        besides: The name to avoid.
+
+    Returns:
+        A different name, in the same ``FAMILY GIVEN`` form.
+    """
+    family = rng.choice([n for n in vocabulary.FAMILY_NAMES if not besides.startswith(n)])
+    given = rng.choice(vocabulary.GIVEN_NAMES_MALE + vocabulary.GIVEN_NAMES_FEMALE)
+    return f"{family} {given}"
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -169,11 +192,14 @@ def _render_subject(
     render_rng = Random(child_seed(spec.seed, f"render|{planned.index}"))
 
     spans: list[PhiSpan] = []
-    counts = {"lab": 0, "reports": 0, "imaging": 0}
+    counts = {"lab": 0, "cda": 0, "imaging": 0, "reports": 0}
+    study_dates = sorted(study.study_date for study in planned.subject.studies)
 
     # --- Laboratory ---
     for position, panel in enumerate(planned.subject.panels):
-        relative = f"lab/{person.mrn}_{panel.accession}.hl7"
+        source = "cda" if spec.cda else "lab"
+        extension = "xml" if spec.cda else "hl7"
+        relative = f"{source}/{person.mrn}_{panel.accession}.{extension}"
         # A conflicting identity is a property of a *pair* of messages, not of
         # either one alone, so the first message is not an opportunity for one:
         # there is nothing for it to disagree with. The draw still happens for
@@ -194,22 +220,40 @@ def _render_subject(
             if position < len(planned.control_ids)
             else f"MSG{planned.index:05d}{position:04d}"
         )
-        content, panel_spans = render_panel(
-            panel,
-            person=speaking_for,
-            site=planned.site,
-            path=relative,
-            control_id=control_id,
-            injector=injector,
-        )
+        if spec.cda:
+            # A CDA document may cite an earlier examination, the same way a
+            # radiology report does. Only one that actually precedes it: a
+            # comparison the generator invented would make the corpus
+            # internally inconsistent in a way nothing records.
+            earlier_studies = [moment for moment in study_dates if moment < panel.collected_at]
+            content, panel_spans = render_lab_cda(
+                panel,
+                person=speaking_for,
+                site=planned.site,
+                path=relative,
+                document_id=control_id,
+                signed_by=_another_clinician(render_rng, panel.ordering_provider),
+                injector=injector,
+                previous_study_date=earlier_studies[-1] if earlier_studies else None,
+                previous_site=planned.previous_site if earlier_studies else None,
+            )
+        else:
+            content, panel_spans = render_panel(
+                panel,
+                person=speaking_for,
+                site=planned.site,
+                path=relative,
+                control_id=control_id,
+                injector=injector,
+            )
         _write_text(root / relative, content)
         spans.extend(panel_spans)
-        counts["lab"] += 1
+        counts[source] += 1
 
         # A retried interface delivers the same message twice. In an export that
         # shows up as a second file with the same accession number.
         if injector.should_apply("lab.duplicate_message"):
-            duplicate = f"lab/{person.mrn}_{panel.accession}_2.hl7"
+            duplicate = f"{source}/{person.mrn}_{panel.accession}_2.{extension}"
             injector.record(
                 "lab.duplicate_message",
                 duplicate,
@@ -217,7 +261,7 @@ def _render_subject(
             )
             _write_text(root / duplicate, content)
             spans.extend(span.model_copy(update={"path": duplicate}) for span in panel_spans)
-            counts["lab"] += 1
+            counts[source] += 1
 
     # --- Imaging ---
     for study in planned.subject.studies:
@@ -228,7 +272,6 @@ def _render_subject(
         counts["imaging"] += 1
 
     # --- Reports ---
-    study_dates = sorted(study.study_date for study in planned.subject.studies)
     for position, report in enumerate(planned.subject.reports, start=1):
         kind = "rad" if report.kind is ReportKind.RADIOLOGY else "dim"
         relative = f"reports/{person.mrn}_{kind}_{position}.txt"
@@ -261,7 +304,12 @@ def _render_subject(
     return (
         spans,
         list(injector.applied()),
-        ModalityCounts(lab=counts["lab"], reports=counts["reports"], imaging=counts["imaging"]),
+        ModalityCounts(
+            lab=counts["lab"],
+            cda=counts["cda"],
+            reports=counts["reports"],
+            imaging=counts["imaging"],
+        ),
     )
 
 
@@ -280,13 +328,14 @@ def write_corpus(spec: CohortSpec, root: Path) -> CorpusSummary:
 
     all_spans: list[PhiSpan] = []
     all_defects: list[AppliedDefect] = []
-    totals = {"lab": 0, "reports": 0, "imaging": 0}
+    totals = {"lab": 0, "cda": 0, "reports": 0, "imaging": 0}
 
     for subject in planned:
         spans, defects, counts = _render_subject(subject, root=root, spec=spec)
         all_spans.extend(spans)
         all_defects.extend(defects)
         totals["lab"] += counts.lab
+        totals["cda"] += counts.cda
         totals["reports"] += counts.reports
         totals["imaging"] += counts.imaging
 
@@ -297,7 +346,10 @@ def write_corpus(spec: CohortSpec, root: Path) -> CorpusSummary:
         seed=spec.seed,
         subject_count=spec.subjects,
         files=ModalityCounts(
-            lab=totals["lab"], reports=totals["reports"], imaging=totals["imaging"]
+            lab=totals["lab"],
+            cda=totals["cda"],
+            reports=totals["reports"],
+            imaging=totals["imaging"],
         ),
         phi_span_count=len(all_spans),
         defects=tuple(all_defects),

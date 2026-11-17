@@ -280,9 +280,17 @@ class AppliedDefect(_Frozen):
 
 
 class ModalityCounts(_Frozen):
-    """How many files were written per modality."""
+    """How many files were written per source.
+
+    ``cda`` counts HL7 Italia CDA R2 laboratory documents, which carry both
+    structured results and a narrative and are therefore written *instead of* a
+    ``lab`` message rather than alongside one. A corpus has one or the other,
+    and a count of zero on either is a fact worth reading rather than an absence
+    to infer.
+    """
 
     lab: int = 0
+    cda: int = 0
     reports: int = 0
     imaging: int = 0
 
