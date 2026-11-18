@@ -24,6 +24,7 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from random import Random
+from typing import Final
 
 from commissura.generate import vocabulary as vocab
 from commissura.generate.imaging import sample_study
@@ -35,9 +36,20 @@ from commissura.identifiers import (
     email_address,
     landline_number,
     medical_record_number,
+    synthetic_assigned_code,
     synthetic_place_code,
+    synthetic_team_number,
 )
-from commissura.models import ClinicalReport, ImagingStudy, LabPanel, Person, Sex, Subject
+from commissura.models import (
+    ClinicalReport,
+    Enrolment,
+    ForeignIdentity,
+    ImagingStudy,
+    LabPanel,
+    Person,
+    Sex,
+    Subject,
+)
 
 DEFAULT_REFERENCE_DATE = date(2024, 6, 30)
 """The notional 'today' of the corpus; all clinical activity precedes it.
@@ -132,7 +144,65 @@ class PlannedSubject:
     control_ids: tuple[str, ...] = field(default_factory=tuple)
 
 
-def build_person(rng: Random, *, reference_date: date) -> Person:
+_TEAM_CARD_DIGITS: Final = 20
+_TEAM_PERSONAL_DIGITS: Final = 16
+"""Serial lengths, taken from the specification's own worked examples.
+
+It states no rule for either, so these are the only guidance there is and are
+not presented as more than that.
+"""
+
+ENROLMENT_PERIOD: Final = 4
+"""One subject in this many holds no codice fiscale, in a CDA corpus.
+
+Far more than a real cohort, and chosen for the same reason one of the five
+sites carries its national identifier in the deprecated PID-19: a path no
+corpus exercises is not covered, whatever the coverage percentage says, and
+these four kinds were reachable only from hand-built fixtures until now. One in
+four means the four cycle through within sixteen subjects, so the tests that
+assert they all appear do not need a cohort nobody would otherwise generate.
+"""
+
+NON_ENROLLED_KINDS: Final = (Enrolment.ENI, Enrolment.STP, Enrolment.ANA, Enrolment.TEAM)
+"""Cycled in order rather than drawn, so a small corpus still covers all four.
+
+A random choice over four kinds leaves one of them absent from a sixteen-subject
+corpus about a third of the time, and a coverage guarantee that holds two times
+in three is not one.
+"""
+
+
+def plan_enrolment(index: int, *, cda: bool) -> Enrolment | None:
+    """Return which non-enrolled kind this subject is, or ``None`` for enrolled.
+
+    **Only in a CDA corpus**, and that is a scope decision rather than a
+    simplification. These four kinds are the cases the CDA R2 laboratory
+    specification enumerates for ``patientRole/id``; HL7 v2 has no sourced
+    mapping for them — table 0203's ``NNxxx`` pattern names a *national* person
+    identifier, which is precisely what a TEAM or STP patient does not have —
+    and inventing one would put a plausible code with no provenance into the
+    generator, which is the `NNITA` mistake of 2026-11-11.
+
+    It also keeps the walkthrough's captured numbers still: that corpus is HL7,
+    so this function returns ``None`` for every subject in it and draws nothing
+    from the random stream.
+
+    Args:
+        index: Position in the cohort.
+        cda: Whether the corpus renders panels as CDA documents.
+
+    Returns:
+        The kind, or ``None`` when this subject holds a codice fiscale.
+    """
+    if not cda or index % ENROLMENT_PERIOD != ENROLMENT_PERIOD - 1:
+        return None
+    kind: Enrolment = NON_ENROLLED_KINDS[(index // ENROLMENT_PERIOD) % len(NON_ENROLLED_KINDS)]
+    return kind
+
+
+def build_person(
+    rng: Random, *, reference_date: date, enrolment: Enrolment | None = None
+) -> Person:
     """Invent one synthetic person.
 
     Ages are drawn from a triangular distribution peaking at 68. A uniform draw
@@ -143,6 +213,10 @@ def build_person(rng: Random, *, reference_date: date) -> Person:
     Args:
         rng: Seeded random source.
         reference_date: The notional present, used to place the birth date.
+        enrolment: When given, the person holds that kind of identifier instead
+            of a codice fiscale. ``None``, the default, draws nothing extra from
+            ``rng``, so an enrolled cohort's stream is exactly what it was
+            before this parameter existed.
 
     Returns:
         The person. Every field is fabricated and, where the format allows it,
@@ -168,9 +242,10 @@ def build_person(rng: Random, *, reference_date: date) -> Person:
         given_name=given_name,
         sex=sex,
         birth_date=birth_date,
-        codice_fiscale=codice_fiscale(
-            family_name, given_name, birth_date, sex, synthetic_place_code(rng)
-        ),
+        codice_fiscale=""
+        if enrolment is not None
+        else codice_fiscale(family_name, given_name, birth_date, sex, synthetic_place_code(rng)),
+        foreign=_foreign_identity(enrolment, rng) if enrolment is not None else None,
         mrn=medical_record_number(rng),
         street=street,
         city=city,
@@ -178,6 +253,32 @@ def build_person(rng: Random, *, reference_date: date) -> Person:
         postal_code=postal_code,
         phone=landline_number(rng, area_code),
         email=email_address(given_name, family_name, rng),
+    )
+
+
+def _foreign_identity(enrolment: Enrolment, rng: Random) -> ForeignIdentity:
+    """Return the identifier a non-enrolled patient carries.
+
+    TEAM is the one that needs two values, because the specification requires
+    two ``id`` elements and they are not interchangeable: the card number
+    identifies a card and only the personal number identifies the person.
+
+    Args:
+        enrolment: Which kind.
+        rng: Seeded random source.
+
+    Returns:
+        The identity.
+    """
+    if enrolment is Enrolment.TEAM:
+        return ForeignIdentity(
+            enrolment=enrolment,
+            value=synthetic_team_number(rng, digits=_TEAM_PERSONAL_DIGITS),
+            card_number=synthetic_team_number(rng, digits=_TEAM_CARD_DIGITS),
+        )
+    return ForeignIdentity(
+        enrolment=enrolment,
+        value=synthetic_assigned_code(enrolment.value.upper(), rng),
     )
 
 
@@ -199,7 +300,11 @@ def build_subject(rng: Random, *, index: int, spec: CohortSpec) -> PlannedSubjec
     Returns:
         The subject and the context needed to render their files.
     """
-    person = build_person(rng, reference_date=spec.reference_date)
+    person = build_person(
+        rng,
+        reference_date=spec.reference_date,
+        enrolment=plan_enrolment(index, cda=spec.cda),
+    )
     site = rng.choice(vocab.SITES)
     previous_site = rng.choice(vocab.SITES)
 

@@ -41,13 +41,26 @@ from typing import Final
 from commissura.annotate import AnnotatedText, Phi
 from commissura.generate.defects import DefectInjector
 from commissura.generate.vocabulary import Site
-from commissura.models import LabObservation, LabPanel, Person, PhiCategory, PhiSpan
+from commissura.models import (
+    Enrolment,
+    ForeignIdentity,
+    LabObservation,
+    LabPanel,
+    Person,
+    PhiCategory,
+    PhiSpan,
+)
 from commissura.read.cda import (
     ADMINISTRATIVE_GENDER_SYSTEM,
+    ANA_ROOT,
     CDA_NAMESPACE,
     CODICE_FISCALE_ROOT,
     CODICE_FISCALE_ROOT_MISPRINT,
+    ENI_NATIONAL_ROOT,
     LOINC_SYSTEM,
+    STP_NATIONAL_ROOT,
+    TEAM_CARD_ROOT,
+    TEAM_PERSONAL_ROOT,
 )
 
 _RESERVED: Final[str] = '<&"'
@@ -209,9 +222,23 @@ def render_lab_cda(
     # from the table beside it sends that root. Injecting it is what makes the
     # reader's refusal reachable from a generated corpus instead of from a
     # hand-written string in one test.
-    codice_fiscale_root = (
-        CODICE_FISCALE_ROOT_MISPRINT
-        if injector.apply(
+    #
+    # **Not offered to a patient who has no codice fiscale.** They write no
+    # codice fiscale element, so there is no root to misdeclare -- and before
+    # this guard the generator *recorded* the defect for them anyway, naming two
+    # documents in the manifest that did not carry it. Caught by the CDA
+    # session's own `test_the_misprinted_root_is_reachable_from_a_generated_corpus`,
+    # which asserts every injected defect is reported: a guard written for one
+    # reason catching a different thing a day later.
+    #
+    # Drawn first and used second, rather than guarded by a condition that would
+    # short-circuit the draw away. The draw has to happen for every document or
+    # the random stream shifts with the shape of a cohort, which is the same
+    # reason `lab.conflicting_identity` draws for every panel and records only
+    # the draws it uses.
+    misdeclare = injector.should_apply("cda.misdeclared_cf_namespace") and person.foreign is None
+    if misdeclare:
+        injector.record(
             "cda.misdeclared_cf_namespace",
             path,
             "recordTarget/patientRole/id/@root written as "
@@ -219,8 +246,7 @@ def render_lab_cda(
             "example misprints, instead of the correct "
             f"{CODICE_FISCALE_ROOT}",
         )
-        else CODICE_FISCALE_ROOT
-    )
+    codice_fiscale_root = CODICE_FISCALE_ROOT_MISPRINT if misdeclare else CODICE_FISCALE_ROOT
 
     text.line('<?xml version="1.0" encoding="UTF-8"?>')
     text.line(
@@ -301,6 +327,54 @@ def render_lab_cda(
     return text.finish()
 
 
+_FOREIGN_ROOT: Final[dict[Enrolment, str]] = {
+    Enrolment.ENI: ENI_NATIONAL_ROOT,
+    Enrolment.STP: STP_NATIONAL_ROOT,
+    Enrolment.ANA: ANA_ROOT,
+}
+"""The national OID each kind is written under.
+
+The specification allows a *regional* OID for ENI and STP instead, which is why
+the reader can also recognise those two from the code's own `ENI`/`STP` prefix.
+The generator writes the national form: a regional one is a local value this
+project has no business inventing, and the prefix path is exercised by the
+reader's own tests with a hand-built root rather than by minting a fake region.
+"""
+
+
+def _foreign_ids(text: AnnotatedText, foreign: ForeignIdentity) -> None:
+    """Write the ``id`` elements for a patient who holds no codice fiscale.
+
+    **TEAM writes two and the order is the specification's**: the card number
+    first, then the personal identification number. Both are recorded as
+    national identifiers in the ground truth, because both identify the patient
+    to anybody holding them and both therefore have to be removed — the
+    distinction that only the personal number may *key* a subject is the
+    reader's to make, and it makes it.
+
+    Args:
+        text: The document being assembled.
+        foreign: What this patient carries instead of a codice fiscale.
+    """
+    if foreign.enrolment is Enrolment.TEAM:
+        text.line(
+            f'      <id root="{TEAM_CARD_ROOT}" extension="',
+            Phi(foreign.card_number, PhiCategory.NATIONAL_ID),
+            '" assigningAuthorityName="Istituzione estera sintetica"/>',
+        )
+        text.line(
+            f'      <id root="{TEAM_PERSONAL_ROOT}" extension="',
+            Phi(foreign.value, PhiCategory.NATIONAL_ID),
+            '" assigningAuthorityName="Istituzione estera sintetica"/>',
+        )
+        return
+    text.line(
+        f'      <id root="{_FOREIGN_ROOT[foreign.enrolment]}" extension="',
+        Phi(foreign.value, PhiCategory.NATIONAL_ID),
+        '"/>',
+    )
+
+
 def _record_target(text: AnnotatedText, person: Person, codice_fiscale_root: str) -> None:
     """Write the patient's identity, which CDA states in defined elements.
 
@@ -311,11 +385,14 @@ def _record_target(text: AnnotatedText, person: Person, codice_fiscale_root: str
     """
     text.line("  <recordTarget>")
     text.line("    <patientRole>")
-    text.line(
-        f'      <id root="{codice_fiscale_root}" extension="',
-        Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID),
-        '" assigningAuthorityName="Ministero Economia e Finanze"/>',
-    )
+    if person.foreign is None:
+        text.line(
+            f'      <id root="{codice_fiscale_root}" extension="',
+            Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID),
+            '" assigningAuthorityName="Ministero Economia e Finanze"/>',
+        )
+    else:
+        _foreign_ids(text, person.foreign)
     text.line('      <addr use="H">')
     text.line("        <country>100</country>")
     text.line("        <city>", Phi(person.city, PhiCategory.ADDRESS), "</city>")

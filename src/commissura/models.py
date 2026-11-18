@@ -26,7 +26,15 @@ from __future__ import annotations
 from datetime import date, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+CODICE_FISCALE_LENGTH = 16
+"""Characters in a codice fiscale.
+
+Here rather than imported, because :mod:`commissura.identifiers` computes the
+check character and this module only needs the length -- and a model importing
+an algorithm module to learn a number is a dependency nobody needs.
+"""
 
 
 class _Frozen(BaseModel):
@@ -93,19 +101,70 @@ class AbnormalFlag(StrEnum):
     HIGH = "H"
 
 
+class Enrolment(StrEnum):
+    """How a patient is identified when they hold no codice fiscale.
+
+    The four cases HL7 Italia's CDA R2 laboratory report enumerates beside the
+    codice fiscale, for people the Italian national identifier does not cover: a
+    visitor insured abroad, a European resident not enrolled in the health
+    service, a foreigner temporarily present, and the national registry's own
+    code.
+
+    **Deliberately a separate vocabulary from
+    :class:`commissura.read.identity.PatientIdentifierKind`, which names the
+    same four things.** The contract between the generator and the reader is the
+    *document*, not a shared type: the reader decides a kind from what a
+    document declares, and must reach the same answer for a hospital's export as
+    for ours. Sharing an enum would also point the model layer at the reader,
+    which is the dependency `read/identity.py` already avoids with a Protocol.
+    Unifying them would be the obvious tidy-up and would be wrong.
+    """
+
+    TEAM = "team"
+    ENI = "eni"
+    STP = "stp"
+    ANA = "ana"
+
+
+class ForeignIdentity(_Frozen):
+    """The identifier a patient carries instead of a codice fiscale.
+
+    Attributes:
+        enrolment: Which of the four cases this is.
+        value: The code that identifies the *person* — an ENI, STP or ANA code,
+            or the TEAM personal identification number.
+        card_number: The TEAM card number, and empty for every other case. A
+            card is not a person: it is reissued on expiry or loss, so a subject
+            keyed on it would split across a reissue. It is carried because the
+            specification requires the document to state it and because it is
+            therefore an identifier the de-identifier has to find.
+    """
+
+    enrolment: Enrolment
+    value: str
+    card_number: str = ""
+
+
 class Person(_Frozen):
     """A synthetic person. Every field is fabricated.
 
     ``mrn`` is the hospital's own medical record number and ``codice_fiscale``
     the Italian national identifier. Both appear in the generated material and
     both are things a de-identifier has to find.
+
+    **Exactly one of ``codice_fiscale`` and ``foreign`` is set**, enforced below
+    rather than left as a convention. A person with both would be two people as
+    far as identity resolution is concerned; a person with neither cannot be
+    identified at all, and a renderer reaching for an empty codice fiscale would
+    write an empty element rather than fail. Neither should be constructible.
     """
 
     family_name: str
     given_name: str
     sex: Sex
     birth_date: date
-    codice_fiscale: str = Field(min_length=16, max_length=16)
+    codice_fiscale: str = Field(default="", max_length=16)
+    foreign: ForeignIdentity | None = None
     mrn: str
     street: str
     city: str
@@ -113,6 +172,28 @@ class Person(_Frozen):
     postal_code: str = Field(min_length=5, max_length=5)
     phone: str
     email: str
+
+    @model_validator(mode="after")
+    def _exactly_one_identifier(self) -> Person:
+        """Refuse a person with two identifiers, or with none.
+
+        Raises:
+            ValueError: If both a codice fiscale and a foreign identity are
+                given, or neither, or the codice fiscale is present at the
+                wrong length. The length check lives here rather than on the
+                field because the field now permits an empty value, and
+                ``min_length=16`` would forbid the legitimate empty one.
+        """
+        if self.codice_fiscale and self.foreign is not None:
+            raise ValueError("a person holds a codice fiscale or a foreign identity, not both")
+        if not self.codice_fiscale and self.foreign is None:
+            raise ValueError("a person needs a codice fiscale or a foreign identity")
+        if self.codice_fiscale and len(self.codice_fiscale) != CODICE_FISCALE_LENGTH:
+            raise ValueError(
+                f"a codice fiscale is {CODICE_FISCALE_LENGTH} characters, "
+                f"got {len(self.codice_fiscale)}"
+            )
+        return self
 
     @property
     def full_name(self) -> str:

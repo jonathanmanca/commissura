@@ -605,6 +605,44 @@ plain text, because those have their own CDA profiles that this tool does not
 read yet. Off by default, so a given seed produces the same corpus it produced
 before the flag existed.
 
+**A CDA corpus also contains patients who hold no codice fiscale**, which an
+HL7 one does not. The specification enumerates four other ways a patient is
+identified, and a real hospital sees all of them: a **TEAM** card for somebody
+insured abroad, an **ENI** code for a European not enrolled in the health
+service, an **STP** code for a foreigner temporarily present, and an **ANA**
+code. One subject in four is one of these, cycling through the four so a
+sixteen-subject corpus covers them all — far more than a real cohort, and for
+the same reason one of the five sites sends its national identifier in the
+deprecated PID-19: a path no corpus exercises is not covered, whatever the
+coverage percentage says.
+
+Three consequences you will see in the output:
+
+- Those subjects appear in the manifest under `subject_keys` as
+  `assigned_identifier`, which is neither a national identifier nor an
+  institution-scoped record number. An ENI code assigned nationally *is*
+  relinkable across Italy, so calling it institution-scoped would understate
+  it; it carries no checksum and its namespace may be one region's, so calling
+  it national would overstate it.
+- **TEAM writes two `id` elements and only one of them keys the patient.** A
+  card number identifies a card, which is reissued on expiry or loss, so a
+  subject keyed on it would split across a reissue. Both are redacted; only the
+  personal number establishes the subject.
+- Their reports carry no `Codice fiscale:` line and link on the record number
+  instead. Writing the foreign code under that label would state something
+  untrue, and writing it under a correct one would break linkage outright,
+  because the reader recognises four header labels and `Codice STP` is not
+  among them.
+
+These identifiers are synthetic by construction where the format allows it and
+only *marked* synthetic where it does not, which is a real difference. TEAM
+numbers name a country in ISO 3166-1's user-assigned `XAA`–`XZZ` range, which
+the standard undertakes never to allocate — the same guarantee as the codice
+fiscale's `X` place code. ENI, STP and ANA codes publish no internal allocation
+rule, so there is no range to sit outside of; they carry the literal
+`SINTETIC` instead, which says what they are to anybody reading a file but is
+a weaker claim and is not dressed up as the other one.
+
 The generated material **deliberately contains synthetic identifiers** — names,
 codici fiscali, absolute dates, addresses, referring physicians. That is the
 point: you cannot test a de-identifier on data that has nothing to remove.

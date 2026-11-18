@@ -199,7 +199,21 @@ def render_report(
         ),
         " anni",
     )
-    text.line("Codice fiscale: ", Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID))
+    # A patient with no codice fiscale gets no codice fiscale line, rather than
+    # an empty one or their foreign code under the wrong label. Both
+    # alternatives are worse than silence: an empty field is a header a reader
+    # would trust, and `Codice fiscale: STPSINTETIC...` states something untrue
+    # about what the value is.
+    #
+    # The report stays linkable without it. `read_report` treats every header
+    # as optional and identity resolution falls back to the record number
+    # below, which is the institution-scoped key these patients are keyed on
+    # anyway. Writing the foreign code here under a *correct* label would be
+    # the obvious alternative and would break linkage outright, because
+    # `_REPORT_LABELS` recognises four strings and `Codice STP` is not one of
+    # them -- every such report would land in `unlinked_report`.
+    if person.codice_fiscale:
+        text.line("Codice fiscale: ", Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID))
     text.line("Numero nosografico: ", Phi(person.mrn, PhiCategory.PATIENT_ID))
     # An unfilled template placeholder where the date should be. Written as a
     # plain string and *not* as a Phi span, deliberately: `__/__/____` is not an

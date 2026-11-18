@@ -37,6 +37,7 @@ from __future__ import annotations
 import uuid
 from datetime import date
 from random import Random
+from typing import Final
 
 from commissura.models import Sex
 
@@ -184,6 +185,72 @@ def synthetic_place_code(rng: Random) -> str:
         A four-character code such as ``X417``.
     """
     return f"X{rng.randrange(1000):03d}"
+
+
+SYNTHETIC_MARKER: Final = "SINTETIC"
+"""The word every synthetic identifier that has room for it carries.
+
+The same marker the generated institution names use, for the same reason: a
+value that announces itself cannot be mistaken for a real one by somebody
+reading a file, and no allocation scheme emits it.
+"""
+
+ASSIGNED_CODE_LENGTH: Final = 16
+"""Characters in an ENI or STP code, per the CDA R2 laboratory specification."""
+
+TEAM_SYNTHETIC_COUNTRY: Final = "XSY"
+"""An ISO 3166-1 alpha-3 code that is not a country and never will be.
+
+TEAM identifiers are prefixed with the alpha-3 code of the state that issued
+the card. ISO 3166-1 sets aside ``XAA``-``XZZ`` as user-assigned: the standard
+undertakes never to allocate them, so a code in that range cannot collide with
+a real issuing state however the list changes. The same argument as the codice
+fiscale's ``X`` place code, applied to a different registry.
+"""
+
+
+def synthetic_assigned_code(prefix: str, rng: Random) -> str:
+    """Return an ENI, STP or ANA code that announces it is fabricated.
+
+    The specification fixes the length at sixteen and requires an ENI or STP
+    code to begin with those three letters. It publishes no rule for the
+    thirteen characters that follow, and ANA's own details it defers to a later
+    release — so unlike the codice fiscale there is **no documented range this
+    can be placed outside of**, and claiming the result is impossible by
+    construction would be claiming to know an allocation scheme that has not
+    been read.
+
+    What can be said instead, and is weaker on purpose: the code carries
+    :data:`SYNTHETIC_MARKER` in the middle of it, so a value found in a file
+    says what it is to anybody reading it, and a scheme issuing numeric
+    sequences will not produce it. Where the codice fiscale's guarantee rests
+    on a published range, this one rests on a marker, and the difference is
+    worth knowing rather than glossing.
+
+    Args:
+        prefix: ``ENI``, ``STP`` or ``ANA``.
+        rng: Seeded random source.
+
+    Returns:
+        A sixteen-character code such as ``STPSINTETIC04173``.
+    """
+    digits = ASSIGNED_CODE_LENGTH - len(prefix) - len(SYNTHETIC_MARKER)
+    return f"{prefix}{SYNTHETIC_MARKER}{rng.randrange(10**digits):0{digits}d}"
+
+
+def synthetic_team_number(rng: Random, *, digits: int) -> str:
+    """Return a TEAM card or personal number under a non-existent state.
+
+    Args:
+        rng: Seeded random source.
+        digits: How many digits the serial carries. The specification's own
+            examples use twenty for a card number and sixteen for a personal
+            number, which is the only guidance it gives.
+
+    Returns:
+        A value such as ``XSY.SINTETIC00000000000417``.
+    """
+    return f"{TEAM_SYNTHETIC_COUNTRY}.{SYNTHETIC_MARKER}{rng.randrange(10**digits):0{digits}d}"
 
 
 def medical_record_number(rng: Random) -> str:

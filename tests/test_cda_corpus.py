@@ -177,11 +177,23 @@ def test_the_narrative_reaches_the_report_record_intact(cda_corpus: CorpusSummar
 
 
 def test_a_cda_subject_is_keyed_on_its_codice_fiscale(cda_corpus: CorpusSummary) -> None:
-    """The same key an HL7 message would have produced, so labels are stable."""
+    """The same key an HL7 message would have produced, so labels are stable.
+
+    **Of the subjects that have one.** This asserted that *every* CDA subject
+    was keyed nationally, which held only because no generated corpus produced
+    a patient without a codice fiscale -- the gap closed on 2026-11-18. A
+    non-enrolled patient is keyed as an assigned identifier by design, and
+    `tests/test_enrolment.py` is where that is asserted. What this test is
+    about is unchanged: a codice fiscale read from CDA must key exactly as one
+    read from HL7, or the same person gets two labels depending on the format
+    their hospital sends.
+    """
     corpus = read_corpus(cda_corpus.root)
 
-    kinds = {subject.key.kind for subject in corpus.subjects}
-    assert kinds == {KeyKind.NATIONAL_ID}
+    enrolled = [s for s in corpus.subjects if s.key.kind is not KeyKind.ASSIGNED_IDENTIFIER]
+    assert enrolled
+    assert {subject.key.kind for subject in enrolled} == {KeyKind.NATIONAL_ID}
+    assert all(subject.key.derivation_input == subject.key.value for subject in enrolled)
 
 
 def test_imaging_links_to_a_subject_established_from_a_cda_document(
@@ -447,8 +459,13 @@ def test_the_manifest_reports_the_cda_source_and_the_new_key_kind(
     assert isinstance(source, dict)
     keys = source["subject_keys"]
     assert isinstance(keys, dict)
-    assert keys["assigned_identifier"] == 0
-    assert keys["national_id"] == len(corpus.subjects)
+    # Both kinds are reported, and both are non-zero: a CDA corpus now carries
+    # patients identified by an ENI, STP, ANA or TEAM code as well as by a
+    # codice fiscale. This asserted `assigned_identifier == 0`, which was true
+    # only because no corpus could produce one.
+    assert keys["assigned_identifier"] > 0
+    assert keys["national_id"] > 0
+    assert sum(keys.values()) == len(corpus.subjects)
 
 
 def test_the_manifest_never_quotes_a_planted_identifier(
