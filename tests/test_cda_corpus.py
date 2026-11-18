@@ -137,18 +137,30 @@ def test_one_document_yields_a_lab_record_and_a_report_record(
     A CDA laboratory report is structured results *and* a human-written
     narrative, and the existing pipeline has a shape for each. Mapping it onto
     both is what keeps ``build`` free of a branch per document type.
+
+    **Of a laboratory report.** This asserted that every CDA document in the
+    corpus contributed a laboratory record, which held only while the laboratory
+    report was the one profile the generator wrote. Radiology reports and
+    discharge letters arrived on 2026-11-18 and are narrative: they contribute a
+    report record and no laboratory record, because giving them an empty one
+    would write an empty table into the dataset and claim the modality carried
+    something. The claim this test is about is unchanged for the profile it is
+    about: a laboratory document yields exactly one of each, naming the same
+    file -- one input contributing two records, not a collision.
     """
     corpus = read_corpus(cda_corpus.root)
 
     assert corpus.subjects
     for subject in corpus.subjects:
         lab_paths = Counter(record.path for record in subject.labs)
+        # Keyed on the paths the laboratory records claim, because the narrative
+        # profiles share the directory and not the shape.
         report_paths = Counter(
-            record.path for record in subject.reports if record.path.startswith("cda/")
+            record.path
+            for record in subject.reports
+            if record.path.startswith("cda/") and record.path in lab_paths
         )
-        # Every CDA document contributed exactly one of each, and they name the
-        # same file: one input contributing two records, not a collision.
-        assert set(report_paths) <= set(lab_paths)
+        assert set(report_paths) == set(lab_paths)
         assert all(count == 1 for count in lab_paths.values())
 
     cda_labs = [r for s in corpus.subjects for r in s.labs if r.path.startswith("cda/")]
@@ -164,7 +176,16 @@ def test_the_narrative_reaches_the_report_record_intact(cda_corpus: CorpusSummar
     could not report what it removed.
     """
     corpus = read_corpus(cda_corpus.root)
-    reports = [r for s in corpus.subjects for r in s.reports if r.path.startswith("cda/")]
+    # Laboratory documents only: the sentence asserted below is the laboratory
+    # narrative's, and a radiology report or a discharge letter has its own.
+    # Those are covered by `tests/test_cda_narrative.py`.
+    lab_paths = {record.path for s in corpus.subjects for record in s.labs}
+    reports = [
+        r
+        for s in corpus.subjects
+        for r in s.reports
+        if r.path.startswith("cda/") and r.path in lab_paths
+    ]
 
     assert reports
     for report in reports:

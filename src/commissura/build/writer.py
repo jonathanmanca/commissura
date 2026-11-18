@@ -303,10 +303,19 @@ def _known_identifiers(corpus: RawCorpus, subject: Subject) -> KnownIdentifiers:
                 institutions.update(part for part in lab.sending_facility.split() if len(part) >= 4)
     # The clinician who signed a report appears in no laboratory message, so
     # the signature line is the only structured source for that name.
+    # Both names a report declares, not just the signature. A CDA document
+    # carries an obligatory `author/assignedAuthor` as well as an obligatory
+    # `legalAuthenticator`, and they are routinely different people. Reading
+    # only the second threw away a declared identifier and left a half-redaction
+    # in the narrative -- `Refertazione a cura del dott. GALLO [PROVIDER]` --
+    # which is not a limit of targeted redaction but a declaration the reader
+    # was discarding. A plain-text report sets `author_name` to the empty
+    # string, where the signature line is the only name there is.
     for report in subject.reports:
-        if report.signed_by:
-            providers.add(report.signed_by)
-            providers.update(part for part in report.signed_by.split() if len(part) >= 4)
+        for clinician in (report.signed_by, report.author_name):
+            if clinician:
+                providers.add(clinician)
+                providers.update(part for part in clinician.split() if len(part) >= 4)
     # Imaging metadata carries the institution's street address, which no
     # laboratory message does. A street plus a city is a quasi-identifier even
     # with the patient's own address gone.

@@ -40,6 +40,7 @@ from commissura.models import Sex
 from commissura.read.cda import (
     CODICE_FISCALE_ROOT,
     CODICE_FISCALE_ROOT_MISPRINT,
+    LABORATORY_DOCUMENT_CODE,
     CdaParseError,
     parse_clinical_document,
 )
@@ -320,6 +321,17 @@ class ReportRecord:
     ``text`` is the whole document, unmodified. De-identifying it is a later
     step, and it needs the original: a scrubber that received pre-trimmed text
     could not report what it removed.
+
+    **Two clinician names and not one, which a plain-text report did not need.**
+    A free-text report reveals its author only through the signature line, so
+    ``signed_by`` was the whole of what there was to know. A CDA document
+    declares both: ``author/assignedAuthor`` is obligatory and so is
+    ``legalAuthenticator``, and the two are routinely different people -- the
+    radiologist who dictated the report and the one who signed it off.
+    ``author_name`` exists because leaving it unread threw away a declared
+    identifier and produced a half-redaction: ``Refertazione a cura del dott.
+    GALLO [PROVIDER]``, where the given name matched some other clinician's and
+    the surname, declared in this document's own header, did not.
     """
 
     path: str
@@ -329,6 +341,7 @@ class ReportRecord:
     signed_by: str
     authored_on: date | None
     text: str
+    author_name: str = ""
     date_field: str = DATE_FIELD_REPORT_HEADER
 
     def declared(self) -> DeclaredIdentity:
@@ -653,7 +666,17 @@ class CdaRecords:
     came out of it.
 
     Attributes:
-        lab: The structured results, as a laboratory record.
+        identity: Who the document is about, read from its header. Held here
+            rather than reached for through ``lab``, because a radiology report
+            and a discharge letter have no structured results and so no
+            laboratory record to reach through -- and identity resolution needs
+            it for every document type.
+        scope: The institution whose record numbers this document speaks for,
+            for the same reason.
+        lab: The structured results, or ``None`` for a document type that has
+            none. A radiology report and a discharge letter are narrative:
+            giving them an empty laboratory record would write an empty table
+            into the dataset and claim the modality carried something.
         report: The narrative, as a report record, or ``None`` when the
             document carried no human-readable text at all.
         identifiers: Every classified ``patientRole/id``, so that identity
@@ -662,7 +685,9 @@ class CdaRecords:
             fiscale under the root the specification's own example misprints.
     """
 
-    lab: LabRecord
+    identity: Identity
+    scope: AuthorityScope
+    lab: LabRecord | None
     report: ReportRecord | None
     identifiers: tuple[PatientIdentifier, ...]
     misdeclared_codice_fiscale: bool
@@ -699,33 +724,41 @@ def read_cda(path: Path, relative: str) -> CdaRecords:
         birth_date=document.birth_date,
     )
 
-    lab = LabRecord(
-        path=relative,
-        identity=identity,
-        accession=document.order_id or document.document_id,
-        panel_code=specialty.code if specialty else "",
-        panel_name=specialty.display or specialty.title if specialty else "",
-        collected_at=document.effective_time,
-        ordering_provider=document.author_name,
-        sending_facility=document.custodian_name,
-        # Deliberately empty: see this function's docstring. The custodian's
-        # name reaches the scope through ``sending_facility``.
-        assigning_authority="",
-        observations=tuple(
-            Observation(
-                loinc_code=item.code,
-                display=item.display,
-                value=item.value,
-                unit=item.unit,
-                reference_range=f"{item.reference_low}-{item.reference_high}"
-                if item.reference_low and item.reference_high
-                else "",
-                abnormal_flag=item.interpretation,
-                observed_at=item.observed_at,
-            )
-            for item in document.observations
-        ),
-        date_field=DATE_FIELD_CDA_EFFECTIVE_TIME,
+    # A laboratory record only for a laboratory report, decided by what the
+    # document declares about itself rather than by whether it happens to carry
+    # observations. A laboratory report with no results is still one, and an
+    # export that was truncated should not change what kind of document it is.
+    lab = (
+        LabRecord(
+            path=relative,
+            identity=identity,
+            accession=document.order_id or document.document_id,
+            panel_code=specialty.code if specialty else "",
+            panel_name=specialty.display or specialty.title if specialty else "",
+            collected_at=document.effective_time,
+            ordering_provider=document.author_name,
+            sending_facility=document.custodian_name,
+            # Deliberately empty: see this function's docstring. The custodian's
+            # name reaches the scope through ``sending_facility``.
+            assigning_authority="",
+            observations=tuple(
+                Observation(
+                    loinc_code=item.code,
+                    display=item.display,
+                    value=item.value,
+                    unit=item.unit,
+                    reference_range=f"{item.reference_low}-{item.reference_high}"
+                    if item.reference_low and item.reference_high
+                    else "",
+                    abnormal_flag=item.interpretation,
+                    observed_at=item.observed_at,
+                )
+                for item in document.observations
+            ),
+            date_field=DATE_FIELD_CDA_EFFECTIVE_TIME,
+        )
+        if document.document_code == LABORATORY_DOCUMENT_CODE
+        else None
     )
 
     narrative = document.narrative
@@ -736,6 +769,7 @@ def read_cda(path: Path, relative: str) -> CdaRecords:
             national_id=document.codice_fiscale,
             full_name=identity.full_name,
             signed_by=document.signed_by,
+            author_name=document.author_name,
             authored_on=document.effective_time.date() if document.effective_time else None,
             text=narrative,
             date_field=DATE_FIELD_CDA_EFFECTIVE_TIME,
@@ -745,6 +779,8 @@ def read_cda(path: Path, relative: str) -> CdaRecords:
     )
 
     return CdaRecords(
+        identity=identity,
+        scope=AuthorityScope(sending_facility=document.custodian_name),
         lab=lab,
         report=report,
         identifiers=document.identifiers,
@@ -950,9 +986,7 @@ def read_corpus(root: Path) -> RawCorpus:
                 )
             )
 
-        resolved = index.establish(
-            records.lab.identity, records.lab.scope, assigned=records.identifiers
-        )
+        resolved = index.establish(records.identity, records.scope, assigned=records.identifiers)
         if isinstance(resolved, Refusal):
             refuse(relative, resolved)
             continue
@@ -974,9 +1008,12 @@ def read_corpus(root: Path) -> RawCorpus:
                 )
             )
 
-        if _attach(subjects, key, records.lab.identity):
+        if _attach(subjects, key, records.identity):
             issues.append(LinkageIssue(relative, *_CONFLICTING_IDENTITY))
-        subjects[key].labs.append(records.lab)
+        # Only a laboratory report has results. A radiology report or a
+        # discharge letter contributes its narrative and nothing else.
+        if records.lab is not None:
+            subjects[key].labs.append(records.lab)
         if records.report is not None:
             subjects[key].reports.append(records.report)
 

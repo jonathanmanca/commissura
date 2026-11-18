@@ -174,6 +174,31 @@ carry — see :data:`commissura.read.identity.ASSIGNED_CODE_PREFIX`.
 STP_NATIONAL_ROOT: Final = "2.16.840.1.113883.2.9.4.3.17"
 """STP, when the code was assigned nationally (Tabella 20). Same caveat as ENI."""
 
+LABORATORY_DOCUMENT_CODE: Final = "11502-2"
+"""``ClinicalDocument/code``, obligatory, for a laboratory medicine report."""
+
+RADIOLOGY_DOCUMENT_CODE: Final = "68604-8"
+"""``ClinicalDocument/code``, obligatory, for a radiology report.
+
+Read from `Specifiche HL7 CDA R2 del Referto di Radiologia (RAD) v.1.1`
+(`HL7IT-IG_CDA2_RAD-v1.1-S`, HL7 Italia 2022) section 4.1.5, which fixes it as
+a constant: "DEVE essere presente ed assumere il valore costante 68604-8".
+
+**Not ``18748-4``, which is what recalling it would produce.** That is LOINC's
+"Diagnostic imaging study" and is the obvious guess; the profile uses
+``68604-8``, "Radiology Imaging study [Impression] (narrative)". The difference
+was found by reading the specification rather than by remembering it, which is
+the same lesson as `NNITA` on 2026-11-11 and the misprinted codice fiscale root
+two entries below.
+"""
+
+DISCHARGE_DOCUMENT_CODE: Final = "34105-7"
+"""``ClinicalDocument/code``, obligatory, for a hospital discharge letter.
+
+`Specifiche HL7 CDA R2 della Lettera di Dimissione Ospedaliera (LDO) v.1.2`
+(`HL7IT-IG_CDA2_LDO-v1.2-S`, HL7 Italia 2022), CONF-LDO-9.
+"""
+
 ANA_ROOT: Final = "2.16.840.1.113883.2.9.4.3.15"
 """Anagrafe Nazionale degli Assistiti (Tabella 21).
 
@@ -290,6 +315,12 @@ class CdaDocument:
     reader's job.
 
     Attributes:
+        document_code: ``ClinicalDocument/code/@code``, obligatory in all three
+            profiles, which is how the document says what kind it is. Read
+            rather than inferred from the body: a laboratory report that
+            happened to carry no results is still a laboratory report, and
+            guessing from the sections present would make the answer depend on
+            how complete an export was.
         document_id: ``ClinicalDocument/id/@extension``.
         order_id: ``inFulfillmentOf/order/id/@extension``, the request this
             report answers. The nearest thing CDA has to a laboratory accession.
@@ -311,6 +342,7 @@ class CdaDocument:
         sections: The body's sections, specialty sections first.
     """
 
+    document_code: str
     document_id: str
     order_id: str
     title: str
@@ -758,6 +790,7 @@ def parse_clinical_document(text: str) -> CdaDocument:
     name = patient.find("v3:name", _NS) if patient is not None else None
 
     return CdaDocument(
+        document_code=_attribute(root.find("v3:code", _NS), "code"),
         document_id=_attribute(root.find("v3:id", _NS), "extension"),
         order_id=_attribute(root.find("v3:inFulfillmentOf/v3:order/v3:id", _NS), "extension"),
         title=_text(root.find("v3:title", _NS)),

@@ -39,7 +39,7 @@ from random import Random
 from commissura import __version__
 from commissura.annotate import check_spans
 from commissura.generate import vocabulary
-from commissura.generate.cda import render_lab_cda
+from commissura.generate.cda import render_lab_cda, render_narrative_cda
 from commissura.generate.cohort import CohortSpec, PlannedSubject, build_cohort, child_seed
 from commissura.generate.defects import DefectInjector
 from commissura.generate.imaging import render_study
@@ -274,7 +274,15 @@ def _render_subject(
     # --- Reports ---
     for position, report in enumerate(planned.subject.reports, start=1):
         kind = "rad" if report.kind is ReportKind.RADIOLOGY else "dim"
-        relative = f"reports/{person.mrn}_{kind}_{position}.txt"
+        # In a CDA corpus the narrative documents go the same way the laboratory
+        # panels do: a site that has migrated to the Fascicolo Sanitario
+        # Elettronico sends its radiology reports and discharge letters as CDA
+        # too, under their own profiles, and the plain-text path exists for the
+        # sites that have not. Both branches write into `cda/` or `reports/`
+        # accordingly, so `RAW_SOURCES` needs nothing new.
+        source = "cda" if spec.cda else "reports"
+        extension = "xml" if spec.cda else "txt"
+        relative = f"{source}/{person.mrn}_{kind}_{position}.{extension}"
         # A report can refer in prose to an earlier study, but only if one
         # actually precedes it. Inventing a comparison that never happened would
         # make the corpus internally inconsistent in a way nothing records.
@@ -287,19 +295,32 @@ def _render_subject(
             "document links to by codice fiscale and record number",
         ):
             named_in_header = _another_name(render_rng, person)
-        content, report_spans = render_report(
-            report,
-            person=named_in_header,
-            site=planned.site,
-            path=relative,
-            rng=render_rng,
-            injector=injector,
-            previous_study_date=earlier[-1] if earlier else None,
-            previous_site=planned.previous_site if earlier else None,
-        )
+        if spec.cda:
+            content, report_spans = render_narrative_cda(
+                report,
+                person=named_in_header,
+                site=planned.site,
+                path=relative,
+                document_id=f"DOC{planned.index:05d}{position:04d}",
+                signed_by=_another_clinician(render_rng, report.author_name),
+                injector=injector,
+                previous_study_date=earlier[-1] if earlier else None,
+                previous_site=planned.previous_site if earlier else None,
+            )
+        else:
+            content, report_spans = render_report(
+                report,
+                person=named_in_header,
+                site=planned.site,
+                path=relative,
+                rng=render_rng,
+                injector=injector,
+                previous_study_date=earlier[-1] if earlier else None,
+                previous_site=planned.previous_site if earlier else None,
+            )
         _write_text(root / relative, content)
         spans.extend(report_spans)
-        counts["reports"] += 1
+        counts["cda" if spec.cda else "reports"] += 1
 
     return (
         spans,

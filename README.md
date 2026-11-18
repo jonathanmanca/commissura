@@ -597,13 +597,33 @@ raw/
     phi_annotations.json       every identifier, with file and character offsets
 ```
 
-`--cda` writes the laboratory data as HL7 Italia CDA R2 documents in `cda/`
-instead of HL7 v2 messages in `lab/`, which is the corpus a site that has
-migrated to the Fascicolo Sanitario Elettronico would hand over: structured
-results as CDA, with radiology reports and discharge letters still arriving as
-plain text, because those have their own CDA profiles that this tool does not
-read yet. Off by default, so a given seed produces the same corpus it produced
-before the flag existed.
+`--cda` writes **everything** as HL7 Italia CDA R2 documents in `cda/` instead
+of HL7 v2 messages in `lab/` and plain text in `reports/`, which is the corpus
+a site that has migrated to the Fascicolo Sanitario Elettronico would hand
+over. Three profiles, each with its own LOINC document code:
+
+| Document | Code | Specification |
+| --- | --- | --- |
+| Referto di Medicina di Laboratorio | `11502-2` | `HL7IT-IG_CDA2_RefertoMedicinaLab-v1.3-S` |
+| Referto di Radiologia | `68604-8` | `HL7IT-IG_CDA2_RAD-v1.1-S` |
+| Lettera di Dimissione Ospedaliera | `34105-7` | `HL7IT-IG_CDA2_LDO-v1.2-S` |
+
+Off by default, so a given seed produces the same corpus it produced before the
+flag existed.
+
+The three share one header, element for element, and differ in four things: the
+document code above, the title, the template identifier, and which LOINC-coded
+sections the body carries. **A laboratory report yields structured results and a
+narrative; the other two are narrative only** — both specifications keep the
+coded entries optional and say a document with sections and no entries is still
+well formed, and a radiology report's content *is* prose. So a radiology or
+discharge document contributes a report record and no laboratory record, rather
+than an empty table claiming the modality carried something.
+
+One number worth knowing if you reach for the obvious value: the radiology
+document code is **68604-8**, not `18748-4`. The latter is LOINC's "Diagnostic
+imaging study" and is what memory produces; section 4.1.5 of the radiology
+specification fixes `68604-8` as a constant.
 
 **A CDA corpus also contains patients who hold no codice fiscale**, which an
 HL7 one does not. The specification enumerates four other ways a patient is

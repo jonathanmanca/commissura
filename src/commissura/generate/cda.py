@@ -35,6 +35,7 @@ be discovered.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
@@ -42,6 +43,7 @@ from commissura.annotate import AnnotatedText, Phi
 from commissura.generate.defects import DefectInjector
 from commissura.generate.vocabulary import Site
 from commissura.models import (
+    ClinicalReport,
     Enrolment,
     ForeignIdentity,
     LabObservation,
@@ -49,6 +51,7 @@ from commissura.models import (
     Person,
     PhiCategory,
     PhiSpan,
+    ReportKind,
 )
 from commissura.read.cda import (
     ADMINISTRATIVE_GENDER_SYSTEM,
@@ -56,8 +59,10 @@ from commissura.read.cda import (
     CDA_NAMESPACE,
     CODICE_FISCALE_ROOT,
     CODICE_FISCALE_ROOT_MISPRINT,
+    DISCHARGE_DOCUMENT_CODE,
     ENI_NATIONAL_ROOT,
     LOINC_SYSTEM,
+    RADIOLOGY_DOCUMENT_CODE,
     STP_NATIONAL_ROOT,
     TEAM_CARD_ROOT,
     TEAM_PERSONAL_ROOT,
@@ -269,9 +274,9 @@ def render_lab_cda(
     text.line('  <languageCode code="it-IT"/>')
 
     _record_target(text, person, codice_fiscale_root)
-    _author(text, panel, site)
+    _author(text, panel.reported_at, panel.ordering_provider, site)
     _custodian(text, site)
-    _legal_authenticator(text, panel, site, signed_by)
+    _legal_authenticator(text, panel.reported_at, site, signed_by)
 
     text.line("  <inFulfillmentOf>")
     text.line("    <order>")
@@ -375,6 +380,295 @@ def _foreign_ids(text: AnnotatedText, foreign: ForeignIdentity) -> None:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _NarrativeProfile:
+    """What distinguishes one narrative CDA profile from another.
+
+    Three documents, one header, and the differences confined to this: a
+    document code, a title, a template identifier, and which LOINC-coded
+    sections carry which part of the report. That is the whole of what the seam
+    had to absorb, and it absorbed it.
+
+    Attributes:
+        document_code: ``ClinicalDocument/code/@code``, obligatory.
+        display_name: The ``@displayName`` each specification gives.
+        title: ``ClinicalDocument/title``.
+        template_root: ``templateId/@root`` for the profile.
+        template_extension: ``templateId/@extension``, empty where the
+            specification states none.
+        sections: ``(code, display, title, field)`` in document order, where
+            ``field`` names the :class:`ClinicalReport` attribute the section
+            carries.
+    """
+
+    document_code: str
+    display_name: str
+    title: str
+    template_root: str
+    template_extension: str
+    sections: tuple[tuple[str, str, str, str], ...]
+
+
+NARRATIVE_PROFILES: Final[dict[ReportKind, _NarrativeProfile]] = {
+    ReportKind.RADIOLOGY: _NarrativeProfile(
+        document_code=RADIOLOGY_DOCUMENT_CODE,
+        display_name="Referto Radiologico",
+        title="Referto di Radiologia",
+        template_root="2.16.840.1.113883.2.9.10.1.7.1",
+        template_extension="1.1",
+        sections=(
+            ("18785-6", "Radiology Reason for study", "Quesito diagnostico", "indication"),
+            (
+                "55111-9",
+                "Current imaging procedure descriptions Document",
+                "Esame eseguito",
+                "technique",
+            ),
+            ("18782-3", "Radiology Study observation", "Referto", "findings"),
+            ("55110-1", "Conclusions", "Conclusioni", "conclusion"),
+        ),
+    ),
+    ReportKind.DISCHARGE: _NarrativeProfile(
+        document_code=DISCHARGE_DOCUMENT_CODE,
+        display_name="Lettera di dimissione ospedaliera",
+        title="Lettera di Dimissione Ospedaliera",
+        template_root="2.16.840.1.113883.2.9.10.1.5",
+        template_extension="",
+        sections=(
+            ("46241-6", "Hospital Admission Dx", "Motivo del ricovero", "indication"),
+            ("8648-8", "Hospital Course", "Decorso Ospedaliero", "findings"),
+            ("11535-2", "Hospital Discharge Dx", "Condizioni alla dimissione", "conclusion"),
+            ("18776-5", "Treatment Plan", "Istruzioni di follow-up", "technique"),
+        ),
+    ),
+}
+"""Section codes and obligations read from the two specifications, not recalled.
+
+**RAD, Tabella 46**: of eleven sections exactly *two* are OBBLIGATORIO --
+``55111-9`` "Esame eseguito" and ``18782-3`` "Referto (Refertazione)". Both are
+emitted. ``18785-6`` "Quesito diagnostico" and ``55110-1`` "Conclusioni" are
+OPZIONALE and are emitted because the generator has the content for them.
+
+**LDO, Tabella 52**: of sixteen sections *three* are OBBLIGATORIO --
+``46241-6`` "Motivo del ricovero", ``8648-8`` "Decorso Ospedaliero" and
+``11535-2`` "Condizioni del paziente alla dimissione e diagnosi alla
+dimissione". All three are emitted, plus the optional ``18776-5`` "Istruzioni di
+follow-up", which is where a discharge letter's technique text belongs.
+
+The document codes are the finding worth keeping: radiology is **68604-8** and
+not ``18748-4``, which is what recalling it would produce. See
+:data:`commissura.read.cda.RADIOLOGY_DOCUMENT_CODE`.
+"""
+
+
+def render_narrative_cda(
+    report: ClinicalReport,
+    *,
+    person: Person,
+    site: Site,
+    path: str,
+    document_id: str,
+    signed_by: str,
+    injector: DefectInjector,
+    previous_study_date: datetime | None = None,
+    previous_site: Site | None = None,
+) -> tuple[str, tuple[PhiSpan, ...]]:
+    """Render a radiology report or a discharge letter as a CDA R2 document.
+
+    **One function for both, because the two specifications differ in four
+    values and nothing else.** ``HL7IT-IG_CDA2_RAD-v1.1-S`` and
+    ``HL7IT-IG_CDA2_LDO-v1.2-S`` share the header with the laboratory profile --
+    the same ``recordTarget`` with the same five identifier cases under the same
+    OIDs, the same obligatory ``custodian`` and ``legalAuthenticator`` -- and
+    differ in the document code, the title, the template identifier and which
+    LOINC-coded sections the body carries. Those four live in
+    :data:`NARRATIVE_PROFILES`; everything else is shared with
+    :func:`render_lab_cda`, which is what the seam was for and is the only
+    evidence that the seam was real rather than asserted.
+
+    **No Level 3 entries.** Both specifications keep the coded entries
+    OPZIONALE and say a document detailed to level two -- sections with
+    narrative and no entries -- is still well formed. A radiology report's
+    content *is* prose, so inventing coded observations for it would model
+    something a radiology department does not produce.
+
+    **The narrative is hostile in the same ways the plain-text reports are**,
+    and that is deliberate rather than thorough. A CDA narrative that carried
+    only clean clinical prose would be easier to de-identify than the free-text
+    report it replaces, and the recall figure would improve for no reason but
+    the corpus getting kinder. So the closing paragraph names the author and,
+    where there is one to cite, the institution that performed an earlier study
+    -- neither in any structured field, which is the documented limit of
+    targeted redaction.
+
+    Args:
+        report: The report to render.
+        person: Whose it is.
+        site: The institution.
+        path: Corpus-relative path, recorded with every span.
+        document_id: ``ClinicalDocument/id/@extension``.
+        signed_by: The clinician who legally authenticated it, deliberately
+            different from the author for the reason in :func:`render_lab_cda`.
+        injector: Decides and records defects.
+        previous_study_date: If given, the narrative may cite a comparison.
+        previous_site: If given, the narrative may name where it was done.
+
+    Returns:
+        The document text and its identifier spans.
+    """
+    profile = NARRATIVE_PROFILES[report.kind]
+    text = AnnotatedText(path)
+
+    # The same guard as the laboratory writer: drawn for every document so the
+    # random stream does not move with the shape of a cohort, and never offered
+    # to a patient who writes no codice fiscale element at all.
+    misdeclare = injector.should_apply("cda.misdeclared_cf_namespace") and person.foreign is None
+    if misdeclare:
+        injector.record(
+            "cda.misdeclared_cf_namespace",
+            path,
+            "recordTarget/patientRole/id/@root written as "
+            f"{CODICE_FISCALE_ROOT_MISPRINT}, the root the specification's own "
+            f"example misprints, instead of the correct {CODICE_FISCALE_ROOT}",
+        )
+    codice_fiscale_root = CODICE_FISCALE_ROOT_MISPRINT if misdeclare else CODICE_FISCALE_ROOT
+
+    template = f'  <templateId root="{profile.template_root}"'
+    if profile.template_extension:
+        template += f' extension="{profile.template_extension}"'
+    template += "/>"
+
+    text.line('<?xml version="1.0" encoding="UTF-8"?>')
+    text.line(
+        f'<ClinicalDocument xmlns="{CDA_NAMESPACE}" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+    )
+    text.line('  <realmCode code="IT"/>')
+    text.line('  <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>')
+    text.line(template)
+    text.line(
+        f'  <id root="{_SYNTHETIC_ORGANISATION_ARC}.4.6" extension="{_literal(document_id)}"/>'
+    )
+    text.line(
+        f'  <code code="{profile.document_code}" codeSystem="{LOINC_SYSTEM}" '
+        f'codeSystemName="LOINC" displayName="{profile.display_name}"/>'
+    )
+    text.line(f"  <title>{profile.title}</title>")
+    text.line(f'  <effectiveTime value="{_timestamp(report.authored_at)}"/>')
+    text.line(f'  <confidentialityCode code="V" codeSystem="{_CONFIDENTIALITY_SYSTEM}"/>')
+    text.line('  <languageCode code="it-IT"/>')
+
+    _record_target(text, person, codice_fiscale_root)
+    _author(text, report.authored_at, report.author_name, site)
+    _custodian(text, site)
+    _legal_authenticator(text, report.authored_at, site, signed_by)
+
+    # The numero nosologico, which is what links this document to the subject's
+    # imaging. OPZIONALE for radiology and obligatory for a discharge letter
+    # (CONF-LDO-80), and written for both: a document that could carry it and
+    # does not is a document whose imaging attaches to nobody.
+    text.line("  <componentOf>")
+    text.line("    <encompassingEncounter>")
+    text.line(
+        f'      <id root="{_SYNTHETIC_ORGANISATION_ARC}.4.2" extension="',
+        Phi(person.mrn, PhiCategory.PATIENT_ID),
+        '" assigningAuthorityName="',
+        _literal(site.name),
+        '"/>',
+    )
+    text.line(f'      <effectiveTime value="{_timestamp(report.authored_at)}"/>')
+    text.line("    </encompassingEncounter>")
+    text.line("  </componentOf>")
+
+    text.line("  <component>")
+    text.line("    <structuredBody>")
+    for code, display, title, field in profile.sections:
+        value = getattr(report, field)
+        lines = list(value) if field == "findings" else [value]
+        if not any(lines):
+            continue
+        text.line("      <component>")
+        text.line("        <section>")
+        text.line(
+            f'          <code code="{code}" codeSystem="{LOINC_SYSTEM}" '
+            f'codeSystemName="LOINC" displayName="{display}"/>'
+        )
+        text.line(f"          <title>{title}</title>")
+        text.line("          <text>")
+        for line in lines:
+            if line:
+                text.line(f"            <paragraph>{_literal(line)}</paragraph>")
+        text.line("          </text>")
+        text.line("        </section>")
+        text.line("      </component>")
+
+    _narrative_attribution(
+        text,
+        report=report,
+        previous_study_date=previous_study_date,
+        previous_site=previous_site,
+    )
+
+    text.line("    </structuredBody>")
+    text.line("  </component>")
+    text.line("</ClinicalDocument>")
+
+    return text.finish()
+
+
+def _narrative_attribution(
+    text: AnnotatedText,
+    *,
+    report: ClinicalReport,
+    previous_study_date: datetime | None,
+    previous_site: Site | None,
+) -> None:
+    """Write the closing section: a clinician and an institution, in prose.
+
+    Its own section rather than appended to a coded one, because every section
+    in these profiles has a prescribed LOINC code and this content belongs to
+    none of them. ``55107-7`` "Addendum" is OPZIONALE in RAD's Tabella 46 and is
+    what an addition like this is for; LDO has no equivalent, so a discharge
+    letter carries it under ``18776-5``, which it already uses.
+
+    Why it exists at all is in :func:`render_narrative_cda`: without prose that
+    names somebody no structured field declares, a CDA narrative would be
+    easier than the plain-text report it replaces and the recall figure would
+    improve for no reason but a kinder corpus.
+    """
+    addendum = "55107-7" if report.kind is ReportKind.RADIOLOGY else "18776-5"
+    text.line("      <component>")
+    text.line("        <section>")
+    text.line(
+        f'          <code code="{addendum}" codeSystem="{LOINC_SYSTEM}" codeSystemName="LOINC"/>'
+    )
+    text.line("          <text>")
+    text.line(
+        "            <paragraph>Refertazione a cura del dott. ",
+        Phi(report.author_name, PhiCategory.PROVIDER_NAME, "author named in running prose"),
+        ".</paragraph>",
+    )
+    if previous_study_date is not None and previous_site is not None:
+        text.line(
+            "            <paragraph>Si confronta con l'esame del ",
+            Phi(
+                previous_study_date.strftime(_ITALIAN_DATE),
+                PhiCategory.DATE,
+                "comparison date inside running prose",
+            ),
+            " eseguito presso ",
+            Phi(
+                previous_site.name,
+                PhiCategory.INSTITUTION,
+                "institution named in running prose",
+            ),
+            ".</paragraph>",
+        )
+    text.line("          </text>")
+    text.line("        </section>")
+    text.line("      </component>")
+
+
 def _record_target(text: AnnotatedText, person: Person, codice_fiscale_root: str) -> None:
     """Write the patient's identity, which CDA states in defined elements.
 
@@ -451,13 +745,19 @@ def _clinician_elements(text: AnnotatedText, provider: str, indent: str) -> None
     text.line(f"{indent}</assignedPerson>")
 
 
-def _author(text: AnnotatedText, panel: LabPanel, site: Site) -> None:
-    """Write the clinician who created the document."""
+def _author(text: AnnotatedText, moment: datetime, clinician: str, site: Site) -> None:
+    """Write the clinician who created the document.
+
+    Takes the moment and the name rather than a ``LabPanel``, because a
+    radiology report and a discharge letter carry the same element and have no
+    panel. Narrowing the parameters is what let the three document types share
+    one header without a branch per type.
+    """
     text.line("  <author>")
-    text.line(f'    <time value="{_timestamp(panel.reported_at)}"/>')
+    text.line(f'    <time value="{_timestamp(moment)}"/>')
     text.line('    <assignedAuthor classCode="ASSIGNED">')
     text.line(f'      <id root="{_SYNTHETIC_ORGANISATION_ARC}.4.3" extension="AUT"/>')
-    _clinician_elements(text, panel.ordering_provider, "      ")
+    _clinician_elements(text, clinician, "      ")
     text.line("      <representedOrganization>")
     text.line("        <name>", Phi(site.name, PhiCategory.INSTITUTION), "</name>")
     text.line("      </representedOrganization>")
@@ -493,7 +793,7 @@ def _custodian(text: AnnotatedText, site: Site) -> None:
     text.line("  </custodian>")
 
 
-def _legal_authenticator(text: AnnotatedText, panel: LabPanel, site: Site, signed_by: str) -> None:
+def _legal_authenticator(text: AnnotatedText, moment: datetime, site: Site, signed_by: str) -> None:
     """Write the clinician who legally signed the document.
 
     Obligatory, and its ``assignedPerson/name`` must carry ``given`` and
@@ -502,7 +802,7 @@ def _legal_authenticator(text: AnnotatedText, panel: LabPanel, site: Site, signe
     single clearest illustration of what reading a standard buys.
     """
     text.line("  <legalAuthenticator>")
-    text.line(f'    <time value="{_timestamp(panel.reported_at)}"/>')
+    text.line(f'    <time value="{_timestamp(moment)}"/>')
     text.line('    <signatureCode code="S"/>')
     text.line("    <assignedEntity>")
     text.line(f'      <id root="{_SYNTHETIC_ORGANISATION_ARC}.4.4" extension="FIR"/>')
