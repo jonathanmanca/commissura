@@ -155,7 +155,7 @@ Wrote 211 files to ./dataset
   imaging        27  metadata sidecars in derivatives/
 
   key fingerprint        35eea6fcd0bad4df
-  free-text redactions   847
+  free-text redactions   528
   linkage issues         29
   records dropped        3  (no readable date)
     reports/5806125_rad_2.txt  (undated_record)

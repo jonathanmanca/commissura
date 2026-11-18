@@ -143,11 +143,16 @@ def test_there_is_something_to_search() -> None:
 
     Which is the shape of failure this project has now found five times: an
     empty collection is not evidence that what fills it is safe.
+
+    Named files rather than a count alone, and only files the repository
+    actually tracks: `docs/` and `CLAUDE.md` are present on the machine this is
+    usually run on and absent in CI, so naming one of those would pass here and
+    fail there — the divergence this project moved a check for on 2026-11-14.
     """
     names = {path.name for path in _searched_files()}
 
     assert len(_searched_files()) > 40
-    assert {"README.md", "cli.py", "TEHDAS2_GAP_ANALYSIS.md"} <= names
+    assert {"README.md", "cli.py", "scrub.py"} <= names
 
 
 def test_the_patterns_catch_the_sentences_they_are_for() -> None:
@@ -318,20 +323,22 @@ def test_a_file_discussing_a_claim_carries_the_disclaimer(claim: str) -> None:
     assert not offences, f"{claim} discussed without a disclaimer:\n" + "\n".join(offences)
 
 
-def test_every_tehdas2_document_declares_what_it_is_not() -> None:
-    """Risk R-10's mitigation, asserted rather than trusted.
-
-    Six documents with TEHDAS2 in their names are exactly the thing a reader
-    would mistake for an assessment against the Regulation. "Aligned with
-    TEHDAS2" becomes "EHDS-ready" in a README and then "compliant" in a
-    conversation, and nothing in the repository would contradict it.
-    """
-    documents = sorted((ROOT / "docs").glob("*.md"))
-
-    assert len(documents) >= 5
-    for path in documents:
-        text = path.read_text(encoding="utf-8")
-        assert DISCLAIMER.search(text) or "does not declare" in text, path.name
+# A test asserting that every document under `docs/` declares what it is not
+# stood here, and it was deleted on 2026-11-18 rather than weakened.
+#
+# Those six documents left the repository that day: internal working papers,
+# excluded for the same reason as `CLAUDE.md` and the audit set before them. A
+# test cannot read a file CI does not have, and making it *skip* when the file
+# is absent is the one answer this project has twice recorded as wrong, because
+# a skip is a silent failure mode. There was nowhere to move it to either: the
+# check was about those documents, and they are gone.
+#
+# What remains is not nothing. The rule it enforced — a file that discusses one
+# of these claims must say what it is not — is still checked over everything the
+# repository tracks, by `test_a_file_discussing_a_claim_carries_the_disclaimer`.
+# What is no longer checked is the untracked set, and that now rests on
+# discipline exactly as the brief's own prose does. Saying so is better than a
+# green tick that proves nothing.
 
 
 def test_the_disclaimer_pattern_is_not_satisfied_by_silence() -> None:

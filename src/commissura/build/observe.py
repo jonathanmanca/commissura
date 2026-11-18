@@ -388,12 +388,23 @@ def _element_keys(element: Element, parent: str) -> Iterator[str]:
     CDA puts most of its content in attributes, so a test for text alone would
     miss nearly everything; and pure containers are skipped because reporting
     ``component`` as a removed field says nothing a reader can act on.
+
+    **Iterative for the same reason as
+    :func:`commissura.read.cda._flatten_narrative`**, which carries the full
+    argument: a ``yield from`` recursion raises ``RecursionError`` on a document
+    nested deeper than the interpreter's limit, that is not a ``ValueError``, and
+    the caller below catches ``ValueError`` so an unreadable document becomes one
+    reported row rather than a dead build. The caller consumes this into a set,
+    so the order the keys come out in is not observable.
     """
-    for child in element:
-        name = _local_name(child.tag)
-        if (child.text or "").strip() or child.attrib:
-            yield f"{parent}/{name}"
-        yield from _element_keys(child, name)
+    stack: list[tuple[Element, str]] = [(element, parent)]
+    while stack:
+        node, node_name = stack.pop()
+        for child in node:
+            child_name = _local_name(child.tag)
+            if (child.text or "").strip() or child.attrib:
+                yield f"{node_name}/{child_name}"
+            stack.append((child, child_name))
 
 
 def imaging_fields(path: Path) -> set[str]:

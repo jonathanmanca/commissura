@@ -77,3 +77,21 @@ Thumbs.db
 /REMEDIATION_REPORT.md
 /IDENTITY_RESOLUTION.md
 /HARDENING_CHANGELOG.md
+
+# The TEHDAS2 analysis set, excluded for the same reason as the five above:
+# internal working documents, not part of what a stranger reads in order to use
+# the tool. The gap matrix, the risk register, the target architecture, the
+# remediation plan, the traceability matrix and the implementation report are
+# how this project decided what to build; they are not how anybody uses it.
+#
+# They were committed in e45e704 before that was decided, so `git show
+# e45e704:docs/TEHDAS2_GAP_ANALYSIS.md` still prints one in any clone. That is
+# deliberate and not an oversight: the decision of 2026-11-16 settled that this
+# project does not rewrite its history to remove internal paperwork, because the
+# cost -- every commit SHA changed, every clone invalidated -- is certain while
+# the risk is nil. A `git rm --cached` changes what HEAD carries and nothing
+# else, and nobody should read the current tree and conclude otherwise.
+#
+# Not a security measure, and saying so matters: the comment above records what
+# happened the last time a reason that merely sounded like one went unexamined.
+/docs/

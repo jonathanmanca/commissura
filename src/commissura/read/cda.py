@@ -414,24 +414,46 @@ def _flatten_narrative(element: ElementTree.Element) -> str:
     Args:
         element: A ``section/text`` element.
 
+    **Iterative, and that is about untrusted input rather than about style.** The
+    obvious version of this walker recurses once per nesting level, and a
+    narrative nested deeper than the interpreter's recursion limit — a thousand
+    levels, by default — then raises ``RecursionError``. That is not a
+    ``ValueError``, so it is caught by neither
+    :func:`commissura.read.corpus.read_cda` nor
+    :func:`commissura.build.observe.observe_corpus`, both of which catch
+    ``ValueError`` precisely so that :class:`CdaParseError` behaves like any
+    other unreadable file: one issue naming it, and the rest of the corpus still
+    read. A recursive walker therefore let one pathological document kill a whole
+    build with a traceback, which is the one thing the refusal design exists to
+    prevent. Found by attacking this function rather than by reading it: at depth
+    5000 it raised, uncaught, while three genuinely hostile documents in the same
+    corpus were reported correctly.
+
+    An explicit stack removes the limit instead of handling the error, so there
+    is no new failure mode to report and no except clause whose branch nothing
+    reaches. The closing marker is what preserves the order: a block break and a
+    tail belong *after* that element's children, which recursion got for free.
+
     Returns:
         The text, with a newline wherever the markup implied one and runs of
         blank lines collapsed.
     """
     pieces: list[str] = []
+    stack: list[tuple[ElementTree.Element, bool]] = [(element, False)]
 
-    def walk(node: ElementTree.Element) -> None:
-        tag = node.tag.rsplit("}", 1)[-1]
+    while stack:
+        node, closing = stack.pop()
+        if closing:
+            if node.tag.rsplit("}", 1)[-1] in _NARRATIVE_BLOCK_BREAK:
+                pieces.append("\n")
+            if node.tail:
+                pieces.append(node.tail)
+            continue
         if node.text:
             pieces.append(node.text)
-        for child in node:
-            walk(child)
-        if tag in _NARRATIVE_BLOCK_BREAK:
-            pieces.append("\n")
-        if node.tail:
-            pieces.append(node.tail)
+        stack.append((node, True))
+        stack.extend((child, False) for child in reversed(node))
 
-    walk(element)
     joined = "".join(pieces)
     lines = [_collapse(line) for line in joined.splitlines()]
     return "\n".join(line for line in lines if line).strip()

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Final
@@ -246,10 +247,13 @@ def _identity_entries(
     doubled placeholder. Order between identities is the order they were
     observed, primary first, which keeps the plan deterministic.
 
-    Longest first within each category would be another defensible order, and is
-    deliberately not used: the full name is already the longest form of a name,
-    and reordering identifiers against each other would make the plan depend on
-    the data rather than on the schema.
+    Longest first is deliberately **not** used here, and that is a statement
+    about identities only: the full name is already the longest form of a name,
+    so the structure supplies the ordering, and reordering identifiers against
+    each other would make the plan depend on the data rather than on the schema.
+    The flat sets of institutions, providers and addresses have no such
+    structure and do need it — see :func:`_longest_first`, which exists because
+    the absence of it leaked a clinician's surname.
 
     Args:
         identities: Every identity observed for one subject.
@@ -309,6 +313,37 @@ def _declared_entries(
             seen.add(entry)
             unique.append(entry)
     return unique
+
+
+def _longest_first(values: Iterable[str]) -> list[str]:
+    """Order values so that no shorter one can consume a longer one.
+
+    Exact-match substitution is destructive: once ``DAVIDE`` has become
+    ``[PROVIDER]``, the string ``LOMBARDI DAVIDE`` is no longer present for the
+    longer entry to match, and the surname survives beside a placeholder that
+    says it was handled. So within any flat set of values, the longest must go
+    first.
+
+    Ties break alphabetically, so the plan stays deterministic — two corpora
+    with the same declared values produce the same substitution order, which is
+    what makes a build reproducible and a manifest comparable.
+
+    **This is not the ordering question :func:`_identity_entries` settles**, and
+    the difference is worth keeping straight. An identity has structure: it
+    contributes its full name, then the family and given parts, and placing the
+    whole before its pieces is what stops a two-word name leaving a doubled
+    placeholder. Length is not needed there and would make the plan depend on
+    the data. The institution, provider and address sets have no such structure
+    — they are bare collections, and length is the only thing standing between
+    a short member and a long one.
+
+    Args:
+        values: The declared values of one category.
+
+    Returns:
+        The same values, longest first.
+    """
+    return sorted(values, key=lambda value: (-len(value), value))
 
 
 def _replace_all(text: str, needle: str, placeholder: str) -> tuple[str, int]:
@@ -380,11 +415,29 @@ def scrub_text(
         *_identity_entries(known.identities),
         *_declared_entries(known.declared),
     ]
+    # Longest first, and this is a PHI leak that shipped. These three sets are
+    # flat: unlike an identity, which contributes its full name before its
+    # parts, they are bare collections that genuinely contain both `DAVIDE` and
+    # `LOMBARDI DAVIDE`. Sorted alphabetically, `DAVIDE` was substituted first,
+    # so `collega LOMBARDI DAVIDE` became `collega LOMBARDI [PROVIDER]` — the
+    # longer entry no longer matched and the surname survived attached to the
+    # placeholder.
+    #
+    # That is the failure mode recorded on 2026-11-07 about emails:
+    # **a leak that looks like a redaction.** Worse here, because a reader
+    # seeing `[PROVIDER]` concludes the name was handled. Found by reviewing
+    # the CDA work, present identically on HL7 input, and measured: four
+    # survivors at ten subjects and rate 0.5, on both input formats.
     ordered += [
-        ("institution", name, PLACEHOLDER_INSTITUTION) for name in sorted(known.institutions)
+        ("institution", name, PLACEHOLDER_INSTITUTION)
+        for name in _longest_first(known.institutions)
     ]
-    ordered += [("provider_name", name, PLACEHOLDER_PROVIDER) for name in sorted(known.providers)]
-    ordered += [("address", value, PLACEHOLDER_ADDRESS) for value in sorted(known.addresses)]
+    ordered += [
+        ("provider_name", name, PLACEHOLDER_PROVIDER) for name in _longest_first(known.providers)
+    ]
+    ordered += [
+        ("address", value, PLACEHOLDER_ADDRESS) for value in _longest_first(known.addresses)
+    ]
 
     for category, needle, placeholder in ordered:
         if not needle:
