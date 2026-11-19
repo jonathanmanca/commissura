@@ -148,6 +148,15 @@ class BuildSummary:
     dropped: list[DroppedRecord] = field(default_factory=list)
     report_pairs: list[ReportPair] = field(default_factory=list)
     missing_for_conformance: tuple[str, ...] = ()
+    age_band: int | None = None
+    """The width participant ages were generalised into, or None for exact ages.
+
+    Carried into the manifest, because a dataset whose ages read ``40-44`` is
+    not self-describing: a reader cannot tell a five-year band from a decade
+    that happens to start on a multiple of five, nor a banded dataset from one
+    whose source only ever had bands.
+    """
+
     opt_out: OptOutRecord | None = None
     """What an exclusion list did to this build, or None when none was given.
 
@@ -209,11 +218,25 @@ def _split_reference_range(value: str) -> tuple[str, str]:
     return low, high
 
 
-def _age_band(birth_date: date | None, reference: date | None) -> str:
-    """Return the participant's age, truncated at the ceiling.
+def _participant_age(birth_date: date | None, reference: date | None, band: int | None) -> str:
+    """Return the participant's age, truncated at the ceiling and banded if asked.
 
-    Returns ``n/a`` when either date is unreadable: a dataset that guessed an
-    age would be stating something it does not know.
+    **Renamed from ``_age_band``, which was the name of a thing it did not do**,
+    and the misnomer had escaped into the document that travels: two entries in
+    :data:`commissura.build.observe.CARRIED_FIELDS` told an auditor the birth
+    date was carried "as an age band", when the dataset held exact ages and no
+    generalisation had been applied anywhere. A manifest that overstates a
+    disclosure control is worse than one that claims none.
+
+    Args:
+        birth_date: From the structured export.
+        reference: The subject's baseline, which the age is taken at.
+        band: Band width in years, or None for the exact age.
+
+    Returns:
+        ``n/a`` when either date is unreadable, because a dataset that guessed
+        an age would state something it does not know; the ceiling marker above
+        :data:`commissura.layout.AGE_CEILING`; otherwise the age, banded or not.
     """
     if birth_date is None or reference is None:
         return layout.NOT_APPLICABLE
@@ -221,7 +244,9 @@ def _age_band(birth_date: date | None, reference: date | None) -> str:
     age = reference.year - birth_date.year - (0 if had_birthday else 1)
     if age > layout.AGE_CEILING:
         return layout.AGE_ABOVE_CEILING
-    return str(age)
+    if band is None:
+        return str(age)
+    return layout.age_band(age, band)
 
 
 def _report_kind(text: str) -> str:
@@ -373,6 +398,7 @@ def build_dataset(
     out: Path,
     *,
     exclusions: Exclusions | None = None,
+    age_band: int | None = None,
 ) -> BuildSummary:
     """Write a de-identified dataset from a linked raw corpus.
 
@@ -385,6 +411,10 @@ def build_dataset(
             and must not appear. ``None`` means no list was supplied, which the
             manifest states in those words rather than leaving a reader to infer
             it from a count of zero.
+        age_band: Width in years to generalise participant ages into, or
+            ``None`` for exact ages. The holder's judgement about their own
+            cohort and their own release, which is why there is no default --
+            see :func:`commissura.layout.age_band`.
 
     Returns:
         A summary of what was written and what remains unsatisfied.
@@ -431,7 +461,7 @@ def build_dataset(
         participant_rows.append(
             [
                 directory,
-                _age_band(subject.identity.birth_date, baseline),
+                _participant_age(subject.identity.birth_date, baseline, age_band),
                 subject.identity.sex.value if subject.identity.sex else layout.NOT_APPLICABLE,
             ]
         )
@@ -454,6 +484,7 @@ def build_dataset(
     # an excluded person is not an individual in this dataset. The corpus's own
     # total stays available to the manifest as `source.subjects_linked`.
     summary.subject_count = len(participant_rows)
+    summary.age_band = age_band
     if exclusions is not None:
         summary.opt_out = OptOutRecord(
             entries=len(exclusions),

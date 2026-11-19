@@ -44,11 +44,30 @@ from commissura.read.corpus import RawCorpus
 from commissura.read.identity import REASON_KEEPS_RECORD, KeyKind, RefusalReason
 from commissura.validate.context import DatasetContext
 
-MANIFEST_SCHEMA_VERSION = "7.0.0"
+MANIFEST_SCHEMA_VERSION = "7.1.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
 different clock from the dataset layout.
+
+**7.1.0, 2026-11-19.** ``generalisation`` is new. Additive, so a reader of
+7.0.0 still parses this; the minor number moves because there is something new
+to read.
+
+It states whether participant ages were generalised into bands and how wide,
+separately from the age ceiling, which this tool applies to every dataset. D7.2
+section 3.1 (p. 18) asks a holder to publish the default minimisation rules
+that apply, and section 3.3.1 (p. 22) names exact age as the example to justify
+rather than assume. Stated even when no banding was applied, for the reason
+``opt_out`` states the same: a reader cannot otherwise tell a decision from a
+silence.
+
+One correction ships with it rather than a schema change. Two entries in the
+per-field table said the birth date was carried "as an age band", which was
+never true -- the helper that produced the value was *named* ``_age_band`` and
+banded nothing. A manifest that overstates a disclosure control is worse than
+one that claims none, so those notes now describe what happens and point at
+``generalisation.age`` for whether a band was applied.
 
 **7.0.0, 2026-11-19.** ``source.opt_out`` is new and ``source.records_not_in_dataset``
 widens to include the records it accounts for.
@@ -181,6 +200,76 @@ def _absent_record_count(corpus: RawCorpus, summary: BuildSummary) -> int:
     )
     excluded = summary.opt_out.records_excluded if summary.opt_out else 0
     return refused + len(summary.dropped) + excluded
+
+
+def _generalisation_section(summary: BuildSummary) -> dict[str, object]:
+    """Describe which values were coarsened before release, and by how much.
+
+    D7.2 section 3.1 (p. 18) asks a holder to "specify any standard data
+    minimisation rules that are applicable by default to the datasets offered",
+    and section 3.3.1 (p. 22) names age as the worked example: it "should only
+    be used as an exact value when it is indispensable for the research question
+    and cannot be replaced by age categories". A dataset whose ages read
+    ``40-44`` cannot answer either on its own -- a reader cannot tell a
+    five-year band from a decade that starts on a multiple of five, nor a banded
+    dataset from one whose source only ever carried bands.
+
+    **The ceiling and the band are reported as the two different things they
+    are.** Truncating above :data:`commissura.layout.AGE_CEILING` is a
+    de-identification invariant this project applies to every dataset; banding
+    is a disclosure-control choice the holder makes per release. Reporting them
+    in one field would make the first look optional.
+
+    Args:
+        summary: What the build produced.
+
+    Returns:
+        The section, which states that no banding was applied as plainly as it
+        states a width -- the reason being the one the opt-out section gives.
+    """
+    ceiling = {
+        "ceiling_years": layout.AGE_CEILING,
+        "above_ceiling": layout.AGE_ABOVE_CEILING,
+        "ceiling_note": (
+            "Applied to every dataset this tool writes, independently of any "
+            "band width. In a small cohort an age of 97 is close to a unique "
+            "identifier, and the information lost is negligible for most "
+            "research questions."
+        ),
+    }
+    if summary.age_band is None:
+        return {
+            "age": {
+                "banded": False,
+                **ceiling,
+                "note": (
+                    "Ages are exact. D7.2 section 3.3.1 asks that an exact age "
+                    "be used only where it is indispensable and cannot be "
+                    "replaced by a category, so this is a statement the "
+                    "recipient should weigh rather than a default nobody chose. "
+                    "`commissura build --age-band <years>` generalises them; "
+                    "the width is the holder's judgement about their own cohort "
+                    "and their own release, which is why there is none here."
+                ),
+            }
+        }
+    return {
+        "age": {
+            "banded": True,
+            "band_years": summary.age_band,
+            "band_format": f"low{layout.AGE_BAND_SEPARATOR}high, both bounds inclusive",
+            "band_anchor": "bands start at zero, so a width of ten gives decades",
+            **ceiling,
+            "note": (
+                "The upper bound of a band is clamped to the ceiling, so the two "
+                "mechanisms cannot interfere: a width of seven would otherwise "
+                "place an 85-year-old in a band reaching 90 and state that they "
+                "might be 90. `risk` measures k over these values and not over "
+                "the ages they came from, because the banded values are what the "
+                "dataset holds."
+            ),
+        }
+    }
 
 
 def _opt_out_section(summary: BuildSummary) -> dict[str, object]:
@@ -622,6 +711,12 @@ def write_manifest(
         "pseudonymisation": declare(
             key, permit_reference=permit_reference, root_fingerprint=root_fingerprint
         ),
+        # Beside pseudonymisation because it is the other half of the same
+        # question: pseudonymisation replaces an identifier with something
+        # unlinkable, generalisation keeps a value and makes it coarser. D7.2
+        # treats both as data minimisation and asks a holder to publish which
+        # rules were applied by default.
+        "generalisation": _generalisation_section(summary),
         # What this manifest replaced, so a chain of rebuilds is followable.
         # `None` is written rather than omitted: a reader must be able to tell a
         # first build from one whose predecessor went unrecorded.
@@ -816,19 +911,19 @@ def _typical_age_range(out: Path) -> dict[str, object]:
     Returns:
         Zero or two properties, ready to merge into the dataset node.
     """
-    ages: list[int] = []
-    for value in DatasetContext(out).participants.column("age"):
-        try:
-            ages.append(int(value))
-        except ValueError:
-            # `90+` above the ceiling, or `n/a`. Neither is a number and
-            # neither is an error.
-            continue
-    if not ages:
+    bounds = [
+        pair
+        for value in DatasetContext(out).participants.column("age")
+        # `90+` above the ceiling, or `n/a`. Neither states a number and
+        # neither is an error. A band states two, and reading only the first
+        # would understate the maximum by almost a whole band.
+        if (pair := layout.age_bounds(value)) is not None
+    ]
+    if not bounds:
         return {}
     return {
-        "healthdcatap:minTypicalAge": _non_negative(min(ages)),
-        "healthdcatap:maxTypicalAge": _non_negative(max(ages)),
+        "healthdcatap:minTypicalAge": _non_negative(min(low for low, _ in bounds)),
+        "healthdcatap:maxTypicalAge": _non_negative(max(high for _, high in bounds)),
     }
 
 

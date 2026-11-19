@@ -156,6 +156,7 @@ Wrote 211 files to ./dataset
 
   key fingerprint        35eea6fcd0bad4df
   free-text redactions   528
+  participant ages       exact, truncated at 89
   linkage issues         29
   records dropped        3  (no readable date)
     reports/5806125_rad_2.txt  (undated_record)
@@ -245,6 +246,11 @@ Twenty-one of twenty-five participants are unique on age and sex together. That
 is not a defect — twenty-five people with exact ages cannot reach k=5 on two
 attributes — and it is the number an access body would ask you to fix by banding
 the ages before release. The command reports it rather than passing judgement.
+
+You can act on it. `build --age-band 10` writes `40-49` instead of `42` and
+takes the same cohort from twenty-one combinations below the threshold to ten;
+see [generalising ages](#generalising-ages) for the width, which is yours to
+choose.
 
 ### What came out
 
@@ -851,6 +857,61 @@ before the option existed — pinned by a test, because a change to pseudonym
 derivation that moved existing datasets would need a migration plan and this one
 cannot be reached by accident. The manifest states which of the two you got,
 in those words, rather than leaving it to be inferred.
+
+#### Generalising ages
+
+`risk` has always reported that a small cohort cannot reach a useful k and that
+banding the ages is the fix. Now it can be applied:
+
+```bash
+commissura build ./raw --out ./dataset --age-band 10
+```
+
+```
+  participant ages       banded, 10 years
+  minimum k              1  (10 combination(s) below 5)
+```
+
+Twenty-one combinations below the threshold became ten, on the same
+twenty-five people. Minimum k is still 1, because some decade-and-sex
+combinations hold one person and twenty-five is a small cohort — the command
+goes on reporting the number rather than a verdict.
+
+**The width is yours and there is no default.** Five years is the convention,
+ten is what a small cohort actually needs, and which one is right depends on
+your cohort and on what the permit is for. TEHDAS2 D7.2 asks that an exact age
+be used "only when it is indispensable for the research question and cannot be
+replaced by age categories" — a judgement about a research question, which this
+tool is not in a position to make for you. Omit the option for exact ages.
+
+Bands are anchored at zero, so a width of ten gives decades. Both bounds are
+inclusive.
+
+**The age ceiling is a separate mechanism and stays on.** Ages above 89 are
+`90+` in every dataset this tool writes, banded or not, and a band's upper
+bound is clamped to 89 so the two cannot interfere — a width of seven would
+otherwise put an 85-year-old in `84-90` and state that they might be 90, which
+is the thing the ceiling exists to prevent. `.deident/manifest.json` reports
+them under separate keys for the same reason: one is an invariant, the other is
+your choice.
+
+```json
+"generalisation": {
+  "age": {
+    "banded": true,
+    "band_years": 10,
+    "band_format": "low-high, both bounds inclusive",
+    "ceiling_years": 89,
+    "above_ceiling": "90+"
+  }
+}
+```
+
+A dataset whose ages read `40-49` is not self-describing: nobody can tell a
+decade from a five-year band that happens to start on a multiple of ten, nor a
+banded dataset from one whose source only ever carried bands. **An unbanded
+build says so just as plainly**, with `"banded": false`, because a reader has to
+be able to tell a decision from a silence.
 
 #### Acting on an opt-out
 

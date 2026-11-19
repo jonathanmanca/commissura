@@ -509,6 +509,18 @@ def build(
             "typing error and is only valid for one key and one permit.",
         ),
     ] = None,
+    age_band: Annotated[
+        int | None,
+        typer.Option(
+            "--age-band",
+            min=layout.MINIMUM_AGE_BAND,
+            help="Generalise participant ages into bands this many years wide, "
+            "so 42 becomes 40-44 at a width of 5. TEHDAS2 D7.2 asks that an "
+            "exact age be used only where it is indispensable. The width is "
+            "yours to choose: it depends on your cohort and your release, so "
+            "there is no default. Omit the option for exact ages.",
+        ),
+    ] = None,
     report_to: Annotated[
         Path | None,
         typer.Option(
@@ -652,7 +664,9 @@ def build(
 
     working = staged.root
     try:
-        summary = build_dataset(corpus, key, spec, working, exclusions=exclusions)
+        summary = build_dataset(
+            corpus, key, spec, working, exclusions=exclusions, age_band=age_band
+        )
         write_healthdcat_description(
             working, spec=spec, summary=summary, dataset_name=staged.destination.name
         )
@@ -742,6 +756,7 @@ def build(
                         "subjects_unreachable_by_national_identifier": unreachable,
                     },
                     "free_text_redactions": summary.redaction_count,
+                    "age_band_years": summary.age_band,
                     "key_fingerprint": key.fingerprint,
                     "html_report": str(written_report) if written_report else None,
                     "profile": {
@@ -773,6 +788,14 @@ def build(
         typer.echo("")
         typer.echo(f"  key fingerprint        {key.fingerprint}")
         typer.echo(f"  free-text redactions   {summary.redaction_count}")
+        typer.echo(
+            "  participant ages       "
+            + (
+                f"banded, {summary.age_band} years"
+                if summary.age_band
+                else f"exact, truncated at {layout.AGE_CEILING}"
+            )
+        )
         typer.echo(f"  linkage issues         {summary.linkage_issues}")
         typer.echo(f"  records dropped        {len(summary.dropped)}  (no readable date)")
         # Printed here and nowhere else. The manifest records how many records

@@ -797,13 +797,21 @@ def test_a_reference_range_is_split_or_declared_absent(
         (date(1960, 1, 1), None, layout.NOT_APPLICABLE),
     ],
 )
-def test_an_age_is_banded_or_declared_absent(
+def test_an_age_is_truncated_or_declared_absent(
     birth: date | None, reference: date | None, expected: str
 ) -> None:
-    """A dataset that guessed an age would be stating something it does not know."""
-    from commissura.build.writer import _age_band
+    """A dataset that guessed an age would be stating something it does not know.
 
-    assert _age_band(birth, reference) == expected
+    Named for what it checks. It used to say "banded", after a helper called
+    `_age_band` that banded nothing -- the same misnomer that had reached the
+    manifest, where two per-field notes told an auditor the birth date was
+    carried as an age band while the dataset held exact ages. Banding exists
+    now and has its own tests; this one is about the ceiling and the absent
+    value.
+    """
+    from commissura.build.writer import _participant_age
+
+    assert _participant_age(birth, reference, None) == expected
 
 
 @pytest.mark.parametrize(

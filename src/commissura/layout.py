@@ -126,6 +126,78 @@ truncating is negligible for most research questions.
 
 AGE_ABOVE_CEILING: Final = "90+"
 
+AGE_BAND_SEPARATOR: Final = "-"
+"""Joins the two inclusive bounds of a banded age, as in ``40-44``.
+
+Cannot be confused with a surviving calendar date by
+:data:`ABSOLUTE_DATE_PATTERNS`: every bound is at most two digits, because ages
+stop at :data:`AGE_CEILING`.
+"""
+
+MINIMUM_AGE_BAND: Final = 2
+"""The narrowest band worth asking for.
+
+A width of one is not banding, it is the exact age, which is what omitting the
+option already gives. Accepting it would put ``42-42`` in the dataset and a
+declared band width of one in the manifest -- a true statement about nothing,
+and a reader would have to work out that no generalisation had been applied.
+"""
+
+
+def age_band(age: int, width: int) -> str:
+    """Return the inclusive band an age falls in, as the dataset writes it.
+
+    Bands are anchored at zero, so a width of five gives ``0-4``, ``5-9`` and so
+    on and a width of ten gives decades. The upper bound is clamped to
+    :data:`AGE_CEILING`, which keeps the two mechanisms from interfering: a
+    width of seven would otherwise place an 85-year-old in ``84-90`` and state
+    that they might be 90, which is exactly what the ceiling exists to prevent.
+    Truncation at the ceiling is a de-identification invariant of this project;
+    banding is a disclosure-control choice the holder makes per release, and
+    collapsing them into one option would make the invariant look optional.
+
+    **Logic in `layout`, which is meant to hold none**, and the reason is that
+    this is the format rather than a decision about it: the writer composes the
+    string and the description reader takes it apart again, so a second copy of
+    the rule in either place is a copy that can disagree.
+
+    Args:
+        age: Whole years, at or below :data:`AGE_CEILING`.
+        width: Band width in years, at least :data:`MINIMUM_AGE_BAND`.
+
+    Returns:
+        ``"<low><separator><high>"``, both bounds inclusive.
+    """
+    low = age // width * width
+    high = min(low + width - 1, AGE_CEILING)
+    return f"{low}{AGE_BAND_SEPARATOR}{high}"
+
+
+def age_bounds(value: str) -> tuple[int, int] | None:
+    """Return the inclusive bounds an age cell states, or None if it states none.
+
+    Accepts both forms the ``age`` column can carry, because a reader of the
+    column cannot know which a dataset used: an exact age is its own lower and
+    upper bound, and a band gives two. ``n/a`` and :data:`AGE_ABOVE_CEILING`
+    give nothing, which is not an error -- the first says the age is unknown and
+    the second says only that it is above the ceiling.
+
+    Args:
+        value: One cell of the ``age`` column.
+
+    Returns:
+        ``(low, high)``, or None.
+    """
+    low, separator, high = value.partition(AGE_BAND_SEPARATOR)
+    try:
+        if not separator:
+            exact = int(value)
+            return exact, exact
+        return int(low), int(high)
+    except ValueError:
+        return None
+
+
 # --- Subject and session directories --------------------------------------
 
 SUBJECT_PREFIX: Final = "sub-"

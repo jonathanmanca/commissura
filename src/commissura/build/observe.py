@@ -75,7 +75,8 @@ CARRIED_FIELDS: Final[dict[str, dict[str, Carried]]] = {
     "lab": {
         "PID-7": Carried(
             "replaced",
-            "date of birth, as an age band in participants.tsv truncated at the age ceiling",
+            "date of birth, as an age in participants.tsv truncated at the age "
+            "ceiling; `generalisation.age` says whether it was also banded, and how wide",
         ),
         "PID-8": Carried("kept", "administrative sex, in participants.tsv"),
         "PID-19": Carried(
@@ -114,7 +115,8 @@ CARRIED_FIELDS: Final[dict[str, dict[str, Carried]]] = {
         ),
         "patient/birthTime": Carried(
             "replaced",
-            "date of birth, as an age band in participants.tsv truncated at the age ceiling",
+            "date of birth, as an age in participants.tsv truncated at the age "
+            "ceiling; `generalisation.age` says whether it was also banded, and how wide",
         ),
         "patientRole/id": Carried(
             "replaced",
