@@ -505,10 +505,13 @@ identifiers. `.deident/manifest.json` is written to be sent to an access body,
 so it counts them by reason instead — `source.linkage_issues` for records that
 could not be attached to anybody, `source.records_dropped` for records that
 were attached and then had nowhere to go, and
-`source.records_not_in_dataset` adding them up. Two lists rather than one
-because they need different fixes: the first is a labelling problem in your
-export, the second a date format the reader does not recognise. Your terminal
-gets the filenames; the document that travels gets the counts.
+`source.records_not_in_dataset` adding them up, together with
+`source.opt_out.records_excluded` for records left out because their subject
+[objected](#acting-on-an-opt-out). Separate lists rather than one because they
+need different fixes: the first is a labelling problem in your export, the
+second a date format the reader does not recognise, and the third is not a
+problem at all. Your terminal gets the filenames; the document that travels
+gets the counts.
 
 **Twenty-nine of those linkage issues are records that *are* in the dataset.**
 A reason either means the record could not be attached to anybody, or it means
@@ -848,6 +851,71 @@ before the option existed — pinned by a test, because a change to pseudonym
 derivation that moved existing datasets would need a migration plan and this one
 cannot be reached by accident. The manifest states which of the two you got,
 in those words, rather than leaving it to be inferred.
+
+#### Acting on an opt-out
+
+EHDS Article 71 lets a person object to the secondary use of their data, and
+TEHDAS2 D6.1 marks acting on it *Mandatory* for a data holder: *identify and
+remove data of natural persons who opted-out.* Put them in a file, one per
+line:
+
+```bash
+commissura build ./raw --out ./dataset --exclude-subjects ./objections.txt
+```
+
+```
+# received 2026-03-04, ticket 1198
+RSSMRA80A01X000Z
+VRDLGU75D12X842T
+```
+
+Every record belonging to those people is left out: no subject directory, no
+row in `participants.tsv`, no pseudonym issued. Everybody else's labels,
+offsets and redactions are **byte-identical** to a build without the file, so
+acting on one person's objection does not hand your data user a dataset that no
+longer joins to the one they already have.
+
+**The file holds codici fiscali, not subject labels**, and that is deliberate.
+A label is derived from your key and, with `--permit`, from the permit too, so a
+file of labels is valid for exactly one of each and silently matches nobody
+under any other — while an objection is permanent and a key can be rotated. And
+a codice fiscale carries a check character, so a typo is refused by name; twelve
+hex characters are twelve hex characters, and a holder who mistypes one would
+see a successful build and would not have acted on the objection.
+
+**A malformed entry fails the build. An entry matching nobody does not.** The
+first cannot be anything but a mistake. The second can mean the person simply
+has no records in this export, and no tool can tell that from a mistyped
+identifier — so it is reported rather than decided for you:
+
+```
+  Opt-out exclusions:
+    identifiers on the list           2
+    subjects excluded                 1
+    records excluded                  7
+    matching no subject here          1
+      VRDLGU75D12X842T
+      An entry matches nothing when the person has no records in this export,
+      or when it is mistyped. This tool cannot tell which.
+```
+
+Two limits, both reported rather than left to be found:
+
+- **A subject this corpus keyed on something else cannot be reached.** When a
+  message carries no usable codice fiscale, the subject is keyed on the
+  institution's own record number instead, and an ENI, STP or ANA patient has no
+  codice fiscale at all. `build` says how many such subjects there are whenever
+  you pass the flag, because a list of codici fiscali was never offered the
+  chance on them.
+- **The identifiers are on your disk and nowhere else.** The manifest records
+  counts and never a value: a list of excluded subjects is a list of people who
+  exercised a right to object, and that document is written to be sent to an
+  access body. What it does record is that an exclusion happened at all — which
+  is the point, because a dataset built after an objection should not look
+  identical to one built before it.
+
+Use [`commissura whois`](#commissura-whois) when you need the other direction:
+the label a named person was given, in a dataset you have already released.
 
 #### The key is never a command-line argument
 
@@ -1414,10 +1482,13 @@ that cannot key a subject — a placeholder, a wrong check character, the wrong
 shape — is refused with exit code 2 and the diagnosis, rather than given a label
 that corresponds to nobody.
 
-**This is what an EHDS opt-out needs.** Somebody exercises their right to
-object. You know exactly who they are; the datasets you already released
-contain no name, no codice fiscale and no record number. The subject label is
-the only handle that connects the two, and this derives it.
+**This is what an EHDS opt-out needs in a dataset you have already released.**
+Somebody exercises their right to object. You know exactly who they are; the
+datasets already in somebody else's hands contain no name, no codice fiscale and
+no record number. The subject label is the only handle that connects the two,
+and this derives it. For the datasets you have *not* built yet, give the
+identifier to [`build --exclude-subjects`](#acting-on-an-opt-out) instead and
+the person never appears at all.
 
 It reads nothing. The label comes from the identifier and the key, so the
 answer is the same whether or not that person is in any dataset — which is

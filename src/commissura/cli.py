@@ -28,6 +28,7 @@ from commissura.build.manifest import (
     write_healthdcat_description,
     write_manifest,
 )
+from commissura.build.optout import ExclusionFileError, read_exclusions
 from commissura.build.publish import PublicationError, abandon, begin, publish
 from commissura.build.report import DEFAULT_COMPARISONS, write_report
 from commissura.build.risk import K_THRESHOLD, assess, write_risk_report
@@ -48,7 +49,7 @@ from commissura.healthdcat import Tier as HealthTier
 from commissura.measure import RETAINED_BY_DESIGN
 from commissura.measure import measure as run_measure
 from commissura.read.corpus import read_corpus
-from commissura.read.identity import classify_national_id
+from commissura.read.identity import KeyKind, classify_national_id
 from commissura.validate import registered_rules, validate_dataset
 
 app = typer.Typer(
@@ -497,6 +498,17 @@ def build(
             "permits; without this they are.",
         ),
     ] = None,
+    exclude_subjects: Annotated[
+        Path | None,
+        typer.Option(
+            "--exclude-subjects",
+            help="A file of national identifiers, one per line, of people who have "
+            "objected to the secondary use of their data. Every one of their "
+            "records is left out and the manifest records that it was. Codici "
+            "fiscali and not subject labels: a label cannot be checked for a "
+            "typing error and is only valid for one key and one permit.",
+        ),
+    ] = None,
     report_to: Annotated[
         Path | None,
         typer.Option(
@@ -552,6 +564,16 @@ def build(
     `healthdcatap:hdab` is mandatory in the profile and Italy has not designated
     its access body yet, so a dataset that names none is the normal case until
     2027 and should still be buildable.
+
+    `--exclude-subjects` is how an objection under EHDS Article 71 reaches the
+    dataset. The file holds national identifiers, because a subject label is
+    valid for only one key and one permit and nothing can check it for a typing
+    error; see `commissura.build.optout` for the whole argument. A malformed
+    entry fails the build before anything is written. An entry that matches no
+    subject here does not, because the person may simply have no records in
+    this export — it is reported instead, and so is the number of subjects this
+    corpus keyed on something other than a national identifier, whom no list of
+    codici fiscali could reach.
     """
     try:
         selected_tier = HealthTier(tier)
@@ -573,6 +595,18 @@ def build(
     # option existed -- which a test pins. With one, it is a subkey, and the
     # whole label space moves with it.
     key = scope_to_permit(root_key, permit) if permit is not None else root_key
+
+    # Read before the corpus and long before anything is staged, so a holder
+    # whose list has a typo in it learns that in a second. A malformed entry is
+    # refused outright; an entry that matches nobody is reported at the end,
+    # because only the first of the two can be proven wrong.
+    exclusions = None
+    if exclude_subjects is not None:
+        try:
+            exclusions = read_exclusions(exclude_subjects)
+        except ExclusionFileError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(2) from None
 
     if not source.is_dir():
         typer.echo(f"No raw corpus at {source}.", err=True)
@@ -618,7 +652,7 @@ def build(
 
     working = staged.root
     try:
-        summary = build_dataset(corpus, key, spec, working)
+        summary = build_dataset(corpus, key, spec, working, exclusions=exclusions)
         write_healthdcat_description(
             working, spec=spec, summary=summary, dataset_name=staged.destination.name
         )
@@ -674,6 +708,14 @@ def build(
     # destination now, and every line printed below names it.
     summary.root = published
 
+    # How many subjects no exclusion list could have reached, whatever it held.
+    # A subject this corpus established from an institution's own record number
+    # or from an ENI, STP or ANA code carries no codice fiscale to match, so an
+    # operator who sees "2 excluded" needs to know the list was not even offered
+    # the chance on these. Counted whether or not a list was given, and reported
+    # only when one was.
+    unreachable = sum(1 for s in corpus.subjects if s.key.kind is not KeyKind.NATIONAL_ID)
+
     if as_json:
         typer.echo(
             json.dumps(
@@ -684,6 +726,21 @@ def build(
                     "files": summary.file_count,
                     "linkage_issues": summary.linkage_issues,
                     "records_dropped": len(summary.dropped),
+                    # Counts, where the text output below also names the
+                    # identifiers that matched nothing. The same split as the
+                    # dropped paths and the linkage details: `--json` exists so
+                    # this command composes inside somebody else's pipeline, and
+                    # a pipeline's stdout is the thing most likely to end up in
+                    # a log file or a CI artefact that outlives the run.
+                    "opt_out": None
+                    if summary.opt_out is None
+                    else {
+                        "entries": summary.opt_out.entries,
+                        "subjects_excluded": summary.opt_out.subjects_excluded,
+                        "records_excluded": summary.opt_out.records_excluded,
+                        "entries_matching_no_subject": len(summary.opt_out.unmatched),
+                        "subjects_unreachable_by_national_identifier": unreachable,
+                    },
                     "free_text_redactions": summary.redaction_count,
                     "key_fingerprint": key.fingerprint,
                     "html_report": str(written_report) if written_report else None,
@@ -749,6 +806,34 @@ def build(
             for term in summary.missing_for_conformance:
                 typer.echo(f"    {term}")
             typer.echo("    Supply them with --hdab and --publisher.")
+        if summary.opt_out is not None:
+            typer.echo("")
+            typer.echo("  Opt-out exclusions:")
+            typer.echo(f"    identifiers on the list      {summary.opt_out.entries:6d}")
+            typer.echo(f"    subjects excluded            {summary.opt_out.subjects_excluded:6d}")
+            typer.echo(f"    records excluded             {summary.opt_out.records_excluded:6d}")
+            typer.echo(f"    matching no subject here     {len(summary.opt_out.unmatched):6d}")
+            # Named here and in no document. The operator has this file already,
+            # and these are the lines they have to go and look at; a list of
+            # them in the manifest would be a list of people who objected, in a
+            # document written to be sent to an access body.
+            for value in summary.opt_out.unmatched[:10]:
+                typer.echo(f"      {value}")
+            if len(summary.opt_out.unmatched) > 10:
+                typer.echo(f"      ... and {len(summary.opt_out.unmatched) - 10} more")
+            if summary.opt_out.unmatched:
+                typer.echo(
+                    "      An entry matches nothing when the person has no records in this export,"
+                )
+                typer.echo("      or when it is mistyped. This tool cannot tell which.")
+            if unreachable:
+                typer.echo(
+                    f"    {unreachable} subject(s) here are keyed on an institution's own "
+                    "record number"
+                )
+                typer.echo(
+                    "      or on an ENI, STP or ANA code, so no entry on the list could reach them."
+                )
         if summary.residual_risks():
             typer.echo("")
             typer.echo("  Residual risk the method cannot reach:")

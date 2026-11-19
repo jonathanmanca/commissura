@@ -37,10 +37,12 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from commissura import healthdcat, layout
+from commissura.build.optout import Exclusions, OptOutRecord
 from commissura.build.scrub import KnownIdentifiers, ScrubReport, scrub_text
 from commissura.deident.keys import SecretKey
 from commissura.deident.pseudonymise import RULE_VERSION, Pseudonymiser
 from commissura.read.corpus import RawCorpus, Subject
+from commissura.read.identity import IdentityKey
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +148,13 @@ class BuildSummary:
     dropped: list[DroppedRecord] = field(default_factory=list)
     report_pairs: list[ReportPair] = field(default_factory=list)
     missing_for_conformance: tuple[str, ...] = ()
+    opt_out: OptOutRecord | None = None
+    """What an exclusion list did to this build, or None when none was given.
+
+    The distinction is load-bearing and is carried all the way into the
+    manifest: a build with an empty list and a build with no list at all are
+    different statements about whether anybody was asked.
+    """
 
     @property
     def file_count(self) -> int:
@@ -357,7 +366,14 @@ def _known_identifiers(corpus: RawCorpus, subject: Subject) -> KnownIdentifiers:
     )
 
 
-def build_dataset(corpus: RawCorpus, key: SecretKey, spec: BuildSpec, out: Path) -> BuildSummary:
+def build_dataset(
+    corpus: RawCorpus,
+    key: SecretKey,
+    spec: BuildSpec,
+    out: Path,
+    *,
+    exclusions: Exclusions | None = None,
+) -> BuildSummary:
     """Write a de-identified dataset from a linked raw corpus.
 
     Args:
@@ -365,6 +381,10 @@ def build_dataset(corpus: RawCorpus, key: SecretKey, spec: BuildSpec, out: Path)
         key: The secret every pseudonym derives from.
         spec: What the data holder had to supply.
         out: Dataset root. Created if absent.
+        exclusions: People who have objected to the secondary use of their data
+            and must not appear. ``None`` means no list was supplied, which the
+            manifest states in those words rather than leaving a reader to infer
+            it from a count of zero.
 
     Returns:
         A summary of what was written and what remains unsatisfied.
@@ -373,15 +393,36 @@ def build_dataset(corpus: RawCorpus, key: SecretKey, spec: BuildSpec, out: Path)
     pseudonymiser = Pseudonymiser(key)
     summary = BuildSummary(
         root=out,
-        subject_count=len(corpus.subjects),
+        subject_count=0,
         session_count=0,
         linkage_issues=len(corpus.issues),
         missing_for_conformance=spec.missing_for_conformance(),
     )
 
     participant_rows: list[list[str]] = []
+    excluded_keys: list[IdentityKey] = []
+    excluded_paths: set[str] = set()
+    # Records, not files, because that is the unit `source.records_linked` and
+    # `records_dropped` are counted in and `records_not_in_dataset` has to
+    # reconcile against. One CDA laboratory document yields two records -- the
+    # coded results and the narrative -- from one path, so the two numbers
+    # differ for a CDA corpus and agree for every other, which is exactly the
+    # shape of a unit error nothing would catch.
+    excluded_records = 0
 
     for subject in corpus.subjects:
+        # Before the label is derived, because an excluded subject must leave no
+        # trace: no directory, no participant row, no pseudonym issued. The
+        # person objected to the use of their data, and a row saying an unnamed
+        # somebody was removed would still be a statement about them.
+        if exclusions is not None and exclusions.excludes(subject.key):
+            excluded_keys.append(subject.key)
+            excluded_records += len(subject.labs) + len(subject.reports) + len(subject.imaging)
+            excluded_paths.update(record.path for record in subject.labs)
+            excluded_paths.update(record.path for record in subject.reports)
+            excluded_paths.update(record.path for record in subject.imaging)
+            continue
+
         label = pseudonymiser.subject_label_for(subject.key)
         directory = f"{layout.SUBJECT_PREFIX}{label}"
         baseline = subject.baseline
@@ -407,6 +448,20 @@ def build_dataset(corpus: RawCorpus, key: SecretKey, spec: BuildSpec, out: Path)
             subject, out, directory, session_of, baseline, pseudonymiser, label, known, summary
         )
         _write_subject_imaging(subject, out, directory, baseline, pseudonymiser, summary)
+
+    # The number of subjects the dataset *holds*, not the number the corpus
+    # linked. `healthdcatap:numberOfUniqueIndividuals` is derived from this, and
+    # an excluded person is not an individual in this dataset. The corpus's own
+    # total stays available to the manifest as `source.subjects_linked`.
+    summary.subject_count = len(participant_rows)
+    if exclusions is not None:
+        summary.opt_out = OptOutRecord(
+            entries=len(exclusions),
+            subjects_excluded=len(excluded_keys),
+            records_excluded=excluded_records,
+            unmatched=exclusions.unmatched(excluded_keys),
+            excluded_paths=frozenset(excluded_paths),
+        )
 
     _write_tsv(
         out / layout.PARTICIPANTS_TSV,

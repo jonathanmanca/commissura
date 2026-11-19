@@ -28,7 +28,10 @@ Every identifier here is synthetic.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+
+import pytest
 
 from commissura import layout
 from commissura.build.manifest import (
@@ -58,13 +61,49 @@ def _spec() -> BuildSpec:
     )
 
 
-def _built(tmp_path: Path, *, subjects: int = 6, seed: int = 42, defect_rate: float = 0.0):  # type: ignore[no-untyped-def]
+def _built(  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+    *,
+    subjects: int = 6,
+    seed: int = 42,
+    defect_rate: float = 0.0,
+    cda: bool = False,
+):
     raw, out = tmp_path / "raw", tmp_path / "dataset"
-    write_corpus(CohortSpec(subjects=subjects, seed=seed, defect_rate=defect_rate), raw)
+    write_corpus(CohortSpec(subjects=subjects, seed=seed, defect_rate=defect_rate, cda=cda), raw)
     corpus = read_corpus(raw)
     spec = _spec()
     summary = build_dataset(corpus, KEY, spec, out)
     return raw, out, corpus, summary, spec
+
+
+_WORD = r"[^\W_]"
+"""A letter or a digit, Unicode-aware, and deliberately not an underscore.
+
+``\\w`` would include it, which would let a planted value sit inside a
+snake_case token unnoticed. A leak guard takes the strict side: a false positive
+costs somebody a glance, a false negative ships an identifier.
+"""
+
+
+def _standalone(value: str) -> re.Pattern[str]:
+    r"""Match a value only where it is a token and not part of a longer one.
+
+    ``\b`` cannot do this job directly. It is defined against word characters,
+    so a value that begins with ``+`` or ends with ``.`` gets the boundary test
+    applied to the wrong side and the pattern means the opposite of what it
+    reads as. The lookarounds are therefore added only on the edges that are
+    alphanumeric.
+
+    Args:
+        value: The planted identifier, already lowercased.
+
+    Returns:
+        The pattern.
+    """
+    head = rf"(?<!{_WORD})" if value[:1].isalnum() else ""
+    tail = rf"(?!{_WORD})" if value[-1:].isalnum() else ""
+    return re.compile(head + re.escape(value) + tail)
 
 
 # --------------------------------------------------------------------------
@@ -177,7 +216,11 @@ def test_a_destination_manifest_that_is_not_an_object_is_absent(tmp_path: Path) 
 # --------------------------------------------------------------------------
 
 
-def test_no_planted_identifier_reaches_the_new_manifest_sections(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cda", [False, True])
+@pytest.mark.parametrize("seed", [7, 42])
+def test_no_planted_identifier_reaches_the_new_manifest_sections(
+    tmp_path: Path, seed: int, cda: bool
+) -> None:
     """Class-level, as the audit of 2026-11-13 established it must be.
 
     A test naming the fields it checks passes on the next field somebody adds,
@@ -185,8 +228,25 @@ def test_no_planted_identifier_reaches_the_new_manifest_sections(tmp_path: Path)
     reads every planted identifier out of the ground truth and asserts none of
     them is anywhere in the document -- including `pseudonymisation` and
     `predecessor`, which are new.
+
+    **Matched on word boundaries, and that is a correction to this test rather
+    than a refinement.** It compared substrings, so it reported `ANNA` -- a
+    clinician's given name -- because the manifest transcribes the DICOM
+    keywords `ReferringPhysicianName` and `PerformingPhysicianName` and `ANNA`
+    sits inside "Physici**anNa**me". A collision with this project's own
+    vocabulary, not a leak.
+
+    It was recorded on 2026-11-17 as seed- and modality-dependent, which
+    understated it: measuring the grid showed the collision at seeds 5, 6 and 42
+    for a plain corpus as well as for every CDA one, and seed 7 without CDA --
+    the single combination this test ran -- is the only cell of eight where it
+    does not fire. The green was a coincidence, not a property of the modality.
+    So the rule is now a boundary match and the grid is parametrised, because a
+    guard that holds in one cell is a guard nobody has measured.
     """
-    raw, out, corpus, summary, spec = _built(tmp_path, subjects=10, defect_rate=0.5, seed=7)
+    raw, out, corpus, summary, spec = _built(
+        tmp_path, subjects=10, defect_rate=0.5, seed=seed, cda=cda
+    )
     risk = write_risk_report(out)
     write_manifest(out, corpus=corpus, summary=summary, key=KEY, spec=spec, risk=risk)
     write_manifest(
@@ -211,7 +271,7 @@ def test_no_planted_identifier_reaches_the_new_manifest_sections(tmp_path: Path)
 
     assert planted
     for value in planted:
-        assert value.lower() not in text, value
+        assert not _standalone(value.lower()).search(text), value
 
 
 def test_the_pseudonymisation_section_is_present_and_machine_readable(tmp_path: Path) -> None:

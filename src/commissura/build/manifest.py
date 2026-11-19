@@ -44,11 +44,33 @@ from commissura.read.corpus import RawCorpus
 from commissura.read.identity import REASON_KEEPS_RECORD, KeyKind, RefusalReason
 from commissura.validate.context import DatasetContext
 
-MANIFEST_SCHEMA_VERSION = "6.2.0"
+MANIFEST_SCHEMA_VERSION = "7.0.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
 different clock from the dataset layout.
+
+**7.0.0, 2026-11-19.** ``source.opt_out`` is new and ``source.records_not_in_dataset``
+widens to include the records it accounts for.
+
+The new section says whether an exclusion list was applied to this build and,
+when one was, how many people it named, how many of them this corpus held, how
+many of their records are therefore absent, and how many entries matched no
+subject here. Counts only: a list of excluded subjects is a list of people who
+exercised a right to object, and this document is written to be read by an
+access body. Its purpose is that **a dataset built after an objection stops
+being indistinguishable from one built before it**, which is what D6.1 Annex 6
+A6.2 (p. 68) requires a holder to be able to show.
+
+The major number moves because of the second half. ``records_not_in_dataset``
+has meant "the linkage issues that refused a record, plus the records dropped
+for want of a date" since 6.0.0, and a consumer could compute it by summing the
+two lists beside it. It now also counts records left out because their subject
+opted out, so that sum no longer reaches it. The third part is visible as
+``source.opt_out.records_excluded``, so the total still reconciles against
+fields in the same section — it reconciles against three of them rather than
+two. Every dataset built without an exclusion list carries the same number it
+carried under 6.2.0.
 
 **6.2.0, 2026-11-17.** Two additions, from the HL7 Italia CDA R2 reader.
 Additive, so a reader of 6.1.0 still parses this.
@@ -140,34 +162,105 @@ record number of the person who could not be matched. Removing the paths in
 def _absent_record_count(corpus: RawCorpus, summary: BuildSummary) -> int:
     """Return how many handed-over records are not in the dataset.
 
+    Three parts, each visible on its own elsewhere in ``source`` so the total
+    reconciles: a record that could not be attached to anybody, one that was
+    attached and had nowhere to go, and one whose subject opted out. The third
+    is the only one that is absent *on purpose*, and it is counted here anyway
+    because the question this field answers is "what did I hand over that is not
+    here" and the reason does not change the answer.
+
     Args:
         corpus: The linked corpus.
         summary: What the build produced.
 
     Returns:
-        The linkage issues whose reason means the record could not be attached,
-        plus every record that was attached and then had nowhere to go.
+        The count.
     """
     refused = sum(
         1 for issue in corpus.issues if not REASON_KEEPS_RECORD[RefusalReason(issue.reason)]
     )
-    return refused + len(summary.dropped)
+    excluded = summary.opt_out.records_excluded if summary.opt_out else 0
+    return refused + len(summary.dropped) + excluded
 
 
-def _flagged_record_count(corpus: RawCorpus) -> int:
+def _opt_out_section(summary: BuildSummary) -> dict[str, object]:
+    """Describe what an exclusion list did to this build.
+
+    **Whether one was applied is itself the first fact**, and it is stated even
+    when none was. A reader who finds no counts cannot otherwise tell a build
+    that excluded nobody from a build that was never asked to, and this project
+    has recorded twice that an absent collection is not evidence about what
+    would have filled it.
+
+    Args:
+        summary: What the build produced.
+
+    Returns:
+        The section. Counts only — never the identifiers on the list, never the
+        subject labels they resolved to.
+    """
+    record = summary.opt_out
+    if record is None:
+        return {
+            "applied": False,
+            "note": (
+                "No exclusion list was given to this build, so no subject was "
+                "left out on account of an objection. This is not a statement "
+                "that nobody objected: it is a statement that this build was "
+                "not told. Supply one with `commissura build "
+                "--exclude-subjects`."
+            ),
+        }
+    return {
+        "applied": True,
+        "entries": record.entries,
+        "subjects_excluded": record.subjects_excluded,
+        "records_excluded": record.records_excluded,
+        "entries_matching_no_subject": len(record.unmatched),
+        "note": (
+            "Counts only. Neither the identifiers on the list nor the subject "
+            "labels they resolved to are recorded: a list of excluded subjects "
+            "is a list of people who exercised a right to object, which is "
+            "itself a disclosure, and this document is written to be read by an "
+            "access body. The list is matched on national identifiers, so a "
+            "subject this corpus established from an institution's own record "
+            "number or from an ENI, STP or ANA code cannot be reached by it; "
+            "`subject_keys` above says how many such subjects there are. An "
+            "entry matching no subject is reported to the operator and is not "
+            "an error, because the person may simply have no records in this "
+            "export and no tool can tell that from a mistyped identifier."
+        ),
+    }
+
+
+def _flagged_record_count(corpus: RawCorpus, summary: BuildSummary) -> int:
     """Return how many records are in the dataset and carry a linkage issue.
 
     A different fact from the one above, and one an auditor needs separately: a
     record here is published, and something about how it was attributed is
     worth a second look.
 
+    **A record whose subject opted out is not published**, however its
+    attribution was flagged, so it belongs to neither count once it belongs to
+    the one above. Said explicitly because this is the shape of the defect found
+    on 2026-11-16: that field overstated by exactly the number of flagged
+    records, because three reasons had been added that attach a record instead
+    of refusing it and nothing revisited the arithmetic. Exclusion is a fourth
+    way for a record to be absent, and it reaches this field too.
+
     Args:
         corpus: The linked corpus.
+        summary: What the build produced, for the paths it left out.
 
     Returns:
         The count.
     """
-    return sum(1 for issue in corpus.issues if REASON_KEEPS_RECORD[RefusalReason(issue.reason)])
+    absent = summary.opt_out.excluded_paths if summary.opt_out else frozenset()
+    return sum(
+        1
+        for issue in corpus.issues
+        if REASON_KEEPS_RECORD[RefusalReason(issue.reason)] and issue.path not in absent
+    )
 
 
 def _by_reason(reasons: Iterable[str]) -> list[dict[str, object]]:
@@ -589,7 +682,7 @@ def write_manifest(
             # number of flagged records -- 32 claimed where 3 were absent, on
             # the first corpus that produced a conflict at all.
             "records_not_in_dataset": _absent_record_count(corpus, summary),
-            "records_flagged_in_dataset": _flagged_record_count(corpus),
+            "records_flagged_in_dataset": _flagged_record_count(corpus, summary),
             "records_not_in_dataset_note": (
                 "Reasons and counts only. Neither the file paths nor the detail "
                 "sentences are recorded: an export names its files after the "
@@ -597,11 +690,21 @@ def write_manifest(
                 "unlinked report's detail named a codice fiscale and a record "
                 "number. This document is written to be read by an access body. "
                 "`commissura build` prints both for the operator instead. "
-                "`records_not_in_dataset` counts records that are not here; "
+                "`records_not_in_dataset` counts records that are not here, in "
+                "three parts: the linkage issues whose reason refused the "
+                "record, `records_dropped`, and `opt_out.records_excluded`. "
                 "`records_flagged_in_dataset` counts records that are here and "
                 "carry a linkage issue anyway, which is a different fact and was "
-                "being added to the first one."
+                "being added to the first one. A flagged record whose subject "
+                "opted out is not here, so it is counted above and not there; "
+                "`linkage_issues` is a log of what reading the corpus found and "
+                "counts it either way."
             ),
+            # Whether anybody was deliberately left out, and stated even when
+            # nobody was. Without it a dataset built after an objection is
+            # indistinguishable from one built before it, which is the whole of
+            # what D6.1 A6.2 asks a holder to be able to show.
+            "opt_out": _opt_out_section(summary),
         },
         "output": {
             "subjects": summary.subject_count,
