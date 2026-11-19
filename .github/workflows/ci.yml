@@ -65,10 +65,19 @@ jobs:
       - name: Type check
         run: uv run mypy
 
-      # tests/test_shacl_conformance.py skips here by design. The HealthDCAT-AP
-      # shapes live under reference/, which is gitignored, and fetching them
-      # from code.europa.eu on every push would make this pipeline depend on a
-      # server nobody here controls. Conformance is checked locally instead.
+      # tests/test_shacl_conformance.py used to skip here, which meant this
+      # pipeline showed a green tick for the project's headline claim while
+      # never checking it. The shapes are vendored under third_party/ now, so
+      # the check runs on every push without reaching code.europa.eu — no
+      # dependency on a server nobody here controls, and no silent skip.
+      #
+      # The one remaining way for it to skip is pyshacl being unimportable, so
+      # that is asserted on its own line rather than left to a skip nobody
+      # reads. A test asserts pyshacl is still declared in the dev extra; this
+      # asserts it actually arrived.
+      - name: Confirm the conformance check can run
+        run: uv run python -c "import pyshacl"
+
       - name: Test
         run: uv run pytest
 
@@ -105,6 +114,9 @@ jobs:
 
       - name: Type check
         run: uv run mypy
+
+      - name: Confirm the conformance check can run
+        run: uv run python -c "import pyshacl"
 
       - name: Test
         run: uv run pytest

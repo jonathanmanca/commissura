@@ -1590,26 +1590,42 @@ HealthDCAT-AP Release 8's SHACL shapes, its `range.ttl`, and the DCAT-AP 3.0.0
 shapes *and* class ranges, then judges the emitted description.
 
 ```bash
-mkdir -p reference/healthdcat-ap && cd reference/healthdcat-ap
-API=https://code.europa.eu/api/v4/projects/healthdataeu%2Fhealthdcat-ap/repository/files
-EHDS=public%2Freleases%2Frelease-8%2Fhtml%2Fshacl%2FHealthDCAT-AP_validator%2Fconfig%2Frdf-validator%2Fehds
-curl -so non-public-shapes.ttl "$API/$EHDS%2Fshapes%2Fnon-public-shapes.ttl/raw?ref=main"
-curl -so range.ttl "$API/$EHDS%2Franges%2Frange.ttl/raw?ref=main"
-DCATAP=https://semiceu.github.io/DCAT-AP/releases/3.0.0/html/shacl
-curl -so dcat-ap-3.0.0-shapes.ttl "$DCATAP/shapes.ttl"
-curl -so dcat-ap-3.0.0-range.ttl "$DCATAP/range.ttl"
-```
-
-Four files, each named explicitly with `-o`. The API endpoint ends in `/raw`, so
-`curl -O` would save every one of them as `raw` and each would overwrite the
-last — and the conformance test, which skips when a shape file is missing, would
-report a tidy skip rather than a problem.
-
-```bash
 pytest tests/test_shacl_conformance.py
 ```
 
-The test skips when the shapes are absent, so a clean checkout stays green.
+**The shapes are in this repository, under `third_party/`.** Nothing to
+download, nothing to configure: clone, install the dev extra, and the claim is
+checked — on your machine and on every push.
+
+It used to work the other way, and that was the problem. The shapes were
+fetched on demand into a gitignored directory and the test *skipped* when they
+were absent, so the headline claim of this project was verified wherever one
+person had run four `curl` commands and nowhere else. CI showed a green tick for
+a check it never performed. A skip is a silent failure, and it hid a real one
+once already: the download commands printed here were broken for weeks — they
+used `curl -O` against an endpoint whose path ends in `/raw`, so every file
+landed as `raw` and each overwrote the last — and following them produced a tidy
+skip rather than an error.
+
+Two works are redistributed, both under CC BY 4.0, which permits it with
+attribution: **HealthDCAT-AP Release 8** (European Commission, DG SANTE /
+HealthDataEU) and **DCAT-AP 3.0.0** (SEMIC), the second because the first
+imports it. [NOTICE](NOTICE) carries the attribution and
+`third_party/PROVENANCE.json` carries the bytes — per file, the URL it came
+from, the date, and a SHA-256 that `tests/test_vendored_shapes.py` checks on
+every run. The files are unmodified; the one defect in the published shapes is
+repaired on the parsed graph at load time and never in the file.
+
+To refresh them, re-download from the `url` recorded for each file and update
+its `sha256`:
+
+```bash
+uv run python -c "import json;[print(f['path'], f['url']) for w in json.load(open('third_party/PROVENANCE.json'))['works'] for f in w['files']]"
+```
+
+That is deliberately a manual step. **Pinning a copy trades one kind of
+awareness for another**: the repository now always has the shapes, and in
+exchange it no longer finds out on its own when upstream changes them.
 
 **The first run found eleven distinct violations** that reading the cardinality
 table had not revealed — six of them came from the imported DCAT-AP 3.0.0 shapes

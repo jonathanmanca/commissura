@@ -21,3 +21,23 @@
 *.pdf binary
 *.nii binary
 *.dcm binary
+
+# Vendored third-party documents, stored and checked out byte for byte. `-text`
+# switches off every line-ending conversion that the rule above would otherwise
+# apply.
+#
+# Today this changes nothing: all four shape files are published with LF
+# endings, so `eol=lf` would be a no-op on them. It is here because
+# `third_party/PROVENANCE.json` records a SHA-256 per file and NOTICE states
+# that each is unmodified, and CC BY 4.0 asks a redistributor to indicate
+# whether changes were made. If a future refresh ever brings CRLF from
+# upstream, normalisation would rewrite those bytes and make that statement
+# untrue -- quietly, because the file would still parse. This rule means the
+# repository holds what the publisher serves, whatever the publisher serves.
+#
+# Stated plainly because the first version of this comment claimed the files
+# *were* CRLF and that the rule was fixing an active problem. It was not: the
+# measurement behind it used an empty grep pattern, which matches every line.
+# The rule survived the correction; the reason given for it did not, and this
+# project has already recorded once what an unexamined reason costs.
+third_party/** -text

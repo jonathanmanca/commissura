@@ -6,10 +6,21 @@ found eleven distinct violations that the cardinality table and the health shape
 alone did not reveal: six came from the imported DCAT-AP 3.0.0 shapes and from
 ``range.ttl``.
 
-It skips unless both `pyshacl` and the downloaded shapes are present. The shapes
-are somebody else's documents, fetched on demand into a gitignored directory,
-and a suite that failed on a clean checkout would be a suite people stop
-trusting. The README says how to fetch them.
+**The shapes are vendored under ``third_party/``, so this runs on a clean
+checkout and in CI, offline.** It used to skip unless somebody had run four
+``curl`` commands on that machine, which meant the project's headline claim was
+checked in one place and silently unchecked everywhere else — the failure mode
+this project has recorded three times, and the one that let the README's own
+download block stay broken, because a broken download produced a tidy skip
+rather than an error. ``tests/test_vendored_shapes.py`` guards the vendored
+copies: a digest per file, and a check that each is credited in ``NOTICE``,
+since both works are CC BY 4.0 and redistribution is permitted only with
+attribution.
+
+One skip remains and is honest: ``pyshacl`` is a dev extra, so somebody who
+installed without it cannot run this. That cannot happen by a change to the
+project — a test asserts ``pyshacl`` is still declared in the extra, and CI
+installs it.
 
 The shapes are not loaded as published: Release 8 puts an ``sh:or`` inside the
 ``sh:property`` list with no ``sh:path``, which is not a well-formed SHACL
@@ -38,24 +49,21 @@ rdflib = pytest.importorskip("rdflib")
 
 # Relative to this file, not to the working directory: a relative path made
 # the whole conformance check skip silently when pytest ran from elsewhere.
-SHAPES_DIR = Path(__file__).resolve().parent.parent / "reference" / "healthdcat-ap"
+# In the repository rather than downloaded, which is what removed the other and
+# larger silent skip -- see this module's docstring.
+SHAPES_DIR = Path(__file__).resolve().parent.parent / "third_party"
 SHAPE_FILES = (
-    "non-public-shapes.ttl",
-    "dcat-ap-3.0.0-shapes.ttl",
-    "range.ttl",
+    "healthdcat-ap/non-public-shapes.ttl",
+    "dcat-ap/shapes.ttl",
+    "healthdcat-ap/range.ttl",
     # DCAT-AP's own class ranges, loaded by hand because HealthDCAT-AP's
     # range.ttl declares `owl:imports` of its own IRI -- a self-loop, which is a
     # no-op. Its comment says it imports these; it does not, so 84 class range
     # constraints were never checked here. Six of them failed when they were.
-    "dcat-ap-3.0.0-range.ttl",
+    "dcat-ap/range.ttl",
 )
 SHACL = "http://www.w3.org/ns/shacl#"
 DCAT_AP_RANGE_IRI = "https://semiceu.github.io/DCAT-AP/releases/3.0.0/html/shacl/range.ttl"
-
-pytestmark = pytest.mark.skipif(
-    not all((SHAPES_DIR / name).is_file() for name in SHAPE_FILES),
-    reason=f"HealthDCAT-AP shapes not downloaded into {SHAPES_DIR}",
-)
 
 
 def _load_shapes() -> Any:  # rdflib arrives through importorskip, so Any is honest
@@ -115,38 +123,50 @@ def test_the_description_conforms_to_the_profiles_own_shapes(tmp_path: Path) -> 
     assert conforms, text
 
 
-def test_the_published_shapes_still_need_the_repair() -> None:
-    """When upstream fixes its own shapes, this fails and the patch can go.
+def test_the_vendored_shapes_still_need_the_repair() -> None:
+    """When a refresh brings shapes that load unmodified, this fails and the patch can go.
+
+    **Vendoring changed what this test can see, and saying so is the point.**
+    It used to read whatever had last been downloaded, so it would fire the
+    first time somebody re-fetched after upstream fixed the defect. It now reads
+    a pinned copy, so it reports on that copy and will pass for as long as the
+    copy sits still. Pinning a dependency converts "we find out when upstream
+    changes" into "we find out when somebody refreshes" — the refresh procedure
+    in the README is where that now happens, and the digest in
+    `third_party/PROVENANCE.json` is what makes a refresh deliberate rather than
+    accidental.
 
     Without this, the repair in :func:`_load_shapes` would quietly outlive the
     defect it works around.
     """
     sh = rdflib.Namespace(SHACL)
     unpatched = rdflib.Graph()
-    unpatched.parse(SHAPES_DIR / "non-public-shapes.ttl", format="turtle")
+    unpatched.parse(SHAPES_DIR / "healthdcat-ap/non-public-shapes.ttl", format="turtle")
 
     pathless = [
         prop
         for prop in set(unpatched.objects(None, sh.property))
         if (prop, sh.path, None) not in unpatched
     ]
-    assert pathless, "the published shapes now load unmodified; delete the repair in _load_shapes"
+    assert pathless, "the vendored shapes now load unmodified; delete the repair in _load_shapes"
 
 
 def test_the_health_range_file_still_imports_itself() -> None:
-    """When upstream fixes the self-import, loading DCAT-AP's ranges by hand can go.
+    """While it does, DCAT-AP's ranges have to be loaded by hand.
 
     ``range.ttl`` declares itself as the DCAT-AP range IRI *and* ``owl:imports``
     that same IRI, so the import resolves to the file itself and brings in
     nothing. Its own comment says it imports DCAT-AP's range constraints to keep
     reused and extended constraints apart. Until that is fixed, the only way to
     check those 84 constraints is to load the file ourselves, which
-    :data:`SHAPE_FILES` does -- and this fails once the fix lands, so the
-    workaround cannot outlive the defect.
+    :data:`SHAPE_FILES` does -- and this fails once a refresh brings a fixed
+    copy, so the workaround cannot outlive the defect it works around. Like the
+    repair test above, it now reports on the pinned copy rather than on
+    upstream; see that test for what vendoring costs.
     """
     owl = rdflib.Namespace("http://www.w3.org/2002/07/owl#")
     graph = rdflib.Graph()
-    graph.parse(SHAPES_DIR / "range.ttl", format="turtle")
+    graph.parse(SHAPES_DIR / "healthdcat-ap/range.ttl", format="turtle")
 
     self_imports = [
         subject for subject, target in graph.subject_objects(owl.imports) if subject == target

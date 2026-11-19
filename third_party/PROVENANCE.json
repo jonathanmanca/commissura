@@ -1,0 +1,59 @@
+{
+  "note": "Vendored so that the HealthDCAT-AP conformance check runs on a clean checkout and in CI, offline. Before this the shapes were downloaded on demand into a gitignored directory and the test skipped when they were absent, so the project's headline claim was verified on one machine and silently unverified everywhere else. Both works are CC BY 4.0, which permits redistribution with attribution; NOTICE at the repository root carries the attribution and this file carries the bytes. Each file is byte-for-byte what the publisher serves, and .gitattributes turns off line-ending conversion under third_party/ so they stay that way: all four are published with LF endings today, so nothing is converted, but a refresh that brought CRLF would otherwise be normalised and make `modified` below untrue. Refreshing a file means re-downloading it from `url` and updating `sha256` here deliberately, which is the point: a pinned copy cannot notice an upstream change on its own.",
+  "works": [
+    {
+      "name": "HealthDCAT-AP",
+      "version": "Release 8",
+      "attribution": "HealthDCAT-AP, European Commission, DG SANTE / HealthDataEU",
+      "licence": "CC-BY-4.0",
+      "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+      "repository": "https://code.europa.eu/healthdataeu/healthdcat-ap",
+      "ref": "main",
+      "modified": false,
+      "files": [
+        {
+          "path": "healthdcat-ap/non-public-shapes.ttl",
+          "upstream_path": "public/releases/release-8/html/shacl/HealthDCAT-AP_validator/config/rdf-validator/ehds/shapes/non-public-shapes.ttl",
+          "url": "https://code.europa.eu/api/v4/projects/healthdataeu%2Fhealthdcat-ap/repository/files/public%2Freleases%2Frelease-8%2Fhtml%2Fshacl%2FHealthDCAT-AP_validator%2Fconfig%2Frdf-validator%2Fehds%2Fshapes%2Fnon-public-shapes.ttl/raw?ref=main",
+          "sha256": "a3a437940302d3915042b986b0885c73f56f16ea2f6af66920e3cc13454adf75",
+          "bytes": 19871
+        },
+        {
+          "path": "healthdcat-ap/range.ttl",
+          "upstream_path": "public/releases/release-8/html/shacl/HealthDCAT-AP_validator/config/rdf-validator/ehds/ranges/range.ttl",
+          "url": "https://code.europa.eu/api/v4/projects/healthdataeu%2Fhealthdcat-ap/repository/files/public%2Freleases%2Frelease-8%2Fhtml%2Fshacl%2FHealthDCAT-AP_validator%2Fconfig%2Frdf-validator%2Fehds%2Franges%2Frange.ttl/raw?ref=main",
+          "sha256": "819e118441efaf0221a090ac080e92735112239bf88a2acb08b9e8361711418a",
+          "bytes": 4830
+        }
+      ],
+      "retrieved": "2026-11-19"
+    },
+    {
+      "name": "DCAT-AP",
+      "version": "3.0.0",
+      "attribution": "DCAT-AP, SEMIC, European Commission",
+      "licence": "CC-BY-4.0",
+      "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+      "repository": "https://github.com/SEMICeu/DCAT-AP",
+      "ref": "master",
+      "modified": false,
+      "files": [
+        {
+          "path": "dcat-ap/shapes.ttl",
+          "upstream_path": "shapes.ttl",
+          "url": "https://semiceu.github.io/DCAT-AP/releases/3.0.0/html/shacl/shapes.ttl",
+          "sha256": "1a033f9936fc3ba3eae1107c398ff8664f4475046bf185132b8097b45aaf7715",
+          "bytes": 20608
+        },
+        {
+          "path": "dcat-ap/range.ttl",
+          "upstream_path": "range.ttl",
+          "url": "https://semiceu.github.io/DCAT-AP/releases/3.0.0/html/shacl/range.ttl",
+          "sha256": "24d3bfd0fa17a3d0e877c9ebb91c8174124e5038538e1bf081b2cb679ad0f1b2",
+          "bytes": 12490
+        }
+      ],
+      "retrieved": "2026-11-19"
+    }
+  ]
+}
