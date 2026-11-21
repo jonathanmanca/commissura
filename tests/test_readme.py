@@ -106,3 +106,33 @@ def test_the_readme_says_that_the_table_is_pinned() -> None:
     section = text.split(COMMANDS_HEADING, 1)[1].split("\n## ", 1)[0]
 
     assert "A test pins this table" in " ".join(section.split())
+
+
+def test_the_two_captured_warning_counts_agree() -> None:
+    """The README states the same number twice, and the two had drifted apart.
+
+    `build` prints its own validation line and the `validate` section prints the
+    full report, so the warning count appears in two captured blocks. One was
+    recaptured and the other was not: the build block read `0 warning(s)` for
+    weeks while the validate block read `7` and the real run produced `7`. A
+    reader comparing the two screens would conclude the tool is inconsistent.
+
+    **What this does not do, said plainly.** It compares the README with itself,
+    not with a real run. Nothing here executes the walkthrough, so a number that
+    is stale in *both* places still passes — which is how the residual-risk
+    entries and the dropped-record paths in that block came to describe a corpus
+    nobody has. Closing that needs a test that builds the walkthrough and diffs
+    the block, which costs about fifty seconds of suite time and is a decision
+    about runtime rather than a line of code.
+    """
+    text = README.read_text(encoding="utf-8")
+
+    counts = re.findall(r"(\d+) warning\(s\)", text)
+
+    assert len(counts) >= 2, counts
+    # The one in the "not conformant" example is deliberately a different run.
+    conformant = re.findall(r"0 error\(s\), (\d+) warning\(s\)", text)
+    assert len(set(conformant)) == 1, (
+        "the README states two different warning counts for the same walkthrough run: "
+        f"{sorted(set(conformant))}"
+    )

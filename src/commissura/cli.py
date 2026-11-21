@@ -508,6 +508,17 @@ def build(
             "plus 'synthetic' only when --dataset-type says so.",
         ),
     ] = None,
+    license_terms: Annotated[
+        str | None,
+        typer.Option(
+            "--license",
+            help="What a recipient may do with the dataset, written into "
+            "dataset_description.json. Omitted when unset, and `validate` then "
+            "warns that it is - which is the intended behaviour: there is no "
+            "SPDX term for 'released under a data permit', and a dataset that "
+            "says nothing is better than one that says CC0 over personal data.",
+        ),
+    ] = None,
     identifier: Annotated[
         str | None,
         typer.Option(
@@ -671,6 +682,7 @@ def build(
         dataset_type=dataset_type,
         keywords=tuple(keyword) if keyword else (),
         identifier=identifier or "",
+        license=license_terms or "",
     )
     # Everything is assembled in a staging directory beside the destination and
     # moved into place at the end. A build used to write straight into `out`,

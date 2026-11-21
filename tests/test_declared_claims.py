@@ -67,6 +67,7 @@ from commissura.deident.keys import KEY_BYTES, SecretKey
 from commissura.generate.cohort import CohortSpec
 from commissura.generate.writer import write_corpus
 from commissura.read.corpus import RawCorpus, read_corpus
+from commissura.validate import validate_dataset
 
 KEY = SecretKey(bytes(range(32)))
 SPEC = BuildSpec(dataset_name="d", description="d", hdab="H", publisher="P")
@@ -364,15 +365,18 @@ def test_the_keywords_cannot_contradict_the_declared_dataset_type(
     assert ("synthetic" in keywords) is expected
 
 
-def test_the_holder_can_replace_the_keywords_from_the_command_line(
+def test_every_catalogue_field_the_holder_supplies_reaches_the_documents(
     tmp_path: Path, corpus_root: Path
 ) -> None:
-    """Driven through the CLI, because that is where this defect lived.
+    """Driven through the CLI, because that is where this defect lives.
 
     Three mandatory fields once existed on `BuildSpec` with no flag, so the
     library could emit a conformant description while the command could not
-    (2026-11-07). The keywords were the same shape: a field with a default and
-    no way to reach it.
+    (2026-11-07). The keywords were the same shape, and `--license` nearly
+    joined them: a sabotage that made the CLI ignore it passed every test here,
+    because the licence was only ever checked through `BuildSpec`. **All three
+    holder-supplied catalogue fields go through the command in one place now**,
+    so the next one added is a line in this list rather than a gap.
     """
     from typer.testing import CliRunner
 
@@ -403,6 +407,8 @@ def test_the_holder_can_replace_the_keywords_from_the_command_line(
             "oncology",
             "--identifier",
             "urn:irccs-marebianco:lab-2029-01",
+            "--license",
+            "CC-BY-4.0",
         ],
     )
 
@@ -410,6 +416,7 @@ def test_the_holder_can_replace_the_keywords_from_the_command_line(
     node = _description(out)
     assert node["dcat:keyword"] == ["oncology"]
     assert node["dct:identifier"] == "urn:irccs-marebianco:lab-2029-01"
+    assert _bids(out)["License"] == "CC-BY-4.0"
 
 
 def test_every_declared_column_datatype_is_the_tightest_true_one(
@@ -456,3 +463,147 @@ def test_every_declared_column_datatype_is_the_tightest_true_one(
             f"{name} is declared {declared[name]!r} and holds "
             f"{sorted(meaningful)[:4]}; the tightest true type is {expected!r}"
         )
+
+
+# --------------------------------------------------------------------------
+# The two BIDS documents, which finish the sweep
+# --------------------------------------------------------------------------
+
+
+def _bids(out: Path) -> dict[str, object]:
+    payload = json.loads((out / layout.DATASET_DESCRIPTION).read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _sidecar(out: Path) -> dict[str, object]:
+    payload = json.loads((out / layout.PARTICIPANTS_JSON).read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
+
+
+def test_no_dataset_claims_a_licence_nobody_granted(tmp_path: Path, corpus: RawCorpus) -> None:
+    """`CC0-1.0` was hardcoded, and it is a dedication to the public domain.
+
+    In the same dataset whose `dct:accessRights` says `NON_PUBLIC`, over
+    pseudonymised personal data released under a data permit, in the one file
+    every BIDS tool reads. Two documents contradicting each other about whether
+    a recipient may redistribute, and the more permissive one was the one a
+    tool would find first.
+
+    Omitted rather than replaced with a plausible identifier: there is no SPDX
+    term for "released under an EHDS data permit", and the terms are a fact
+    about the arrangement that only the holder knows.
+    """
+    out = tmp_path / "ds"
+    build_dataset(corpus, KEY, SPEC, out)
+
+    description = _bids(out)
+
+    assert "License" not in description
+    assert "CC0" not in json.dumps(description)
+
+
+def test_a_holder_who_has_a_licence_can_declare_it(tmp_path: Path, corpus: RawCorpus) -> None:
+    """The counterpart, so the field is absent by decision rather than by removal."""
+    spec = BuildSpec(
+        dataset_name="d", description="d", hdab="H", publisher="P", license="CC-BY-4.0"
+    )
+    out = tmp_path / "ds"
+    build_dataset(corpus, KEY, spec, out)
+
+    assert _bids(out)["License"] == "CC-BY-4.0"
+
+
+def test_an_unset_licence_is_reported_rather_than_filled_in(
+    tmp_path: Path, corpus: RawCorpus
+) -> None:
+    """`validate` warning about it is the intended behaviour, not a regression.
+
+    `License` is RECOMMENDED by BIDS and listed in
+    `layout.RECOMMENDED_DESCRIPTION_KEYS`, so omitting it costs one warning per
+    build. That warning is the feature: it asks the holder to decide, where the
+    hardcoded value answered for them and answered wrongly.
+    """
+    out = tmp_path / "ds"
+    _build(out, corpus, None)
+
+    report = validate_dataset(out)
+
+    assert not report.errors
+    assert any("License" in finding.message for finding in report.findings)
+
+
+@pytest.mark.parametrize("band", [None, WIDTH])
+def test_the_sidecar_describes_what_the_age_column_actually_holds(
+    tmp_path: Path, corpus: RawCorpus, band: int | None
+) -> None:
+    """It said "Age in whole years" over a column holding `80-89`.
+
+    `participants.json` is how a BIDS consumer learns to parse the table beside
+    it, so a static description is the same defect as the CSVW `integer` in the
+    other document: conformant, well-formed, and wrong about the data.
+    """
+    out = tmp_path / f"ds-{band}"
+    build_dataset(corpus, KEY, SPEC, out, age_band=band)
+
+    age = _sidecar(out)["age"]
+    assert isinstance(age, dict)
+    description = str(age["Description"])
+    values = {value for _, value in _participants(out)}
+
+    if band is None:
+        assert "whole years" in description
+        assert any(value.isdigit() for value in values)
+    else:
+        assert f"bands of {band} years" in description
+        assert all(
+            layout.AGE_BAND_SEPARATOR in value or value == layout.AGE_ABOVE_CEILING
+            for value in values
+        )
+
+
+def test_a_banded_dataset_provokes_no_complaint_about_its_own_ages(
+    tmp_path: Path, corpus: RawCorpus
+) -> None:
+    """The tool complained about output it had just written, once per participant.
+
+    `DI004` accepted an integer or the ceiling marker and warned on anything
+    else, so every banded dataset carried one warning per row — thirteen on a
+    twelve-subject corpus. Nothing caught it, because the test asserting a
+    banded dataset *conforms* was correct and blind: `is_conformant` means no
+    errors, and these were warnings.
+    """
+    out = tmp_path / "ds"
+    _build(out, corpus, WIDTH)
+
+    report = validate_dataset(out)
+
+    assert not [f for f in report.findings if f.rule_id == "DI004"], [
+        f.message for f in report.findings if f.rule_id == "DI004"
+    ][:3]
+
+
+def test_the_age_rule_still_refuses_something_it_cannot_read(
+    tmp_path: Path, corpus: RawCorpus
+) -> None:
+    """The guard on the guard: accepting everything would satisfy the test above.
+
+    A rule widened until it complains about nothing is worse than the one it
+    replaced. The readable forms are `layout.age_bounds`'s, so the rule now
+    disagrees with the schema only if the schema moves — and it still reports a
+    cell that states no age at all.
+    """
+    out = tmp_path / "ds"
+    _build(out, corpus, WIDTH)
+
+    table = out / layout.PARTICIPANTS_TSV
+    lines = table.read_text(encoding="utf-8").splitlines()
+    cells = lines[1].split("\t")
+    cells[1] = "middle-aged"
+    lines[1] = "\t".join(cells)
+    table.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+
+    report = validate_dataset(out)
+
+    assert [f for f in report.findings if f.rule_id == "DI004"]

@@ -76,6 +76,16 @@ class BuildSpec:
     imaging study at all was catalogued as imaging.
     """
 
+    license: str = ""
+    """What a recipient may do with the dataset, or empty to say nothing.
+
+    Empty is the default and the field is then omitted from
+    ``dataset_description.json`` entirely. `CC0-1.0` was hardcoded here, which
+    declared a public-domain dedication over a permit-controlled release of
+    pseudonymised personal data and contradicted the access right the same
+    dataset declares.
+    """
+
     identifier: str = ""
     """``dct:identifier``, or empty to derive it from the output directory name.
 
@@ -529,7 +539,7 @@ def build_dataset(
         [layout.PARTICIPANT_ID_COLUMN, "age", "sex"],
         participant_rows,
     )
-    _write_participants_sidecar(out)
+    _write_participants_sidecar(out, age_band)
     _write_bids_description(out, spec)
     return summary
 
@@ -714,15 +724,39 @@ def _write_subject_imaging(
         summary.imaging_files += 1
 
 
-def _write_participants_sidecar(out: Path) -> None:
-    """Describe the participants table's columns, as BIDS recommends."""
+def _write_participants_sidecar(out: Path, age_band: int | None) -> None:
+    """Describe the participants table's columns, as BIDS recommends.
+
+    The age description is derived, because a static one was false. It said
+    "Age in whole years" with ``"Units": "years"`` whatever the build did, so a
+    banded dataset shipped a sidecar promising whole years over a column holding
+    `80-89` -- and `participants.json` is what a BIDS consumer reads to learn
+    how to parse the table beside it. Same class as the CSVW datatype that
+    declared `integer` over `0.30`, in the other document.
+
+    Args:
+        out: Dataset root.
+        age_band: The width ages were generalised into, or None for exact ages.
+    """
+    if age_band is None:
+        age = {
+            "Description": "Age in whole years at the subject's earliest recorded "
+            f"event, truncated at {layout.AGE_CEILING}.",
+            "Units": "years",
+        }
+    else:
+        age = {
+            "Description": f"Age generalised into bands of {age_band} years at the "
+            "subject's earliest recorded event, written as two inclusive bounds "
+            f"joined by {layout.AGE_BAND_SEPARATOR!r} and truncated at "
+            f"{layout.AGE_CEILING}. Not a number: parse it as two.",
+            "Units": "years",
+        }
     _write_json(
         out / layout.PARTICIPANTS_JSON,
         {
             "age": {
-                "Description": "Age in whole years at the subject's earliest recorded "
-                f"event, truncated at {layout.AGE_CEILING}.",
-                "Units": "years",
+                **age,
                 "Levels": {layout.AGE_ABOVE_CEILING: f"Older than {layout.AGE_CEILING} years."},
             },
             "sex": {
@@ -743,7 +777,23 @@ def _write_bids_description(out: Path, spec: BuildSpec) -> None:
             "Name": spec.dataset_name,
             "BIDSVersion": layout.BIDS_VERSION,
             "DatasetType": "raw",
-            "License": "CC0-1.0",
+            # Present only when the holder says so, and **`CC0-1.0` used to be
+            # hardcoded here**. CC0 is a dedication to the public domain: it
+            # tells anybody who reads it that they may do anything with the
+            # data, in the same dataset whose `dct:accessRights` says
+            # `NON_PUBLIC` and whose whole premise is a permit-controlled
+            # release of pseudonymised personal data. Two documents in one
+            # dataset contradicting each other about redistribution, in the
+            # file every BIDS tool reads.
+            #
+            # Omitted rather than replaced with a plausible identifier, because
+            # there is no SPDX term for "released under an EHDS data permit"
+            # and the terms are a fact about the arrangement that only the
+            # holder knows -- the same reasoning as the access tier. Silence is
+            # not a false statement, `License` is RECOMMENDED and not required
+            # by BIDS, and `validate` warns that it is unset, which is a
+            # warning worth having: it asks the holder to decide.
+            **({"License": spec.license} if spec.license else {}),
             "Authors": [spec.publisher] if spec.publisher else [],
             "GeneratedBy": [
                 {

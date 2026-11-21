@@ -151,26 +151,45 @@ def no_absolute_dates_in_reports(context: DatasetContext) -> Iterator[Finding]:
 
 @rule("DI004", "Ages above the ceiling are truncated")
 def ages_are_truncated(context: DatasetContext) -> Iterator[Finding]:
-    """Report participant ages above the ceiling written as a number.
+    """Report participant ages above the ceiling, however the column states them.
 
     In a small cohort an age of 97 is close to a unique identifier, and the
     information lost by truncating is negligible for most research questions.
+
+    **What counts as a readable age comes from the layout and not from this
+    rule**, which is a correction. The rule accepted an integer or the ceiling
+    marker and warned on anything else, so from the day ``build --age-band``
+    existed it emitted **one warning per participant** on every banded dataset
+    -- the tool complaining about output it had just written, thirteen times on
+    a twelve-subject corpus. Nothing caught it: the test asserting a banded
+    dataset conforms was right and blind, because `is_conformant` means no
+    *errors* and these were warnings.
+
+    So the readable forms are :func:`commissura.layout.age_bounds`'s, which is
+    the one place that defines what the column may hold. A rule that
+    re-implements a schema it does not own will disagree with it the first time
+    the schema moves.
+
+    The ceiling check then applies to the upper bound, which is what the dataset
+    actually states about the person: a band is clamped to the ceiling when it
+    is written, so a band above it is a malformed dataset exactly as an integer
+    above it is.
     """
     table = context.participants
     for value in table.column("age"):
         if value in {layout.AGE_ABOVE_CEILING, layout.NOT_APPLICABLE, ""}:
             continue
-        try:
-            age = int(value)
-        except ValueError:
+        bounds = layout.age_bounds(value)
+        if bounds is None:
             yield Finding(
                 rule_id="DI004",
                 severity=Severity.WARNING,
-                message=f"age {value!r} in {table.relative} is neither an integer nor "
-                f"{layout.AGE_ABOVE_CEILING!r}",
+                message=f"age {value!r} in {table.relative} is neither an age, a band "
+                f"of two bounds, nor {layout.AGE_ABOVE_CEILING!r}",
                 path=table.relative,
             )
             continue
+        age = max(bounds)
         if age > layout.AGE_CEILING:
             yield Finding(
                 rule_id="DI004",

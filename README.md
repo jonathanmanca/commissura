@@ -176,25 +176,25 @@ Wrote 211 files to ./dataset
   participant ages       exact, truncated at 89
   linkage issues         29
   records dropped        3  (no readable date)
-    reports/5806125_rad_2.txt  (undated_record)
-    reports/0976285_dim_1.txt  (undated_record)
-    reports/9680416_dim_3.txt  (undated_record)
-    ... and 10 more
+    reports/5806125_rad_1.txt  (undated_record)
+    reports/2935320_dim_5.txt  (undated_record)
+    reports/5247115_dim_2.txt  (undated_record)
+    lab/0976285_LAB55466956.hl7  (conflicting_identity: this record shares an
+      identifier with a record naming a different person; both identities are
+      kept so that both names are redacted)
+    ... and 19 more linkage issue(s)
   minimum k              1  (21 combination(s) below 5)
   profile                HealthDCAT-AP 8, non-public tier
 
   Residual risk the method cannot reach:
-    1 unrecognised all-capitals token(s) remain, of 4 characters. Nothing
-    declared them, so this is the layer that catches what was not
-    anticipated. Not quoted here: this report travels with the dataset.
-    1 unrecognised all-capitals token(s) remain, of 6 characters. Nothing
+    1 unrecognised all-capitals token(s) remain, of 5 characters. Nothing
     declared them, so this is the layer that catches what was not
     anticipated. Not quoted here: this report travels with the dataset.
 
-  Validation: conforms - 0 error(s), 0 warning(s)
+  Validation: conforms - 0 error(s), 8 warning(s)
 ```
 
-**Thirteen of the forty-eight reports are not in the dataset**, and that is the
+**Three of the forty-eight reports are not in the dataset**, and that is the
 walkthrough earning its keep rather than a disappointment. At this defect rate
 the generator leaves some report dates as an unfilled template placeholder —
 `Data del referto: __/__/____` — and a session is a dated encounter, so those
@@ -202,12 +202,20 @@ documents link to a person and then have nowhere to go. They used to vanish
 without a word. Now the count is on the second screen you look at and the paths
 are listed under it.
 
-`linkage issues 0` is the line to read first: all 190 records were attached to
-the right person, including the ones where the imaging export wrote the record
-number without its zero padding. The four `--hdab`, `--publisher`,
-`--contact-point` and `--access-url` values have no defaults, because they are
-facts about your release arrangement and the tool will not invent them. Leave
-them out and it still builds, and tells you what is missing.
+**`linkage issues 29` is the line to read next, and twenty-nine is not a
+failure.** A reason either means a record could not be attached to anybody or
+it means the record was attached and something about the attribution is worth a
+second look — here they are all the second kind, injected on purpose by the
+`lab.conflicting_identity` and `reports.wrong_patient_name` defects. The
+manifest counts the two separately, because adding them together would be a
+false statement about what the dataset contains. See
+[the manifest](#the-de-identification-manifest) for the split.
+
+The four `--hdab`, `--publisher`, `--contact-point` and `--access-url` values
+have no defaults, because they are facts about your release arrangement and the
+tool will not invent them. Leave them out and it still builds, and tells you
+what is missing. The one warning left at the end is `--license`, for the same
+reason: see [conformance](#conformance-is-checked-against-the-profiles-own-shapes).
 
 ### 4. Check it
 
@@ -222,8 +230,10 @@ WARNING DI009: derivatives/imaging-metadata/sub-744ee679b207_...json
         not inspect pixel data, so they are still there. Remove or redact
         the pixels before release.
 ... six more of the same ...
+WARNING DS005: dataset_description.json does not record 'License'
+        Recommended so the dataset can state its own provenance.
 
-CONFORMANT: 0 error(s), 7 warning(s), 0 notice(s) from 40 rules
+CONFORMANT: 0 error(s), 8 warning(s), 0 notice(s) from 40 rules
 ```
 
 `build` already ran this and would have failed if it did not conform. Running it

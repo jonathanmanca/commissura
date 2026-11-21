@@ -18,6 +18,7 @@ from commissura.deident.pseudonymise import RULE_VERSION
 from commissura.generate.cohort import CohortSpec
 from commissura.generate.writer import write_corpus
 from commissura.read.corpus import read_corpus
+from commissura.validate import validate_dataset
 
 runner = CliRunner()
 
@@ -545,12 +546,24 @@ def test_build_refuses_a_destination_that_is_not_its_own_output(tmp_path: Path) 
 
 
 def test_build_writes_the_risk_report_so_validate_stops_warning(tmp_path: Path) -> None:
-    """The warning validate emitted on every build until now."""
+    """The warning validate emitted on every build until now.
+
+    **Asserted on the finding and not on a total.** This used to require zero
+    warnings, which was a proxy for "the risk report is there" and stopped being
+    true the day `dataset_description.json` stopped claiming `CC0-1.0`: the
+    licence is now unset unless the holder gives one, and `validate` says so.
+    A count is the shape that breaks for a reason unrelated to what the test
+    means, so the two expectations are named.
+    """
     raw, key = _raw_corpus(tmp_path), _key(tmp_path)
     result = runner.invoke(app, _build_args(tmp_path, raw, key, "--json"))
 
     assert result.exit_code == 0, result.stdout
-    assert json.loads(result.stdout)["validation"]["counts"]["warning"] == 0
+    report = validate_dataset(tmp_path / "dataset")
+    assert not [f for f in report.findings if "risk" in f.message.lower()]
+    assert {f.rule_id for f in report.findings} <= {"DS005"}, [
+        f.format_line() for f in report.findings
+    ]
     assert (tmp_path / "dataset" / layout.DEIDENT_DIR / layout.RISK_REPORT_JSON).is_file()
 
 
