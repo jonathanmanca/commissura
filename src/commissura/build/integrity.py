@@ -36,10 +36,17 @@ from commissura.deident.keys import SecretKey
 from commissura.deident.pseudonymise import authenticate
 
 DIGEST_ALGORITHM: Final = "sha256"
-"""Named in the manifest so the field is self-describing.
+"""Named in the manifest so the field is self-describing, and used to hash.
 
 A bare hex string says nothing about how it was produced, and the next
 generation of this file may not use SHA-256.
+
+**The constant causes the behaviour rather than describing it**, which is the
+point of passing it to :func:`hashlib.new` below instead of calling
+``hashlib.sha256`` beside it. Two places naming the same algorithm is two places
+for one to move: a manifest that declared ``sha256`` over digests produced some
+other way would send anybody verifying by hand to the wrong conclusion, and the
+dataset would read as altered when nothing had touched it.
 """
 
 HMAC_FIELD: Final = "manifest_hmac"
@@ -67,7 +74,7 @@ def digest_file(path: Path) -> str:
     Returns:
         The hex digest.
     """
-    digest = hashlib.sha256()
+    digest = hashlib.new(DIGEST_ALGORITHM)
     with path.open("rb") as handle:
         while chunk := handle.read(_CHUNK):
             digest.update(chunk)

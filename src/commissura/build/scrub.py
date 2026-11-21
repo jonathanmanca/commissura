@@ -363,6 +363,7 @@ def scrub_text(
     pseudonymiser: Pseudonymiser,
     subject_label: str,
     baseline: date | None,
+    age_band: int | None = None,
 ) -> tuple[str, ScrubReport]:
     """Remove known identifiers from a document and turn its dates into offsets.
 
@@ -379,6 +380,10 @@ def scrub_text(
         subject_label: The subject's pseudonymous label.
         baseline: The subject's anchor date. Without it, dates are removed
             rather than offset, because an offset needs something to count from.
+        age_band: The width participant ages were generalised into, so that an
+            age written in prose gets the same treatment as the one in
+            ``participants.tsv``. ``None`` leaves ages below the ceiling exact,
+            which is what the dataset's own column then says too.
 
     Returns:
         The scrubbed text and an account of what was done to it.
@@ -454,10 +459,14 @@ def scrub_text(
             Replacement("date", "<date-shaped>", "[day_offset:N]", date_count)
         )
 
-    scrubbed, age_count = _truncate_ages(scrubbed)
-    if age_count:
+    scrubbed, truncated, banded = _generalise_ages(scrubbed, age_band)
+    if truncated:
         report.replacements.append(
-            Replacement("age", "<age above ceiling>", layout.AGE_ABOVE_CEILING, age_count)
+            Replacement("age", "<age above ceiling>", layout.AGE_ABOVE_CEILING, truncated)
+        )
+    if banded:
+        report.replacements.append(
+            Replacement("age", "<age in years>", f"<band of {age_band} years>", banded)
         )
 
     scrubbed = _collapse_runs(scrubbed)
@@ -532,24 +541,51 @@ def _parse_italian_date(value: str) -> date | None:
     return None
 
 
-def _truncate_ages(text: str) -> tuple[str, int]:
-    """Replace ages above the ceiling with the open-ended band.
+def _generalise_ages(text: str, band: int | None) -> tuple[str, int, int]:
+    """Coarsen the ages written in prose, to whatever the dataset's own column says.
 
-    In a small cohort an age of 97 is close to a unique identifier. Ages at or
-    below the ceiling are left alone: they are clinically useful and not
-    identifying on their own.
+    Two rewrites, and the second exists because of a leak this project shipped.
+    An age above the ceiling becomes the open-ended marker, always: in a small
+    cohort an age of 97 is close to a unique identifier.
+
+    **An age at or below the ceiling used to be left alone**, on the reasoning of
+    2026-11-10 that it is clinically useful and not identifying on its own. That
+    reasoning was sound while nothing claimed to generalise age. From the day
+    ``build --age-band`` existed it was false, and measurably so: on a
+    twelve-subject corpus banded to ten years, **eleven participants carried
+    their exact age in their own report prose** while ``participants.tsv`` said
+    ``50-59`` and the manifest declared the band. The dataset reversed a control
+    it documented, and `risk` reported a k improvement the reports handed
+    straight back.
+
+    So when a band is in force the prose gets the same band as the column. The
+    form to remember: **a disclosure control applied to one representation of a
+    value is not applied at all, and the manifest will say it was.**
+
+    Args:
+        text: The document.
+        band: Band width in years, or None for exact ages below the ceiling.
+
+    Returns:
+        The text, how many ages were truncated at the ceiling, and how many
+        were banded. Counted apart because they are different statements: the
+        first says an age was above 89, the second says which band it is in.
     """
-    count = 0
+    truncated = 0
+    banded = 0
 
     def substitute(match: re.Match[str]) -> str:
-        nonlocal count
+        nonlocal truncated, banded
         age = int(match.group(1))
-        if age <= layout.AGE_CEILING:
+        if age > layout.AGE_CEILING:
+            truncated += 1
+            return f"{layout.AGE_ABOVE_CEILING} anni"
+        if band is None:
             return match.group(0)
-        count += 1
-        return f"{layout.AGE_ABOVE_CEILING} anni"
+        banded += 1
+        return f"{layout.age_band(age, band)} anni"
 
-    return _AGE_PATTERN.sub(substitute, text), count
+    return _AGE_PATTERN.sub(substitute, text), truncated, banded
 
 
 _NAME_LABELS: Final[tuple[str, ...]] = (

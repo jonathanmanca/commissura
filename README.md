@@ -904,6 +904,16 @@ tool is not in a position to make for you. Omit the option for exact ages.
 Bands are anchored at zero, so a width of ten gives decades. Both bounds are
 inclusive.
 
+**The band reaches the prose too, and it did not at first.** A report header
+reads `Eta: 50-59 anni` when a band is in force and `Eta: 56 anni` when none is.
+That was a real leak for two days: `participants.tsv` said `50-59` while the
+same subject's own reports said `56`, so **eleven of twelve banded participants
+carried their exact age in a dataset whose manifest declared the band** — and
+the k improvement above was handed straight back by the documents. Found by a
+deliberate pass over every statement the manifest makes. A disclosure control
+applied to one representation of a value is not applied at all, and the manifest
+will say it was.
+
 **The age ceiling is a separate mechanism and stays on.** Ages above 89 are
 `90+` in every dataset this tool writes, banded or not, and a band's upper
 bound is clamped to 89 so the two cannot interfere — a width of seven would

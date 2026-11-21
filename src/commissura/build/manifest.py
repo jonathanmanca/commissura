@@ -35,7 +35,7 @@ from commissura.build.integrity import (
     digest_tree,
     tag_manifest,
 )
-from commissura.build.observe import ModalityLedger, observe_corpus
+from commissura.build.observe import AGE_FIELD, ModalityLedger, observe_corpus
 from commissura.build.scrub import CATEGORY_DISPOSITION, ScrubReport
 from commissura.build.writer import BuildSpec, BuildSummary, tool_versions, utc_now
 from commissura.deident.keys import SecretKey
@@ -431,7 +431,10 @@ def _body_payload(reports: Sequence[ScrubReport]) -> list[dict[str, object]]:
 
 
 def _ledger_payload(
-    ledger: ModalityLedger, *, body: list[dict[str, object]] | None = None
+    ledger: ModalityLedger,
+    *,
+    body: list[dict[str, object]] | None = None,
+    age_band: int | None = None,
 ) -> dict[str, object]:
     """Render one modality's observed field ledger for the manifest.
 
@@ -439,6 +442,12 @@ def _ledger_payload(
         ledger: What was observed in that modality's input.
         body: For the one modality with prose, what the scrubber substituted
             inside it. Omitted for the others, which have no body.
+        age_band: The width ages were generalised into, which rewrites exactly
+            one row. `observe_corpus` describes the *input* and cannot know
+            what the build did to it, so the adjustment belongs here, where
+            both facts are in hand. The alternative -- a static note claiming
+            one disposition for a value whose disposition depends on a flag --
+            is the defect this whole pass was looking for.
 
     Returns:
         The manifest section, with the counts first so that a reader sees the
@@ -469,7 +478,9 @@ def _ledger_payload(
             {
                 "field": item.key,
                 **({"name": item.name} if item.name else {}),
-                "disposition": item.disposition,
+                "disposition": "replaced"
+                if (item.key == AGE_FIELD and age_band is not None)
+                else item.disposition,
                 "files_present": item.files_present,
                 **({"note": item.note} if item.note else {}),
             }
@@ -819,7 +830,11 @@ def write_manifest(
             "counting what the scrubber substituted inside it."
         ),
         "modalities": [
-            _ledger_payload(ledger, body=body if ledger.modality == "reports" else None)
+            _ledger_payload(
+                ledger,
+                body=body if ledger.modality == "reports" else None,
+                age_band=summary.age_band,
+            )
             for ledger in observe_corpus(corpus.root)
         ],
         "residual_risk": {

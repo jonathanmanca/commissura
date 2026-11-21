@@ -44,7 +44,7 @@ from datetime import date, timedelta
 from hashlib import sha256
 from typing import Final
 
-from commissura.deident.keys import SecretKey
+from commissura.deident.keys import KEY_BYTES, SecretKey
 from commissura.read.identity import IdentityKey, KeyKind
 
 SUBJECT_ID_HEX_CHARS: Final = 12
@@ -220,7 +220,7 @@ def declare(
         # for -- the second time it has renamed a field here, after `key` became
         # `field` in the per-input table on 2026-11-10.
         "salt_custody": (
-            "A 32-byte key, held by the data holder, kept outside the dataset and "
+            f"A {KEY_BYTES}-byte key, held by the data holder, kept outside the dataset and "
             "named here only by the fingerprint above. D7.2 section 4.4 (p. 40) "
             "requires the salt be kept separate and secure."
         ),

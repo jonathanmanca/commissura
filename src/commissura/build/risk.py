@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
+from typing import Final
 
 from commissura import layout
 from commissura.validate.context import DatasetContext
@@ -64,6 +65,30 @@ Five is the conventional threshold in statistical disclosure control and the one
 this project's brief names. It is a convention, not a law: a cohort of forty
 cannot reach it on age and sex together, which is a property of small cohorts
 rather than a mistake in the dataset.
+"""
+
+RISK_SCHEMA_VERSION: Final = "1.2.0"
+"""Version of the risk report format, which is this document and not the layout.
+
+**It used to emit `layout.SCHEMA_VERSION`, which describes the dataset layout.**
+Two documents sharing one number can never move independently: a change to the
+layout would bump this report for no reason, and a change to this report could
+not bump it at all without making a false statement about the layout. So the
+number stood at 1.0.0 across two changes to this document's own structure, and
+a consumer had a `schema_version` field structurally incapable of telling them
+anything about the file it sat in.
+
+The history it should have recorded, numbered now that there is somewhere to
+put it:
+
+* **1.1.0**, 2026-11-13 (`04c0ab5`): `laboratory_values` added, so the report
+  covers the rarity of measured values and not only the participant columns.
+* **1.2.0**, 2026-11-17 (`e45e704`): `quasi_identifier_channels` added, naming
+  every route out of the dataset including the ones k cannot score.
+
+Both additive. The cost of having borrowed the number is that reports written
+before today say 1.0.0 and may carry any of the three shapes; that is not
+fixable retrospectively and is the reason this entry exists.
 """
 
 
@@ -321,7 +346,7 @@ def assess(root: Path, *, threshold: int = K_THRESHOLD) -> dict[str, object]:
 
     if not columns:
         return {
-            "schema_version": layout.SCHEMA_VERSION,
+            "schema_version": RISK_SCHEMA_VERSION,
             "quasi_identifiers": [],
             "quasi_identifier_channels": channels(root, scored=()),
             "threshold": threshold,
@@ -347,7 +372,7 @@ def assess(root: Path, *, threshold: int = K_THRESHOLD) -> dict[str, object]:
     ]
 
     return {
-        "schema_version": layout.SCHEMA_VERSION,
+        "schema_version": RISK_SCHEMA_VERSION,
         "quasi_identifiers": columns,
         "quasi_identifier_channels": channels(root, scored=tuple(columns)),
         "threshold": threshold,

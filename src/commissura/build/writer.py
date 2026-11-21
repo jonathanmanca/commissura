@@ -475,7 +475,16 @@ def build_dataset(
 
         _write_subject_labs(subject, out, directory, session_of, baseline, pseudonymiser, summary)
         _write_subject_reports(
-            subject, out, directory, session_of, baseline, pseudonymiser, label, known, summary
+            subject,
+            out,
+            directory,
+            session_of,
+            baseline,
+            pseudonymiser,
+            label,
+            known,
+            summary,
+            age_band,
         )
         _write_subject_imaging(subject, out, directory, baseline, pseudonymiser, summary)
 
@@ -605,6 +614,7 @@ def _write_subject_reports(
     label: str,
     known: KnownIdentifiers,
     summary: BuildSummary,
+    age_band: int | None,
 ) -> None:
     """Scrub and write one subject's reports, with a sidecar each."""
     counters: dict[str, int] = {}
@@ -625,6 +635,11 @@ def _write_subject_reports(
             pseudonymiser=pseudonymiser,
             subject_label=label,
             baseline=baseline,
+            # The same width the participant row got. A band applied to one
+            # representation of a value and not the other is not applied at
+            # all: eleven of twelve banded participants once carried their
+            # exact age in their own prose while the table said `50-59`.
+            age_band=age_band,
         )
         summary.scrub_reports.append(scrub_report)
         summary.report_pairs.append(

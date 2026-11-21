@@ -30,11 +30,29 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-SCHEMA_VERSION: Final = "1.0.0"
+SCHEMA_VERSION: Final = "1.1.0"
 """Version of the layout this module describes.
 
 Written into ``dataset_description.json`` so a reader can tell which revision of
-the schema a dataset was built against.
+the schema a dataset was built against, and into the manifest as
+``tool_versions.layout_schema``.
+
+**1.1.0, 2026-11-21.** It had read 1.0.0 since the initial commit while three
+things a reader of a dataset can observe changed under it, which is the defect
+this project recorded on 2026-11-10 as "the schema version is part of the schema
+change, not a chore afterwards" and then committed anyway. All three are
+additive, so nothing valid at 1.0.0 became invalid:
+
+* ``healthdcat-ap.jsonld`` is a file the dataset did not have at 1.0.0.
+* the ``age`` column can hold a band such as ``40-49``, where 1.0.0 offered only
+  an integer, ``90+`` or ``n/a``. A consumer already had to cope with
+  non-integers; this is a third form, and ``generalisation.age`` in the manifest
+  says which was used.
+* a report's ``Eta:`` line carries the same band when one is in force.
+
+The honest limit: datasets built before today say 1.0.0 and may already carry
+the first two, so 1.0.0 in the wild is ambiguous. A version only separates what
+comes after it from what came before.
 """
 
 BIDS_VERSION: Final = "1.9.0"

@@ -71,6 +71,15 @@ class Carried:
     note: str
 
 
+AGE_FIELD: Final = "Eta"
+"""The report header carrying an age, and the one field a band reaches.
+
+Named rather than written twice: :mod:`commissura.build.manifest` has to find
+this row to report what the build actually did to it, and a magic string in two
+modules is how the two come to disagree.
+"""
+
+
 CARRIED_FIELDS: Final[dict[str, dict[str, Carried]]] = {
     "lab": {
         "PID-7": Carried(
@@ -139,10 +148,11 @@ CARRIED_FIELDS: Final[dict[str, dict[str, Carried]]] = {
         "Data del referto": Carried(
             "replaced", "report date, as day_offset from the subject's baseline"
         ),
-        "Eta": Carried(
+        AGE_FIELD: Carried(
             "kept",
-            "age in years, clinically useful and not identifying on its own; the "
-            "date of birth it was computed from is removed",
+            "age in years; the date of birth it was computed from is removed. This "
+            "row is the only one the build rewrites: `generalisation.age` says "
+            "whether a band was applied, and when one was this reads `replaced`",
         ),
     },
     # The notes here do not repeat the tag's keyword, which ``name`` already
