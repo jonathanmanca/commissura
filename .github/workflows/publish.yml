@@ -1,0 +1,162 @@
+name: Publish
+
+# INERT UNTIL SOMEBODY DELIBERATELY RUNS IT, AND THAT IS THE POINT.
+#
+# `workflow_dispatch` is the only trigger. There is deliberately no `push:
+# tags:` and no `release:` trigger, because publishing to an index is
+# irreversible — PyPI refuses to re-upload a filename it has already seen, and
+# a yanked release is still downloadable by exact version. A workflow that
+# fires on a tag turns `git push --tags` into a publication, which is a lot of
+# consequence for a command people run without thinking.
+#
+# It also cannot work yet, and will fail honestly rather than silently if run
+# before it can. Trusted publishing needs the index to be told which repository
+# and which workflow file may publish this name:
+#
+#   TestPyPI: https://test.pypi.org/manage/account/publishing/
+#   PyPI:     https://pypi.org/manage/account/publishing/
+#
+# with owner `jonathanmanca`, repository `commissura`, workflow `publish.yml`
+# and the environment name below. No API token is stored anywhere in this
+# repository, and none should be: trusted publishing exchanges a short-lived
+# OIDC identity for an upload token at the moment of upload.
+#
+# The declared environments are the second guard. Configure each in the
+# repository settings with a required reviewer, and every run then waits for a
+# human before it uploads anything.
+#
+# Rehearse on TestPyPI first, which is why it is the default and the only
+# choice a careless click produces.
+
+on:
+  workflow_dispatch:
+    inputs:
+      index:
+        description: Which index to upload to. Rehearse on TestPyPI first.
+        required: true
+        default: testpypi
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+jobs:
+  verify:
+    # The same gate as every push, run again here, because a release is the one
+    # artefact this project cannot take back. It costs three minutes once per
+    # release and it is the cheapest part of the whole operation.
+    name: Everything still passes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and Python 3.11
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Create the environment
+        run: uv venv
+
+      - name: Install the project and its dev extras, from the lock
+        run: uv sync --locked --extra dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Confirm the conformance check can run
+        run: uv run python -c "import pyshacl"
+
+      - name: Test
+        run: uv run pytest
+
+  build:
+    name: Build and inspect the artefacts
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and Python 3.11
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Build the sdist and the wheel
+        run: uv build
+
+      # `tests/test_packaging.py` already asserts what each artefact must and
+      # must not contain, and the job above ran it. This is the metadata half,
+      # which that test does not cover: `twine check` renders the long
+      # description the way the index will and fails on markup the index would
+      # reject. A README that does not render is not a defect worth discovering
+      # on an immutable upload.
+      - name: Check the metadata the way the index will
+        run: uv run --with twine --no-project twine check dist/*
+
+      # Installed from the wheel, in an environment that has never seen the
+      # checkout, and then driven. This is the whole of the "deployable by a
+      # stranger" claim: not that the code is good, but that somebody who has
+      # only the artefact can run it.
+      - name: Install the wheel somewhere that has no source tree
+        run: |
+          mkdir -p /tmp/stranger && cd /tmp/stranger
+          uv venv --python 3.11 .venv
+          uv pip install --python .venv --no-cache "$GITHUB_WORKSPACE"/dist/*.whl
+
+      - name: Run the README's walkthrough from the installed wheel
+        run: |
+          cd /tmp/stranger
+          C=.venv/bin/commissura
+          "$C" --version
+          "$C" generate --subjects 10 --seed 42 --defect-rate 0.2 --out ./raw
+          "$C" keygen --out ./k.key
+          "$C" build ./raw --out ./dataset --key-file ./k.key \
+            --hdab "Agenzia Nazionale Sintetica per i Dati Sanitari" \
+            --publisher "IRCCS SINTETICO MAREBIANCO" \
+            --contact-point "dati@irccs-sintetico.invalid" \
+            --access-url "https://portale-hdab-sintetico.invalid/permessi"
+          "$C" validate ./dataset
+          "$C" verify ./dataset --key-file ./k.key
+          "$C" measure ./raw ./dataset
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/*
+          retention-days: 7
+
+  publish:
+    name: Upload to ${{ inputs.index }}
+    runs-on: ubuntu-latest
+    needs: build
+    # Names the environment the index was told to trust, and the place to
+    # require a reviewer. A run stops here until that reviewer approves.
+    environment: ${{ inputs.index }}
+    permissions:
+      # Required for trusted publishing, and the reason no token is stored.
+      # Nothing else in this workflow needs a permission, so nothing else has
+      # one.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+
+      - name: Upload
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: >-
+            ${{ inputs.index == 'pypi'
+                && 'https://upload.pypi.org/legacy/'
+                || 'https://test.pypi.org/legacy/' }}
+          print-hash: true

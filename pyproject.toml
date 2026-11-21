@@ -45,6 +45,21 @@ dev = [
   "pytest-cov>=5.0",
   "ruff>=0.6",
   "mypy>=1.11",
+  # The build backend, named again here so tests/test_packaging.py can build a
+  # wheel and an sdist in process and look inside them. It is already required
+  # to build this project at all, so this adds no third-party dependency -- it
+  # moves one from build isolation into the test environment. Asserting on the
+  # configuration instead would be asserting on the instruction rather than on
+  # the artefact, and the artefact is what gets published.
+  "hatchling>=1.27",
+  # Read-only, and for one guard: tests/test_packaging.py asserts that no
+  # workflow in this repository can publish to an index without a human
+  # starting it. GitHub parses these files as YAML, so the semantics are what
+  # matter -- a text search for "push:" would pass happily on
+  # `on: [workflow_dispatch, push]`, and the act being guarded is the only
+  # irreversible one this project has.
+  "pyyaml>=6.0",
+  "types-PyYAML>=6.0",
   # Dev only. Used by tests/test_shacl_conformance.py to judge the emitted
   # HealthDCAT-AP description against the profile's own SHACL shapes. Never a
   # runtime dependency: `pip install commissura` stays light.

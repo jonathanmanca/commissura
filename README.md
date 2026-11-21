@@ -89,6 +89,23 @@ Add the development extras to run the tests and the linters:
 uv pip install -e ".[dev]"
 ```
 
+**What "not published yet" does and does not mean.** The package builds, and the
+wheel has been installed into an environment that had never seen this source
+tree and driven through the whole walkthrough above — on Python 3.11, the
+declared floor, with dependencies resolved freely rather than from the lock.
+`tests/test_packaging.py` asserts what each artefact carries: the wheel is the
+package, its typing marker and the two licence files and nothing else, while the
+source distribution additionally carries the tests and the vendored shapes, so
+the HealthDCAT-AP conformance claim is checkable from the archive alone. What is
+missing is a decision, not a capability.
+
+That decision is deliberately not automated. `.github/workflows/publish.yml`
+exists, uses trusted publishing so that no upload token is stored anywhere here,
+defaults to TestPyPI, and can only be started by hand — there is no tag or
+release trigger, and a test asserts there is not. PyPI refuses to re-upload a
+filename it has already accepted and a yanked release stays downloadable by
+exact version, so a release is the one thing this project cannot take back.
+
 ## The whole thing, start to finish
 
 Five commands. Every output below was captured from a real run, not written by

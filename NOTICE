@@ -23,6 +23,13 @@ check in `tests/test_shacl_conformance.py` runs on a clean checkout and in
 continuous integration without reaching the network. Each is licensed under the
 Creative Commons Attribution 4.0 International licence (CC BY 4.0):
 
+    (Where this notice travels inside a built distribution: the source
+    distribution carries those files and this credit applies to them. The
+    installable wheel carries neither the files nor the tests that read them,
+    so for a wheel the section below is provenance for the repository it was
+    built from rather than attribution for anything in the archive. The notice
+    ships with both because the Apache License requires it to.)
+
     https://creativecommons.org/licenses/by/4.0/
 
 CC BY 4.0 permits redistribution, including commercially, provided the creator
