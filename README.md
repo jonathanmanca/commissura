@@ -1685,6 +1685,35 @@ pytest tests/test_shacl_conformance.py
 download, nothing to configure: clone, install the dev extra, and the claim is
 checked — on your machine and on every push.
 
+**Conformant is not the same as true, and that gap had three things in it.**
+SHACL judges structure: `"integer"` is a valid CSVW datatype whatever the
+column holds, and `"synthetic"` is a well-formed keyword for real patient data.
+A pass over every property the description emits found that `reference_low` and
+`reference_high` were declared `integer` while the column holds `0.30` and
+`17.0`; that the keywords asserted `imaging` for a dataset with no imaging
+study; and that `--dataset-type TEST_DATA` left `synthetic` in the keywords of
+the same record, with no flag to change it. The keywords are derived from what
+the build produced now — `clinical`, plus a term per modality actually present,
+plus `synthetic` only when the declared dataset type says so — and
+`--keyword` replaces the set:
+
+```bash
+commissura build ./raw --out ./dataset     --keyword oncology --keyword "outcome research"     --identifier "urn:irccs-marebianco:lab-2029-01"
+```
+
+**`--identifier` exists because the default collides.** `dct:identifier`
+defaults to `urn:commissura:<output directory name>`, so two holders who both
+run `build --out ./dataset` submit the same identifier to the same catalogue.
+Nothing here can invent a globally unique name, so set it if your record will
+sit beside somebody else's.
+
+One limit of the profile rather than of this tool, recorded because a holder
+hits it: `dct:type` is mandatory and its authority list has twenty-two
+concepts, **none of which means "personal electronic health data"**. The
+closest honest values for real clinical material are `TEST_DATA` or a
+statistical type, and neither is right. `SYNTHETIC_DATA` is correct for this
+project's own output and is the default for that reason.
+
 It used to work the other way, and that was the problem. The shapes were
 fetched on demand into a gitignored directory and the test *skipped* when they
 were absent, so the headline claim of this project was verified wherever one

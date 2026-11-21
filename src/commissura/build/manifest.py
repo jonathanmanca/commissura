@@ -1005,7 +1005,7 @@ def write_healthdcat_description(
         # would put a process id into the dataset's own name and make two runs
         # of the same corpus differ in exactly one file -- which is the trap the
         # cross-platform reproducibility job was built to catch, and did.
-        "dct:identifier": f"urn:commissura:{dataset_name or summary.root.name}",
+        "dct:identifier": spec.identifier or f"urn:commissura:{dataset_name or summary.root.name}",
         # Mandatory at 1..*, and a dataset on a hospital disk still needs one:
         # the profile assumes the data is distributable, so a description has to
         # say in what form it would be. The Distribution shape requires its own
@@ -1054,7 +1054,7 @@ def write_healthdcat_description(
         "healthdcatap:numberOfUniqueIndividuals": _non_negative(summary.subject_count),
         "healthdcatap:numberOfRecords": _non_negative(summary.file_count),
         **_typical_age_range(out),
-        "dcat:keyword": list(spec.keywords),
+        "dcat:keyword": _keywords(spec, summary),
         "dct:type": _typed(
             healthdcat.dataset_type_iri(spec.dataset_type),
             "skos:Concept",
@@ -1122,6 +1122,47 @@ def write_healthdcat_description(
     return payload
 
 
+def _keywords(spec: BuildSpec, summary: BuildSummary) -> list[str]:
+    """Return the catalogue keywords, derived unless the holder supplied them.
+
+    `dcat:keyword` is mandatory at 1..* in the non-public tier, so there is
+    always at least one: `clinical`, which is true of anything this tool
+    builds.
+
+    **Everything else is a claim about this dataset and is derived from it.**
+    The fixed list this replaces said `laboratory`, `imaging` and `synthetic`
+    whatever the build produced, which made two false statements reachable at
+    once: a corpus with no imaging study was catalogued as imaging, and a
+    holder who correctly declared `--dataset-type TEST_DATA` still had
+    `synthetic` in the keywords of the same record. A catalogue record that
+    contradicts itself is worse than one that says less.
+
+    `synthetic` is tied to the declared dataset type rather than asserted,
+    because those two properties state the same fact and a reader should not
+    have to decide which to believe.
+
+    Args:
+        spec: What the holder supplied.
+        summary: What the build produced.
+
+    Returns:
+        The holder's keywords if they gave any, otherwise the derived ones.
+    """
+    if spec.keywords:
+        return list(spec.keywords)
+
+    derived = ["clinical"]
+    if summary.lab_files:
+        derived.append("laboratory")
+    if summary.report_files:
+        derived.append("reports")
+    if summary.imaging_files:
+        derived.append("imaging")
+    if spec.dataset_type == healthdcat.DATASET_TYPE_FOR_SYNTHETIC:
+        derived.append("synthetic")
+    return derived
+
+
 def _csvw_table_group() -> dict[str, object]:
     """Describe the lab table's columns as a CSVW table group.
 
@@ -1141,7 +1182,17 @@ def _csvw_table_group() -> dict[str, object]:
         "abnormal_flag": "HL7 table 0078 interpretation code.",
         "panel_code": "Code of the panel the result belongs to.",
     }
-    numeric = {"day_offset", "reference_low", "reference_high"}
+    # `day_offset` alone, and the two that left are the finding. The reference
+    # bounds were declared `integer` while the column holds `0.30`, `1.10` and
+    # `17.0` -- a datatype a catalogue consumer would parse by and fail on the
+    # first row, in a document the SHACL check calls conformant because
+    # `integer` is a valid CSVW built-in name. `decimal` would be wrong too:
+    # `_split_reference_range` writes `n/a` for a one-sided or unparseable
+    # interval, so the column's domain includes a non-numeric sentinel and no
+    # numeric type describes it. `value` was already `string` for the same
+    # reason. `day_offset` is genuinely always an integer, because a record with
+    # no readable date is dropped rather than written with a blank offset.
+    numeric = {"day_offset"}
     columns = [
         {
             "@type": "csvw:Column",

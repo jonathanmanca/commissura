@@ -63,7 +63,28 @@ class BuildSpec:
     publisher: str | None = None
     health_categories: tuple[str, ...] = (healthdcat.HEALTH_CATEGORY_FOR_EHR,)
     applicable_legislation: tuple[str, ...] = ("http://data.europa.eu/eli/reg/2025/327/oj",)
-    keywords: tuple[str, ...] = ("clinical", "laboratory", "imaging", "synthetic")
+    keywords: tuple[str, ...] = ()
+    """Catalogue keywords, or empty to derive them from what the build produced.
+
+    **The default used to be a fixed list containing "synthetic", and there was
+    no CLI flag to change it.** So a holder building from real clinical material
+    submitted a catalogue record whose keywords said the data was synthetic, and
+    could not stop it: the same defect as 2026-11-07, where three mandatory
+    fields existed on this class with no flag and the conformance test passed
+    anyway because a conformant document can be false. It also asserted
+    "imaging" and "laboratory" whatever the corpus held, so a dataset with no
+    imaging study at all was catalogued as imaging.
+    """
+
+    identifier: str = ""
+    """``dct:identifier``, or empty to derive it from the output directory name.
+
+    Derived is the default and it collides: two holders who both run
+    ``build --out ./dataset`` submit ``urn:commissura:dataset`` to the same
+    catalogue. A catalogue keyed on this property would merge two institutions'
+    datasets. Nothing here can invent a globally unique name, so the option
+    exists and the limit is documented rather than papered over.
+    """
     dataset_type: str = healthdcat.DATASET_TYPE_FOR_SYNTHETIC
     contact_point: str | None = None
     access_url: str | None = None

@@ -498,6 +498,26 @@ def build(
             "permits; without this they are.",
         ),
     ] = None,
+    keyword: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--keyword",
+            help="A catalogue keyword, repeatable. Replaces the derived set "
+            "entirely. Derived means: 'clinical', plus 'laboratory', 'reports' "
+            "and 'imaging' for the modalities this build actually produced, "
+            "plus 'synthetic' only when --dataset-type says so.",
+        ),
+    ] = None,
+    identifier: Annotated[
+        str | None,
+        typer.Option(
+            "--identifier",
+            help="dct:identifier for the catalogue record. Defaults to "
+            "urn:commissura:<output directory name>, which COLLIDES between two "
+            "holders who both build into ./dataset. Set it if your record will "
+            "sit beside somebody else's.",
+        ),
+    ] = None,
     exclude_subjects: Annotated[
         Path | None,
         typer.Option(
@@ -649,6 +669,8 @@ def build(
         contact_point=contact_point,
         access_url=access_url,
         dataset_type=dataset_type,
+        keywords=tuple(keyword) if keyword else (),
+        identifier=identifier or "",
     )
     # Everything is assembled in a staging directory beside the destination and
     # moved into place at the end. A build used to write straight into `out`,

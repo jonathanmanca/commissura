@@ -52,13 +52,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
 
 from commissura import layout
 from commissura.build.integrity import DIGEST_ALGORITHM, digest_file
-from commissura.build.manifest import write_manifest
+from commissura.build.manifest import write_healthdcat_description, write_manifest
 from commissura.build.observe import AGE_FIELD
 from commissura.build.risk import RISK_SCHEMA_VERSION, write_risk_report
 from commissura.build.writer import BuildSpec, build_dataset
@@ -293,3 +294,165 @@ def test_the_three_part_record_count_still_reconciles(tmp_path: Path, corpus: Ra
 
     assert opt_out["applied"] is False
     assert source["records_not_in_dataset"] >= sum(int(row["count"]) for row in dropped)
+
+
+# --------------------------------------------------------------------------
+# The other document written to travel: the Article 77 description
+# --------------------------------------------------------------------------
+#
+# The SHACL check proves the description is *conformant*, which is a different
+# claim from *true*: `"integer"` is a valid CSVW built-in whatever the column
+# holds, and `"synthetic"` is a perfectly well-formed keyword for real patient
+# data. So the same question was asked here, and found three things.
+
+
+def _description(out: Path) -> dict[str, object]:
+    payload = json.loads((out / layout.HEALTHDCAT_DESCRIPTION).read_text(encoding="utf-8"))
+    node = next(item for item in payload["@graph"] if "dct:title" in item)
+    assert isinstance(node, dict)
+    return node
+
+
+def _describe(out: Path, corpus: RawCorpus, spec: BuildSpec) -> dict[str, object]:
+    summary = build_dataset(corpus, KEY, spec, out)
+    write_healthdcat_description(out, spec=spec, summary=summary)
+    return _description(out)
+
+
+def test_a_dataset_with_no_imaging_is_not_catalogued_as_imaging(
+    tmp_path: Path, corpus_root: Path
+) -> None:
+    """The keywords were a fixed list, so they described a corpus nobody had.
+
+    A catalogue is searched by keyword. A dataset asserting `imaging` with no
+    imaging study in it wastes the time of whoever finds it, and an access body
+    reading the record cannot tell which datasets actually hold what.
+    """
+    bare = tmp_path / "raw"
+    shutil.copytree(corpus_root, bare)
+    shutil.rmtree(bare / "imaging")
+
+    keywords = _describe(tmp_path / "ds", read_corpus(bare), SPEC)["dcat:keyword"]
+    assert isinstance(keywords, list)
+
+    assert "imaging" not in keywords
+    assert "laboratory" in keywords
+
+
+@pytest.mark.parametrize(
+    ("dataset_type", "expected"),
+    [("SYNTHETIC_DATA", True), ("TEST_DATA", False)],
+)
+def test_the_keywords_cannot_contradict_the_declared_dataset_type(
+    tmp_path: Path, corpus: RawCorpus, dataset_type: str, expected: bool
+) -> None:
+    """Two properties stating one fact must not disagree, and they did.
+
+    `--dataset-type TEST_DATA` was reachable from the command line and left
+    `synthetic` in the keywords of the same record, so a holder who correctly
+    declared their dataset type still published a document saying the data was
+    synthetic — with no flag to fix it. A record that contradicts itself leaves
+    a reader to guess which half to believe.
+    """
+    spec = BuildSpec(
+        dataset_name="d", description="d", hdab="H", publisher="P", dataset_type=dataset_type
+    )
+
+    keywords = _describe(tmp_path / f"ds-{dataset_type}", corpus, spec)["dcat:keyword"]
+    assert isinstance(keywords, list)
+
+    assert ("synthetic" in keywords) is expected
+
+
+def test_the_holder_can_replace_the_keywords_from_the_command_line(
+    tmp_path: Path, corpus_root: Path
+) -> None:
+    """Driven through the CLI, because that is where this defect lived.
+
+    Three mandatory fields once existed on `BuildSpec` with no flag, so the
+    library could emit a conformant description while the command could not
+    (2026-11-07). The keywords were the same shape: a field with a default and
+    no way to reach it.
+    """
+    from typer.testing import CliRunner
+
+    from commissura.cli import app
+
+    key = tmp_path / "k.key"
+    key.write_text(KEY.material.hex(), encoding="utf-8")
+    out = tmp_path / "ds"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "build",
+            str(corpus_root),
+            "--out",
+            str(out),
+            "--key-file",
+            str(key),
+            "--hdab",
+            "H",
+            "--publisher",
+            "P",
+            "--contact-point",
+            "a@b.invalid",
+            "--access-url",
+            "https://x.invalid",
+            "--keyword",
+            "oncology",
+            "--identifier",
+            "urn:irccs-marebianco:lab-2029-01",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    node = _description(out)
+    assert node["dcat:keyword"] == ["oncology"]
+    assert node["dct:identifier"] == "urn:irccs-marebianco:lab-2029-01"
+
+
+def test_every_declared_column_datatype_is_the_tightest_true_one(
+    tmp_path: Path, corpus: RawCorpus
+) -> None:
+    """Checked against the data, in both directions.
+
+    `reference_low` and `reference_high` were declared `integer` while the
+    column holds `0.30`, `1.10` and `17.0`. A catalogue consumer parsing by the
+    declared type fails on the first row, and the SHACL check calls the document
+    conformant because `integer` is a valid CSVW built-in name.
+
+    Both directions, because a one-sided test is passed by declaring everything
+    `string`: a column whose every value is an integer must say so, and a column
+    with anything else must not. `decimal` is deliberately not reachable here —
+    `_split_reference_range` writes `n/a` for a one-sided interval, so that
+    column's domain holds a non-numeric sentinel and no numeric type describes
+    it.
+    """
+    out = tmp_path / "ds"
+    node = _describe(out, corpus, SPEC)
+
+    columns = node["healthdcatap:hasVariables"]
+    assert isinstance(columns, list)
+    declared = {
+        column["csvw:name"]: column["csvw:datatype"]
+        for column in columns[0]["csvw:table"][0]["csvw:column"]
+    }
+
+    tables = sorted(out.rglob(f"*{layout.LAB_SUFFIX}.tsv"))
+    assert tables, "no laboratory table to check the declaration against"
+    header = tables[0].read_text(encoding="utf-8").splitlines()[0].split("\t")
+    seen: dict[str, set[str]] = {name: set() for name in header}
+    for table in tables:
+        for line in table.read_text(encoding="utf-8").splitlines()[1:]:
+            for name, cell in zip(header, line.split("\t"), strict=True):
+                seen[name].add(cell)
+
+    for name, values in seen.items():
+        meaningful = {v for v in values if v != layout.NOT_APPLICABLE}
+        all_integers = bool(meaningful) and all(v.lstrip("-").isdigit() for v in meaningful)
+        expected = "integer" if all_integers else "string"
+        assert declared[name] == expected, (
+            f"{name} is declared {declared[name]!r} and holds "
+            f"{sorted(meaningful)[:4]}; the tightest true type is {expected!r}"
+        )
