@@ -271,38 +271,67 @@ def _pattern(text: str) -> re.Pattern[str]:
 def declared_values(dataset: Path) -> frozenset[str]:
     """Return the strings the data holder supplied, folded to lower case.
 
-    Read from the dataset's own Article 77 description, which is where those
-    values land, so the dataset says which strings were typed rather than
-    derived. Absent description, nothing is excluded.
+    Read from the dataset's own documents, so the dataset says which strings
+    were typed rather than derived, and nothing has to be passed in beside it.
+
+    **Both descriptions, and the second one is there because the first is
+    conditional.** The Article 77 description is where these values belong and
+    is the richer source -- title, description, publisher, HDAB -- but `build`
+    does not write it at all when the spec cannot satisfy the profile, which is
+    the documented behaviour of
+    :meth:`commissura.build.writer.BuildSpec.missing_for_conformance`: a
+    dataset built without an access URL or a contact point is produced and
+    reported as not catalogue-ready. On such a dataset this returned nothing,
+    so a publisher name that also occurs in the corpus -- a hospital publishing
+    its own data, which is the case the exclusion exists for -- was counted as
+    76 surviving institution spans on an output from which every one of them had
+    in fact been removed. `dataset_description.json` is always written and its
+    ``Authors`` carries exactly that one holder-typed string, so reading it
+    closes the gap without widening what counts as declared.
 
     Args:
         dataset: The dataset root.
 
     Returns:
-        The declared strings, lower-cased for comparison.
+        The declared strings, lower-cased for comparison. Empty when neither
+        document can be read, because an exclusion that cannot be read must
+        exclude nothing -- overstating survivors is the safe direction and
+        understating them is not.
     """
-    path = dataset / layout.HEALTHDCAT_DESCRIPTION
-    if not path.is_file():
-        return frozenset()
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return frozenset()
-
     found: set[str] = set()
 
-    def walk(node: object, key: str = "") -> None:
+    def collect(node: object, key: str = "") -> None:
         if isinstance(node, dict):
             for name, value in node.items():
-                walk(value, name)
+                collect(value, name)
         elif isinstance(node, list):
             for value in node:
-                walk(value, key)
+                collect(value, key)
         elif isinstance(node, str) and (key in DECLARED_FIELDS or key == "foaf:name"):
             found.add(node.strip().lower())
 
-    walk(payload)
+    collect(_read_json(dataset / layout.HEALTHDCAT_DESCRIPTION))
+
+    bids = _read_json(dataset / layout.DATASET_DESCRIPTION)
+    if isinstance(bids, dict):
+        authors = bids.get("Authors")
+        if isinstance(authors, list):
+            found.update(value.strip().lower() for value in authors if isinstance(value, str))
+
     return frozenset(value for value in found if value)
+
+
+def _read_json(path: Path) -> object:
+    """Return a parsed JSON document, or ``None`` if it cannot be read.
+
+    Absent, unreadable and malformed are one answer here on purpose: each means
+    this measurement cannot learn what the holder declared, and the caller's
+    response to all three is the same.
+    """
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def _dataset_text(dataset: Path) -> dict[str, str]:

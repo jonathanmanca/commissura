@@ -369,17 +369,59 @@ def test_a_non_numeric_count_is_ignored(tmp_path: Path) -> None:
     assert excluded_record_count(out) == 0
 
 
-def test_declared_values_survives_a_missing_or_damaged_description(tmp_path: Path) -> None:
-    """Same reasoning: an exclusion that cannot be read excludes nothing."""
+def test_declared_values_falls_back_to_the_bids_description(tmp_path: Path) -> None:
+    """Because the Article 77 description is not always written.
+
+    `build` omits it when the spec cannot satisfy the profile -- no access URL,
+    no contact point -- and reports the dataset as not catalogue-ready. On such
+    a dataset the exclusion read nothing, so a publisher name that also occurs
+    in the corpus was reported as a surviving institution. ``Authors`` in
+    `dataset_description.json` carries exactly that one holder-typed string and
+    is always written.
+    """
     raw, out = corpus_and_dataset(tmp_path)
     description = out / layout.HEALTHDCAT_DESCRIPTION
-    description.write_text("{ not json", encoding="utf-8")
+    authors = json.loads((out / layout.DATASET_DESCRIPTION).read_text(encoding="utf-8"))
+    publisher = authors["Authors"][0].lower()
 
-    assert declared_values(out) == frozenset()
+    description.write_text("{ not json", encoding="utf-8")
+    assert declared_values(out) == frozenset({publisher})
 
     description.unlink()
-    assert declared_values(out) == frozenset()
+    assert declared_values(out) == frozenset({publisher})
     assert measure(raw, out).recall is not None
+
+
+def test_declared_values_is_empty_when_neither_document_can_be_read(
+    tmp_path: Path,
+) -> None:
+    """An exclusion that cannot be read must exclude nothing.
+
+    Overstating survivors is the safe direction; understating them turns this
+    instrument into a flattering one.
+    """
+    _, out = corpus_and_dataset(tmp_path)
+    (out / layout.HEALTHDCAT_DESCRIPTION).unlink()
+    (out / layout.DATASET_DESCRIPTION).write_text("{ not json", encoding="utf-8")
+
+    assert declared_values(out) == frozenset()
+
+
+def test_declared_values_tolerates_a_bids_description_without_authors(
+    tmp_path: Path,
+) -> None:
+    """A document on disk is a document somebody may have edited.
+
+    ``Authors`` is a list in everything this tool writes, so the type check
+    exists for a file it did not write — and a check no test exercises is not a
+    guard. Here it is a number, which an iteration would raise on rather than
+    ignore, taking the whole measurement down with it.
+    """
+    _, out = corpus_and_dataset(tmp_path)
+    (out / layout.HEALTHDCAT_DESCRIPTION).unlink()
+    (out / layout.DATASET_DESCRIPTION).write_text('{"Authors": 5}', encoding="utf-8")
+
+    assert declared_values(out) == frozenset()
 
 
 def test_a_category_with_nothing_measurable_scores_none_not_perfect() -> None:

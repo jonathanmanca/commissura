@@ -61,9 +61,14 @@ from commissura.read.cda import (
     CODICE_FISCALE_ROOT_MISPRINT,
     DISCHARGE_DOCUMENT_CODE,
     ENI_NATIONAL_ROOT,
+    LABORATORY_DOCUMENT_CODE,
     LOINC_SYSTEM,
     RADIOLOGY_DOCUMENT_CODE,
     STP_NATIONAL_ROOT,
+    SUMMARY_DOCUMENT_CODE,
+    SUMMARY_TEMPLATE_EXTENSION,
+    SUMMARY_TEMPLATE_ROOT,
+    SUMMARY_TYPE_ID_EXTENSION,
     TEAM_CARD_ROOT,
     TEAM_PERSONAL_ROOT,
 )
@@ -79,9 +84,6 @@ works around.
 
 _ITALIAN_DATE: Final = "%d/%m/%Y"
 """Dates in the narrative are written the way a human writes them."""
-
-_LABORATORY_DOCUMENT_CODE: Final = "11502-2"
-"""LOINC for a laboratory report, from the specification's own §4.1.5 example."""
 
 SPECIALTY_BY_PANEL: Final[dict[str, tuple[str, str]]] = {
     "CBC": ("18723-7", "EMATOLOGIA"),
@@ -265,7 +267,7 @@ def render_lab_cda(
         f'  <id root="{_SYNTHETIC_ORGANISATION_ARC}.4.6" extension="{_literal(document_id)}"/>'
     )
     text.line(
-        f'  <code code="{_LABORATORY_DOCUMENT_CODE}" codeSystem="{LOINC_SYSTEM}" '
+        f'  <code code="{LABORATORY_DOCUMENT_CODE}" codeSystem="{LOINC_SYSTEM}" '
         'codeSystemName="LOINC" displayName="Referto di laboratorio"/>'
     )
     text.line("  <title>Referto di Medicina di Laboratorio</title>")
@@ -667,6 +669,272 @@ def _narrative_attribution(
     text.line("          </text>")
     text.line("        </section>")
     text.line("      </component>")
+
+
+SUMMARY_SECTIONS: Final[tuple[tuple[str, str, str, str], ...]] = (
+    (
+        "2.16.840.1.113883.3.1937.777.63.10.415",
+        "48765-2",
+        "Allergie e Intolleranze",
+        "allergies",
+    ),
+    (
+        "2.16.840.1.113883.2.9.10.1.4.2.2",
+        "10160-0",
+        "Terapie Farmacologiche",
+        "therapies",
+    ),
+)
+"""The PSS sections this generator emits: ``(templateId root, LOINC code, title, field)``.
+
+Read from the v1.5 Schematron, where each section's own rule file states its
+code -- ``48765-2`` in "Allergie e Intolleranze PSS", ``10160-0`` in "Terapie
+Farmacologiche (PSS)". Both roots are spelled identically in the document
+template's permitted-section list and in the section's own context, which is the
+condition the next paragraph is about.
+
+**The vaccinations section is deliberately absent, and that is a finding rather
+than a shortcut.** The package describes one -- "Vaccinazioni (PSS)", LOINC
+``11369-6`` -- but every root it offers for it reads
+``'2.16.840.1.113883.2.9.10.1.4.2.3 '``, with a trailing space **inside the
+attribute value**, in the document template's permitted list and in the
+section's own context alike. Two more, ``.2.13`` and ``.2.14``, carry a leading
+space the same way, and so does ``.3.10.5``.
+
+Because the malformed string is used consistently, there is no spelling that is
+both a well-formed OID and accepted by the package: a document carrying
+``…4.2.3`` is rejected by the closed document template as an unpermitted section
+*and* never matched by the section's own rules. Emitting the untrimmed value
+would put a malformed OID into a document this project generates; emitting the
+trimmed one would claim conformance to a rule the package does not contain. The
+section is OPZIONALE -- no section is mandatory in this profile -- so leaving it
+out costs nothing and states something true.
+
+This is the misprinted codice fiscale root of 2026-11-17 one turn worse. There,
+a correct spelling appeared elsewhere in the same document and could corroborate
+a reading; here the malformed value is the only form there is.
+"""
+
+
+def render_summary_cda(
+    person: Person,
+    *,
+    site: Site,
+    path: str,
+    document_id: str,
+    set_id: str,
+    version: int,
+    authored_at: datetime,
+    author_name: str,
+    signed_by: str,
+    allergies: tuple[str, ...],
+    therapies: tuple[str, ...],
+    injector: DefectInjector,
+) -> tuple[str, tuple[PhiSpan, ...]]:
+    """Render a Profilo Sanitario Sintetico as a CDA R2 document, v1.5.
+
+    **A third renderer rather than a fourth row in :data:`NARRATIVE_PROFILES`,
+    and finding that out relocated the seam.** The entry of 2026-11-18 claimed
+    the remaining profiles were "a profile table and a section map" away, which
+    held for the radiology report and the discharge letter and does not hold
+    here. Five differences, every one read from the v1.5 Schematron rather than
+    from a PDF, because every PDF on the Ministry's index for this profile is
+    marked obsolete:
+
+    * ``typeId/@extension`` is ``POCD_MT000040UV02``, asserted at min 1 and
+      max 1, where the laboratory specification writes ``POCD_HD000040`` on page
+      18 and this generator writes that for the other three profiles. **Two
+      specifications from one affiliate disagreeing on a fixed attribute** --
+      see :data:`commissura.read.cda.SUMMARY_TYPE_ID_EXTENSION`.
+    * ``componentOf`` is **not among the permitted elements at all**, so there
+      is no ``encompassingEncounter`` and no numero nosologico.
+      :func:`render_narrative_cda` writes one unconditionally, because a report
+      belongs to an encounter. A patient summary does not.
+    * ``documentationOf[serviceEvent]`` is required at exactly one and takes its
+      place.
+    * ``setId`` and ``versionNumber`` are permitted, with up to two
+      ``relatedDocument`` -- because a summary is **maintained and versioned**
+      and supersedes its own previous version. A report is authored once.
+    * **No section is mandatory.** Only ``component[structuredBody]`` is, where
+      RAD requires two sections of eleven and LDO three of sixteen. A summary
+      records what is known, so a patient with nothing to record in a section
+      has no such section rather than an empty one.
+
+    What *did* transfer, unchanged, is the identity header:
+    :func:`_record_target` with its five identifier cases, :func:`_author`,
+    :func:`_custodian` and :func:`_legal_authenticator`. **That is the real
+    seam, and the 2026-11-18 entry located it one level too high** -- it is the
+    header helpers, not the profile table. Here it also absorbed a cardinality
+    difference for free: ``legalAuthenticator`` is max 1 and **not** required in
+    this profile, where LDO requires it, and its ``signatureCode code="S"`` is
+    what the PSS asserts when one is present.
+
+    Level 2 and not Level 3, deliberately. The package ships nine entry-level
+    templates -- acts, substanceAdministrations, observations, procedures -- so
+    a real PSS is normally coded, and distinct templates exist for *Presenza
+    Terapia* and *Assenza Terapia*. Neither section emitted here requires an
+    ``entry``, so a narrative-only document is conformant, and the identifiers
+    this project exists to remove live in the narrative in either case.
+
+    Args:
+        person: Whose summary it is.
+        site: The institution holding it.
+        path: Corpus-relative path, recorded with every span.
+        document_id: ``ClinicalDocument/id/@extension``.
+        set_id: ``setId/@extension``, stable across versions of one summary,
+            which is what lets a recipient tell a newer version of this
+            document from a different document about the same person.
+        version: ``versionNumber/@value``.
+        authored_at: When this version was compiled.
+        author_name: The clinician who compiled it.
+        signed_by: The clinician who legally authenticated it, deliberately
+            different from the author for the reason in :func:`render_lab_cda`.
+        allergies: Narrative lines for the allergies section, omitted when
+            empty.
+        therapies: Narrative lines for the medication section, omitted when
+            empty. The caller is expected to supply at least one -- "nessuna
+            terapia in corso" is a statement a summary makes, which is why the
+            specification has a template for it -- because the closing
+            attribution is written into the last section emitted.
+        injector: Decides and records defects.
+
+    Returns:
+        The document text and its identifier spans.
+    """
+    text = AnnotatedText(path)
+    content = {"allergies": allergies, "therapies": therapies}
+
+    # The same guard as every other profile: drawn for every document so the
+    # random stream does not move with the shape of a cohort, and never offered
+    # to a patient who writes no codice fiscale element at all.
+    misdeclare = injector.should_apply("cda.misdeclared_cf_namespace") and person.foreign is None
+    if misdeclare:
+        injector.record(
+            "cda.misdeclared_cf_namespace",
+            path,
+            "recordTarget/patientRole/id/@root written as "
+            f"{CODICE_FISCALE_ROOT_MISPRINT}, the root the specification's own "
+            f"example misprints, instead of the correct {CODICE_FISCALE_ROOT}",
+        )
+    codice_fiscale_root = CODICE_FISCALE_ROOT_MISPRINT if misdeclare else CODICE_FISCALE_ROOT
+
+    text.line('<?xml version="1.0" encoding="UTF-8"?>')
+    text.line(
+        f'<ClinicalDocument xmlns="{CDA_NAMESPACE}" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+    )
+    text.line('  <realmCode code="IT"/>')
+    # Not POCD_HD000040, which is what the other three profiles here write. The
+    # element order below is the template's own, because CDA's header is a
+    # sequence: a reordered document is invalid however correct each element is.
+    text.line(f'  <typeId root="2.16.840.1.113883.1.3" extension="{SUMMARY_TYPE_ID_EXTENSION}"/>')
+    text.line(
+        f'  <templateId root="{SUMMARY_TEMPLATE_ROOT}" extension="{SUMMARY_TEMPLATE_EXTENSION}"/>'
+    )
+    text.line(
+        f'  <id root="{_SYNTHETIC_ORGANISATION_ARC}.4.6" extension="{_literal(document_id)}"/>'
+    )
+    text.line(
+        f'  <code code="{SUMMARY_DOCUMENT_CODE}" codeSystem="{LOINC_SYSTEM}" '
+        'codeSystemName="LOINC" displayName="Patient Summary"/>'
+    )
+    text.line("  <title>Profilo Sanitario Sintetico</title>")
+    text.line(f'  <effectiveTime value="{_timestamp(authored_at)}"/>')
+    text.line(f'  <confidentialityCode code="V" codeSystem="{_CONFIDENTIALITY_SYSTEM}"/>')
+    text.line('  <languageCode code="it-IT"/>')
+    # What makes this a maintained document rather than a record of an event:
+    # the set identifier is stable across versions and the version number moves.
+    text.line(f'  <setId root="{_SYNTHETIC_ORGANISATION_ARC}.4.9" extension="{_literal(set_id)}"/>')
+    text.line(f'  <versionNumber value="{version}"/>')
+
+    _record_target(text, person, codice_fiscale_root)
+    _author(text, authored_at, author_name, site)
+    _custodian(text, site)
+    _legal_authenticator(text, authored_at, site, signed_by)
+
+    # Where a report carries componentOf/encompassingEncounter, which this
+    # profile does not permit. A summary documents the act of compiling it,
+    # which has no encounter -- so a subject established only by a PSS has no
+    # institution-scoped record number to fall back on, and is keyed on the
+    # codice fiscale or on nothing.
+    text.line("  <documentationOf>")
+    text.line('    <serviceEvent classCode="PCPR">')
+    text.line(f'      <effectiveTime><low value="{_timestamp(authored_at)}"/></effectiveTime>')
+    text.line("    </serviceEvent>")
+    text.line("  </documentationOf>")
+
+    text.line("  <component>")
+    text.line("    <structuredBody>")
+    for template_root, code, title, field in SUMMARY_SECTIONS:
+        lines = content[field]
+        if not any(lines):
+            continue
+        text.line("      <component>")
+        text.line("        <section>")
+        # A templateId per section, which the narrative profiles do not write:
+        # the PSS document template is closed and keys its permitted sections on
+        # exactly this attribute, so a section without one is not merely
+        # unidentified but not allowed.
+        text.line(f'          <templateId root="{template_root}"/>')
+        text.line(
+            f'          <code code="{code}" codeSystem="{LOINC_SYSTEM}" '
+            f'codeSystemName="LOINC" displayName="{title}"/>'
+        )
+        text.line(f"          <title>{title}</title>")
+        text.line("          <text>")
+        for line in lines:
+            if line:
+                text.line(f"            <paragraph>{_literal(line)}</paragraph>")
+        if field == SUMMARY_SECTIONS[-1][3]:
+            _summary_attribution(text, author_name=author_name, site=site, moment=authored_at)
+        text.line("          </text>")
+        text.line("        </section>")
+        text.line("      </component>")
+
+    text.line("    </structuredBody>")
+    text.line("  </component>")
+    text.line("</ClinicalDocument>")
+
+    return text.finish()
+
+
+def _summary_attribution(
+    text: AnnotatedText, *, author_name: str, site: Site, moment: datetime
+) -> None:
+    """Write the closing paragraphs: who compiled the summary, where, and when.
+
+    **Paragraphs inside a section this document already carries, not a section
+    of its own**, which is the one place this differs from
+    :func:`_narrative_attribution`. RAD has ``55107-7`` "Addendum" for an
+    addition like this and LDO reuses ``18776-5``; the PSS document template is
+    closed and every section it permits has its own prescribed code, so there is
+    no section here that means "a note about the document". Inventing one would
+    mean writing a templateId and a code that the package does not pair, which
+    is the failure mode of a plausible IRI that resolves to nothing.
+
+    Hostile on purpose, the same decision as the narrative profiles of
+    2026-11-18: a summary carrying only clean clinical prose would be *easier*
+    to de-identify than the documents it sits beside, and the recall figure
+    would improve for no reason but the corpus getting kinder. So this names the
+    compiler, the institution and a date in running prose, where no structured
+    field of this document declares them.
+    """
+    text.line(
+        "            <paragraph>Profilo compilato dal dott. ",
+        Phi(author_name, PhiCategory.PROVIDER_NAME, "compiler named in running prose"),
+        " presso ",
+        Phi(site.name, PhiCategory.INSTITUTION, "institution named in running prose"),
+        ".</paragraph>",
+    )
+    text.line(
+        "            <paragraph>Dati aggiornati al ",
+        Phi(
+            moment.strftime(_ITALIAN_DATE),
+            PhiCategory.DATE,
+            "update date inside running prose",
+        ),
+        ".</paragraph>",
+    )
 
 
 def _record_target(text: AnnotatedText, person: Person, codice_fiscale_root: str) -> None:

@@ -39,7 +39,11 @@ from random import Random
 from commissura import __version__
 from commissura.annotate import check_spans
 from commissura.generate import vocabulary
-from commissura.generate.cda import render_lab_cda, render_narrative_cda
+from commissura.generate.cda import (
+    render_lab_cda,
+    render_narrative_cda,
+    render_summary_cda,
+)
 from commissura.generate.cohort import CohortSpec, PlannedSubject, build_cohort, child_seed
 from commissura.generate.defects import DefectInjector
 from commissura.generate.imaging import render_study
@@ -321,6 +325,55 @@ def _render_subject(
         _write_text(root / relative, content)
         spans.extend(report_spans)
         counts["cda" if spec.cda else "reports"] += 1
+
+    # --- Patient summary ---
+    #
+    # **One per subject, not one per encounter, which is why it sits outside
+    # every loop above.** A Profilo Sanitario Sintetico is a maintained document
+    # about a person: it carries a `setId` that is stable across versions and a
+    # `versionNumber` that moves, where a report is authored once about an
+    # event. That is the difference that stopped this profile being a fourth row
+    # in `NARRATIVE_PROFILES`.
+    #
+    # CDA corpora only, and the draws happen *after* the report loop. A summary
+    # is a Fascicolo Sanitario Elettronico document and has no plain-text
+    # counterpart this generator could invent, so there is nothing to write for
+    # a site that has not migrated. Drawing from `render_rng` only inside this
+    # branch, and only after every existing draw, is what keeps a non-CDA
+    # corpus byte-identical — the README's captured numbers included.
+    if spec.cda:
+        # As of the subject's last recorded event, rather than a fresh date: a
+        # summary dated later than everything it summarises would open a session
+        # of its own, since sessions are dated encounters, and that session
+        # would hold a document and no clinical event.
+        moments = (
+            [panel.reported_at for panel in planned.subject.panels]
+            + [report.authored_at for report in planned.subject.reports]
+            + study_dates
+        )
+        compiled_at = max(moments)
+        # `besides` exists to keep a drawn clinician apart from a name already
+        # in play, and the patient's own family name is the one name certainly
+        # in play in this document.
+        compiler = _another_clinician(render_rng, person.family_name)
+        relative = f"cda/{person.mrn}_pss_1.xml"
+        content, summary_spans = render_summary_cda(
+            person,
+            site=planned.site,
+            path=relative,
+            document_id=f"PSS{planned.index:05d}0001",
+            set_id=f"PSS{planned.index:05d}",
+            version=1,
+            authored_at=compiled_at,
+            author_name=compiler,
+            signed_by=_another_clinician(render_rng, compiler),
+            allergies=(render_rng.choice(vocabulary.ALLERGIES),),
+            therapies=(render_rng.choice(vocabulary.THERAPIES),),
+            injector=injector,
+        )
+        _write_text(root / relative, content)
+        spans.extend(summary_spans)
+        counts["cda"] += 1
 
     return (
         spans,

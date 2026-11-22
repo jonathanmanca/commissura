@@ -192,6 +192,52 @@ the same lesson as `NNITA` on 2026-11-11 and the misprinted codice fiscale root
 two entries below.
 """
 
+SUMMARY_DOCUMENT_CODE: Final = "60591-5"
+"""``ClinicalDocument/code`` for the Profilo Sanitario Sintetico, v1.5.
+
+**Read from the profile's own Schematron rather than from a PDF, which is the
+first thing that makes this profile different.** HL7 Italia publishes PSS v1.5
+(2025) as an ART-DECOR specification with HTML and Schematron downloads, and
+marks every PDF it ever shipped -- v1.4, v1.3, v1.2, v1.1 -- "obsoleta, da non
+utilizzare in nuove implementazioni". So the normative source is machine
+readable, and the assertion states itself:
+
+    test="string(@code) = ('60591-5')">(Profilo_Sanitario_Sintetico): The value
+    for code SHALL be '60591-5'.
+
+Which is the same value recalling it would produce, and that is luck rather
+than judgement: `NNITA`, the misprinted codice fiscale root and `18748-4` all
+looked just as plausible and were all wrong. The runtime package this came from
+is `hl7itig-runtime-20250910T172242.zip`, project OID
+``2.16.840.1.113883.3.1937.777.63``, ``versionLabel="v 1.5"``.
+"""
+
+SUMMARY_TEMPLATE_ROOT: Final = "2.16.840.1.113883.2.9.10.1.4.1.1"
+"""The PSS document template root, which every context in the Schematron names."""
+
+SUMMARY_TEMPLATE_EXTENSION: Final = "1.5"
+"""The template version, carried on the same element as the root above.
+
+Every context pairs them -- ``templateId[@root = '...1.4.1.1'][@extension =
+'1.5']`` -- so a document declaring the root alone matches no rule in the
+package and is checked by nothing.
+"""
+
+SUMMARY_TYPE_ID_EXTENSION: Final = "POCD_MT000040UV02"
+"""``typeId/@extension`` for the PSS, and **the profiles disagree about it.**
+
+The laboratory specification v1.3 writes ``POCD_HD000040`` on page 18, which is
+what :func:`commissura.generate.cda.render_lab_cda` and the narrative renderer
+emit. The PSS Schematron permits only ``POCD_MT000040UV02``, in a closed
+template, so a document carrying the other value is rejected outright.
+
+Checked rather than assumed, and the check is the reason this constant exists:
+writing one value for every HL7 Italia profile is what anybody would do, and it
+would have produced a non-conformant PSS while the laboratory documents stayed
+right. Two specifications from one affiliate disagreeing on a fixed attribute
+is the `NNITA` lesson again, in a place nothing would have surfaced it.
+"""
+
 DISCHARGE_DOCUMENT_CODE: Final = "34105-7"
 """``ClinicalDocument/code``, obligatory, for a hospital discharge letter.
 

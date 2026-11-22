@@ -141,6 +141,7 @@ commissura generate --subjects 25 --seed 42 --defect-rate 0.2 --out ./raw
 ```
 Wrote 190 files to ./raw
   lab          115  HL7 v2 ORU^R01 messages
+  cda            0  HL7 Italia CDA R2 documents
   reports       48  free-text documents
   imaging       27  DICOM JSON Model sidecars
 
@@ -394,7 +395,7 @@ identity the linkage needs.
 ```
 raw/
   lab/        *.hl7    HL7 v2 messages, one per file
-  cda/        *.xml    HL7 Italia CDA R2 laboratory reports, one per file
+  cda/        *.xml    HL7 Italia CDA R2 documents, one per file
   reports/    *.txt    free text, UTF-8
   imaging/    *.json   DICOM JSON Model (PS3.18) metadata, one array per study
 ```
@@ -447,10 +448,15 @@ Dates are accepted as `YYYYMMDD`, `YYYYMMDDHHMM`, `YYYYMMDDHHMMSS`,
 
 `cda/*.xml` is read against *Specifiche HL7 CDA R2 del Referto di Medicina di
 Laboratorio v.1.3*, one of the national document standards the Ministry
-publishes with HL7 Italia and AgID. One document produces two records — the
-LOINC-coded results and the human-readable narrative — so it replaces a
+publishes with HL7 Italia and AgID. A laboratory document produces two records
+— the LOINC-coded results and the human-readable narrative — so it replaces a
 `lab/*.hl7` message and a `reports/*.txt` file together, and nothing downstream
 changes.
+
+**The reader needs no profile table**, which is why the three other profiles
+cost it nothing: a document whose code is not the laboratory one yields a
+report record alone, and the identity header is read the same way for all four.
+It is the header, not the document type, that the four profiles share.
 
 What the reader takes, and where each value comes from:
 
@@ -636,25 +642,52 @@ raw/
 `--cda` writes **everything** as HL7 Italia CDA R2 documents in `cda/` instead
 of HL7 v2 messages in `lab/` and plain text in `reports/`, which is the corpus
 a site that has migrated to the Fascicolo Sanitario Elettronico would hand
-over. Three profiles, each with its own LOINC document code:
+over. Four profiles, each with its own LOINC document code:
 
 | Document | Code | Specification |
 | --- | --- | --- |
 | Referto di Medicina di Laboratorio | `11502-2` | `HL7IT-IG_CDA2_RefertoMedicinaLab-v1.3-S` |
 | Referto di Radiologia | `68604-8` | `HL7IT-IG_CDA2_RAD-v1.1-S` |
 | Lettera di Dimissione Ospedaliera | `34105-7` | `HL7IT-IG_CDA2_LDO-v1.2-S` |
+| Profilo Sanitario Sintetico | `60591-5` | ART-DECOR PSS v1.5 |
 
 Off by default, so a given seed produces the same corpus it produced before the
 flag existed.
 
-The three share one header, element for element, and differ in four things: the
-document code above, the title, the template identifier, and which LOINC-coded
-sections the body carries. **A laboratory report yields structured results and a
-narrative; the other two are narrative only** — both specifications keep the
-coded entries optional and say a document with sections and no entries is still
-well formed, and a radiology report's content *is* prose. So a radiology or
-discharge document contributes a report record and no laboratory record, rather
-than an empty table claiming the modality carried something.
+The first three share one header, element for element, and differ in four
+things: the document code above, the title, the template identifier, and which
+LOINC-coded sections the body carries. **A laboratory report yields structured
+results and a narrative; the other two are narrative only** — both
+specifications keep the coded entries optional and say a document with sections
+and no entries is still well formed, and a radiology report's content *is*
+prose. So a radiology or discharge document contributes a report record and no
+laboratory record, rather than an empty table claiming the modality carried
+something.
+
+**The patient summary is the one that does not fit that pattern**, and it is
+one per subject rather than one per encounter, because it is a document that is
+kept up to date rather than a record of an event. Its profile is published as
+ART-DECOR rather than as a PDF — every PDF the Ministry's index offers for it
+is marked *obsoleta* — and it differs from the other three in five ways:
+`typeId/@extension` is `POCD_MT000040UV02` where the laboratory specification
+writes `POCD_HD000040`; there is no `componentOf`, so no numero nosologico;
+`documentationOf/serviceEvent` takes its place; `setId` and `versionNumber` say
+which version of the summary this is; and **no section is mandatory**, where
+the radiology profile requires two of eleven and the discharge letter three of
+sixteen.
+
+A generated summary carries an allergies section and a medication section, each
+able to say "nothing known" — which the specification treats as a distinct
+case from the section being absent, with a template of its own. It does **not**
+carry a vaccinations section, and the reason is a defect in the published
+package rather than a simplification here: every spelling the package offers
+for that section's `templateId` root reads
+`'2.16.840.1.113883.2.9.10.1.4.2.3 '`, with a trailing space inside the
+attribute value, in the closed document template's permitted-section list and
+in the section's own rules alike. There is therefore no spelling that is both a
+well-formed OID and accepted by the package, so the section is left out and the
+finding is recorded instead of being papered over. Two more section roots,
+`.2.13` and `.2.14`, carry a leading space the same way.
 
 One number worth knowing if you reach for the obvious value: the radiology
 document code is **68604-8**, not `18748-4`. The latter is LOINC's "Diagnostic
@@ -1448,26 +1481,26 @@ commissura measure ./raw ./dataset
   accession             314       314      314         0
   address               525       525      525         0
   age                   132        84       84         0  (kept by design)
-  contact               268       268      268         0
-  date                  523       523      523         0
+  contact               253       253      253         0
+  date                  533       533      533         0
   device_id             168       168      168         0
-  institution           322       250      250         0
+  institution           316       241      241         0
   national_id           163       163      163         0
-  patient_id            258       258      258         0
-  person_name           376       371      371         0
-  provider_name         437       432      432         0
+  patient_id            259       259      259         0
+  person_name           377       373      373         0
+  provider_name         440       434      434         0
   uid                   168       168      168         0
 
-  recall                 100.00%  of 3440
+  recall                 100.00%  of 3431
   survived               0
   too short to measure   58  (under 4 characters)
-  declared by the holder 72  (publisher, HDAB, title)
-  records not included   13  (their identifiers are absent because the record is,
+  declared by the holder 75  (publisher, HDAB, title)
+  records not included   3  (their identifiers are absent because the record is,
                                  not because redaction removed them)
-  dataset files searched 197
+  dataset files searched 217
 ```
 
-**100% of 3,440 measurable planted identifiers removed**, on the corpus the
+**100% of 3,431 measurable planted identifiers removed**, on the corpus the
 walkthrough above builds. That number is the point of this project. "Rules
 first, measurement always" is easy to write and the measurement half was a
 promise until this command existed: the generator had been recording every

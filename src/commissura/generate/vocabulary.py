@@ -487,3 +487,36 @@ DISCHARGE_INSTRUCTIONS: tuple[str, ...] = (
     "Visita di controllo ambulatoriale fra tre mesi.",
     "Si raccomanda astensione dal fumo e attivita fisica regolare.",
 )
+
+
+ALLERGIES: tuple[str, ...] = (
+    "Penicillina (reazione cutanea documentata)",
+    "Acido acetilsalicilico (broncospasmo)",
+    "Mezzo di contrasto iodato (orticaria)",
+    "Lattice (dermatite da contatto)",
+    "Nichel (dermatite da contatto)",
+    "Nessuna allergia nota",
+)
+"""Allergies and intolerances for the Profilo Sanitario Sintetico.
+
+"Nessuna allergia nota" is a line and not an empty section, because the two
+say different things: a summary that records no known allergy has been asked
+the question, and one with no allergies section has not.
+"""
+
+THERAPIES: tuple[str, ...] = (
+    "Ramipril 5 mg, una compressa al giorno",
+    "Metformina 1000 mg, due compresse al giorno",
+    "Atorvastatina 20 mg, una compressa la sera",
+    "Levotiroxina 75 mcg, a digiuno",
+    "Salbutamolo inalatore, al bisogno",
+    "Nessuna terapia farmacologica in corso",
+)
+"""Standing medication, written the way a summary records it.
+
+The last entry carries the same distinction as :data:`ALLERGIES`, and here the
+specification makes it explicit: ``Terapie Farmacologiche - Assenza Terapia`` is
+a template of its own, a separate conformance target from the section being
+absent. So a corpus that could only produce an empty section would never
+exercise the case the profile went to the trouble of modelling.
+"""

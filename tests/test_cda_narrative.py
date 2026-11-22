@@ -48,6 +48,7 @@ from commissura.read.cda import (
     DISCHARGE_DOCUMENT_CODE,
     LABORATORY_DOCUMENT_CODE,
     RADIOLOGY_DOCUMENT_CODE,
+    SUMMARY_DOCUMENT_CODE,
     parse_clinical_document,
 )
 from commissura.read.corpus import read_corpus
@@ -123,13 +124,20 @@ def test_a_profile_draws_each_section_from_its_own_field(kind: ReportKind) -> No
 # --------------------------------------------------------------------------
 
 
-def test_a_cda_corpus_carries_all_three_profiles(corpus_root: Path) -> None:
-    """The point of the task: a second and third document type that slot in."""
+def test_a_cda_corpus_carries_every_profile(corpus_root: Path) -> None:
+    """One inventory of what a CDA corpus holds, in one place.
+
+    A second and third document type that slot in was the point of this task;
+    the fourth, the Profilo Sanitario Sintetico, did not slot in and has its own
+    file. It is counted here anyway, because a reader asking "what is in a CDA
+    corpus" should get the whole answer from one test rather than two.
+    """
     codes = Counter(document.document_code for _, document in _documents(corpus_root))  # type: ignore[attr-defined]
 
     assert codes[LABORATORY_DOCUMENT_CODE] > 0
     assert codes[RADIOLOGY_DOCUMENT_CODE] > 0
     assert codes[DISCHARGE_DOCUMENT_CODE] > 0
+    assert codes[SUMMARY_DOCUMENT_CODE] > 0
 
 
 def test_a_cda_corpus_writes_no_plain_text_report(corpus_root: Path) -> None:
@@ -184,8 +192,18 @@ def test_a_narrative_document_declares_the_numero_nosologico(corpus_root: Path) 
     OPZIONALE for radiology and obligatory for a discharge letter (CONF-LDO-80),
     and written for both: a document that could carry it and does not is a
     document whose imaging attaches to nobody.
+
+    **The patient summary is excluded, and not as a convenience.** Its profile
+    does not permit ``componentOf`` at all, so a PSS has no encounter and no
+    numero nosologico to declare -- which means a subject established only by a
+    summary is keyed on their codice fiscale or on nothing. This assertion read
+    "every CDA document" because every CDA document could carry one, and that
+    stopped being true when a fourth profile arrived.
     """
     for name, document in _documents(corpus_root):
+        if document.document_code == SUMMARY_DOCUMENT_CODE:  # type: ignore[attr-defined]
+            assert not document.record_number, name  # type: ignore[attr-defined]
+            continue
         assert document.record_number, name  # type: ignore[attr-defined]
 
 

@@ -133,7 +133,11 @@ CARRIED_FIELDS: Final[dict[str, dict[str, Carried]]] = {
             "never enters the dataset",
         ),
         "section/code": Carried(
-            "kept", "the laboratory specialty, in the lab table's panel_code column"
+            "kept",
+            "for a laboratory document, the specialty, in the lab table's "
+            "panel_code column; a narrative document or a patient summary has "
+            "section codes and no lab table, so theirs are dropped and only "
+            "the section titles reach the prose",
         ),
         "text/paragraph": Carried(
             "kept",
