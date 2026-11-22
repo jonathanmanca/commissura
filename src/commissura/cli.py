@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+import textwrap
 from pathlib import Path
 from typing import Annotated
 
@@ -51,6 +52,28 @@ from commissura.measure import measure as run_measure
 from commissura.read.corpus import read_corpus
 from commissura.read.identity import KeyKind, classify_national_id
 from commissura.validate import registered_rules, validate_dataset
+
+_PARAGRAPH_WIDTH = 76
+"""Where a prose paragraph in the terminal output is wrapped.
+
+A fixed width rather than the terminal's own, and the reason is not aesthetics:
+the README captures this output and a test re-runs the walkthrough to compare
+the two, so output that reflowed with the window could never be compared
+against a capture. Unwrapped is not an option either -- these paragraphs run
+past 200 characters, which no terminal shows legibly.
+"""
+
+
+def _paragraph(text: str, indent: str) -> None:
+    """Echo a prose paragraph wrapped at a fixed width.
+
+    Args:
+        text: The sentence or sentences to print.
+        indent: The leading whitespace every line carries.
+    """
+    for line in textwrap.wrap(text, width=_PARAGRAPH_WIDTH - len(indent)):
+        typer.echo(f"{indent}{line}")
+
 
 app = typer.Typer(
     name="commissura",
@@ -195,7 +218,7 @@ def generate(
     counts = manifest.files
     typer.echo(f"Wrote {summary.file_count} files to {summary.root}")
     typer.echo(f"  lab       {counts.lab:6d}  HL7 v2 ORU^R01 messages")
-    typer.echo(f"  cda       {counts.cda:6d}  HL7 Italia CDA R2 laboratory reports")
+    typer.echo(f"  cda       {counts.cda:6d}  HL7 Italia CDA R2 documents")
     typer.echo(f"  reports   {counts.reports:6d}  free-text documents")
     typer.echo(f"  imaging   {counts.imaging:6d}  DICOM JSON Model sidecars")
     typer.echo("")
@@ -895,7 +918,7 @@ def build(
             typer.echo("")
             typer.echo("  Residual risk the method cannot reach:")
             for entry in summary.residual_risks():
-                typer.echo(f"    {entry}")
+                _paragraph(entry, "    ")
         if report is not None:
             typer.echo("")
             counts = report.counts_by_severity()

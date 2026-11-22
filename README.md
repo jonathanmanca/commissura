@@ -109,7 +109,10 @@ exact version, so a release is the one thing this project cannot take back.
 ## The whole thing, start to finish
 
 Five commands. Every output below was captured from a real run, not written by
-hand.
+hand. A test re-runs this walkthrough and compares each block against what the
+command prints, so a capture cannot quietly go stale — which it did three times
+before the test existed. Lines showing a key fingerprint or a `sub-` label are
+the exception: they come from a key that is not in this repository.
 
 ### 1. Make a key
 
@@ -183,6 +186,7 @@ Wrote 211 files to ./dataset
     lab/0976285_LAB55466956.hl7  (conflicting_identity: this record shares an
       identifier with a record naming a different person; both identities are
       kept so that both names are redacted)
+... nine more of the same ...
     ... and 19 more linkage issue(s)
   minimum k              1  (21 combination(s) below 5)
   profile                HealthDCAT-AP 8, non-public tier
@@ -240,8 +244,10 @@ CONFORMANT: 0 error(s), 8 warning(s), 0 notice(s) from 40 rules
 `build` already ran this and would have failed if it did not conform. Running it
 separately is for datasets you did not build here.
 
-**The seven warnings are the dataset telling you something true about itself.**
-Seven of its twenty-seven imaging studies say in their own metadata that
+**Seven of the eight warnings are the dataset telling you something true about
+itself** — the eighth is the missing `License`, which the build section above
+explains. Seven of its twenty-seven imaging studies say in their own metadata
+that
 identifiers are rendered into the pixels — put there by the
 `imaging.burned_in_annotation` defect, which is what a real scanner does when a
 technician types a name onto a screen capture. This tool orchestrates `dcm2bids`
@@ -268,6 +274,7 @@ commissura risk ./dataset
   below k=5              21 combination(s)
     k=1  age=22, sex=M
     k=1  age=26, sex=F
+... eight more rows, then the laboratory-values section ...
 ```
 
 Twenty-one of twenty-five participants are unique on age and sex together. That

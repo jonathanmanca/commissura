@@ -118,12 +118,12 @@ def test_the_two_captured_warning_counts_agree() -> None:
     reader comparing the two screens would conclude the tool is inconsistent.
 
     **What this does not do, said plainly.** It compares the README with itself,
-    not with a real run. Nothing here executes the walkthrough, so a number that
-    is stale in *both* places still passes — which is how the residual-risk
-    entries and the dropped-record paths in that block came to describe a corpus
-    nobody has. Closing that needs a test that builds the walkthrough and diffs
-    the block, which costs about fifty seconds of suite time and is a decision
-    about runtime rather than a line of code.
+    not with a real run, so a number stale in *both* places passes here. That
+    is `test_walkthrough`'s job now: it re-runs every captured command and
+    compares each block against what the command prints. This check is kept
+    because the two blocks state one number twice and agreeing with each other
+    is a separate claim from agreeing with a run — and because it costs nothing,
+    where that one costs half a minute.
     """
     text = README.read_text(encoding="utf-8")
 
