@@ -556,11 +556,14 @@ def build(
         Path | None,
         typer.Option(
             "--exclude-subjects",
-            help="A file of national identifiers, one per line, of people who have "
-            "objected to the secondary use of their data. Every one of their "
-            "records is left out and the manifest records that it was. Codici "
-            "fiscali and not subject labels: a label cannot be checked for a "
-            "typing error and is only valid for one key and one permit.",
+            help="A file naming the people who have objected to the secondary use "
+            "of their data, one per line. Every one of their records is left "
+            "out and the manifest records that it was. A bare line is a codice "
+            "fiscale; a subject keyed on something else is named "
+            "scoped_record_number|authority|number or "
+            "assigned_identifier|oid|code. Never subject labels: a label "
+            "cannot be checked for a typing error and is only valid for one "
+            "key and one permit.",
         ),
     ] = None,
     age_band: Annotated[
@@ -810,7 +813,7 @@ def build(
                         "subjects_excluded": summary.opt_out.subjects_excluded,
                         "records_excluded": summary.opt_out.records_excluded,
                         "entries_matching_no_subject": len(summary.opt_out.unmatched),
-                        "subjects_unreachable_by_national_identifier": unreachable,
+                        "subjects_not_keyed_on_a_national_identifier": unreachable,
                     },
                     "free_text_redactions": summary.redaction_count,
                     "age_band_years": summary.age_band,
@@ -906,13 +909,29 @@ def build(
                     "      An entry matches nothing when the person has no records in this export,"
                 )
                 typer.echo("      or when it is mistyped. This tool cannot tell which.")
+            listed = summary.opt_out.entries_by_kind
             if unreachable:
+                # Not "unreachable" any more, which is the point: it says what
+                # a holder has to write to reach them. Printed per kind so the
+                # two numbers can be compared -- subjects this corpus holds of
+                # a kind, against entries the list names of that kind -- which
+                # is what tells a holder their list is addressing the wrong
+                # population before a build goes out.
                 typer.echo(
                     f"    {unreachable} subject(s) here are keyed on an institution's own "
                     "record number"
                 )
                 typer.echo(
-                    "      or on an ENI, STP or ANA code, so no entry on the list could reach them."
+                    "      or on an ENI, STP or ANA code. No bare codice fiscale reaches them: "
+                    "name them"
+                )
+                typer.echo(
+                    "      scoped_record_number|authority|number or assigned_identifier|oid|code."
+                )
+                typer.echo(
+                    "      This list names "
+                    f"{listed[KeyKind.SCOPED_RECORD_NUMBER.value]} of the first and "
+                    f"{listed[KeyKind.ASSIGNED_IDENTIFIER.value]} of the second."
                 )
         if summary.residual_risks():
             typer.echo("")

@@ -621,5 +621,16 @@ def test_a_subject_holding_no_codice_fiscale_is_reported_as_out_of_reach(
     )
 
     assert result.exit_code == 0
-    assert "no entry on the list could reach them" in result.stdout
+    # The sentence this used to assert -- "no entry on the list could reach
+    # them" -- was true until the list learnt to name a kind, and asserting it
+    # now would pin the limit rather than the report. What it always meant is
+    # that the holder is told these subjects exist and told what to write, and
+    # that is what it checks.
     assert "ENI, STP or ANA code" in result.stdout
+    assert "No bare codice fiscale reaches them" in result.stdout
+    assert "scoped_record_number|authority|number" in result.stdout
+    # And the list's own composition beside the corpus's, because a holder
+    # comparing "12 subjects of a kind" against "0 entries of that kind" is the
+    # one who catches a list aimed at the wrong population before a build goes
+    # out.
+    assert "This list names 0 of the first and 0 of the second." in result.stdout

@@ -312,7 +312,7 @@ def test_the_manifest_is_consistent_after_a_withdrawal(tmp_path: Path) -> None:
     # Spelled out rather than read from the constant, deliberately: a schema
     # version is part of a schema change, and a test that imported the constant
     # would agree with any value somebody put there.
-    assert manifest["schema_version"] == "7.1.0"
+    assert manifest["schema_version"] == "7.2.0"
 
 
 @pytest.mark.parametrize("field", ["modalities", "integrity", "residual_risk", "source"])

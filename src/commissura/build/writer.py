@@ -530,6 +530,7 @@ def build_dataset(
             entries=len(exclusions),
             subjects_excluded=len(excluded_keys),
             records_excluded=excluded_records,
+            entries_by_kind=exclusions.by_kind(),
             unmatched=exclusions.unmatched(excluded_keys),
             excluded_paths=frozenset(excluded_paths),
         )

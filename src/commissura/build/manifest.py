@@ -44,11 +44,18 @@ from commissura.read.corpus import RawCorpus
 from commissura.read.identity import REASON_KEEPS_RECORD, KeyKind, RefusalReason
 from commissura.validate.context import DatasetContext
 
-MANIFEST_SCHEMA_VERSION = "7.1.0"
+MANIFEST_SCHEMA_VERSION = "7.2.0"
 """Version of the manifest format defined here.
 
 Separate from the layout schema version, because the manifest will change on a
 different clock from the dataset layout.
+
+**7.2.0, 2026-11-23.** ``opt_out.entries_by_kind`` is new, and additive for the
+same reason. It is the one thing about an exclusion list an auditor cannot learn
+elsewhere: whether the list the holder acted on could reach subjects that no
+codice fiscale names. Until that day no entry could, so the section's note
+described a limit; now it carries a count per kind of subject key, to be read
+against ``source.subject_keys``.
 
 **7.1.0, 2026-11-19.** ``generalisation`` is new. Additive, so a reader of
 7.0.0 still parses this; the minor number moves because there is something new
@@ -305,16 +312,21 @@ def _opt_out_section(summary: BuildSummary) -> dict[str, object]:
         "entries": record.entries,
         "subjects_excluded": record.subjects_excluded,
         "records_excluded": record.records_excluded,
+        "entries_by_kind": dict(record.entries_by_kind),
         "entries_matching_no_subject": len(record.unmatched),
         "note": (
             "Counts only. Neither the identifiers on the list nor the subject "
             "labels they resolved to are recorded: a list of excluded subjects "
             "is a list of people who exercised a right to object, which is "
             "itself a disclosure, and this document is written to be read by an "
-            "access body. The list is matched on national identifiers, so a "
-            "subject this corpus established from an institution's own record "
-            "number or from an ENI, STP or ANA code cannot be reached by it; "
-            "`subject_keys` above says how many such subjects there are. An "
+            "access body. `entries_by_kind` is the one thing that cannot be "
+            "learnt any other way: it says whether the list this build acted on "
+            "could reach subjects that no codice fiscale names -- one "
+            "established from an institution's own record number, or from an "
+            "ENI, STP or ANA code -- which a list of codici fiscali alone "
+            "cannot reach. "
+            "Compare it against `subject_keys` above, which says what "
+            "established the subjects this corpus actually held. An "
             "entry matching no subject is reported to the operator and is not "
             "an error, because the person may simply have no records in this "
             "export and no tool can tell that from a mistyped identifier."

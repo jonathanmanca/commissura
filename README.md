@@ -1027,6 +1027,10 @@ commissura build ./raw --out ./dataset --exclude-subjects ./objections.txt
 # received 2026-03-04, ticket 1198
 RSSMRA80A01X000Z
 VRDLGU75D12X842T
+
+# somebody with no codice fiscale: name the kind of key instead
+scoped_record_number|OSPEDALE SINTETICO DI COLLEVERDE|8975172
+assigned_identifier|2.16.840.1.113883.2.9.4.3.4|STP0000000SINTETIC
 ```
 
 Every record belonging to those people is left out: no subject directory, no
@@ -1035,13 +1039,28 @@ offsets and redactions are **byte-identical** to a build without the file, so
 acting on one person's objection does not hand your data user a dataset that no
 longer joins to the one they already have.
 
-**The file holds codici fiscali, not subject labels**, and that is deliberate.
-A label is derived from your key and, with `--permit`, from the permit too, so a
-file of labels is valid for exactly one of each and silently matches nobody
-under any other — while an objection is permanent and a key can be rotated. And
-a codice fiscale carries a check character, so a typo is refused by name; twelve
-hex characters are twelve hex characters, and a holder who mistypes one would
-see a successful build and would not have acted on the objection.
+**Never subject labels**, and that is deliberate. A label is derived from your
+key and, with `--permit`, from the permit too, so a file of labels is valid for
+exactly one of each and silently matches nobody under any other — while an
+objection is permanent and a key can be rotated. And a codice fiscale carries a
+check character, so a typo is refused by name; twelve hex characters are twelve
+hex characters, and a holder who mistypes one would see a successful build and
+would not have acted on the objection.
+
+**A bare line is a codice fiscale.** A subject your corpus keyed on something
+else is named by declaring the kind: `scoped_record_number|authority|number` for
+an institution's own record number, `assigned_identifier|oid|code` for an ENI,
+STP or ANA code. The authority is never guessed, because two hospitals' record
+numbers are deliberately not one namespace — `0012345` at one and `0012345` at
+another are two people. Write the institution as your own exports name it;
+spacing, case and leading zeros are normalised for you, and the kinds are the
+same ones `source.subject_keys` in the manifest reports, so you can see which
+are in play before writing a line.
+
+A line declares its kind rather than having one guessed from the shape of its
+value. That distinction is the whole reason this is safe to offer: a guesser
+reads a file in the wrong mode and excludes nobody, which is the failure that
+looks like success.
 
 **A malformed entry fails the build. An entry matching nobody does not.** The
 first cannot be anything but a mistake. The second can mean the person simply
@@ -1059,20 +1078,22 @@ identifier — so it is reported rather than decided for you:
       or when it is mistyped. This tool cannot tell which.
 ```
 
-Two limits, both reported rather than left to be found:
+Two things worth knowing, both reported rather than left to be found:
 
-- **A subject this corpus keyed on something else cannot be reached.** When a
-  message carries no usable codice fiscale, the subject is keyed on the
-  institution's own record number instead, and an ENI, STP or ANA patient has no
-  codice fiscale at all. `build` says how many such subjects there are whenever
-  you pass the flag, because a list of codici fiscali was never offered the
-  chance on them.
+- **You have to know which kind of key your corpus used.** When a message
+  carries no usable codice fiscale the subject is keyed on the institution's own
+  record number, and an ENI, STP or ANA patient has no codice fiscale at all. So
+  `build` tells you how many subjects of each kind this corpus holds, and how
+  many entries of each kind your list names — because a list naming none of a
+  kind the corpus is full of is a list aimed at the wrong population, and that
+  is worth seeing before the dataset goes out rather than after.
 - **The identifiers are on your disk and nowhere else.** The manifest records
   counts and never a value: a list of excluded subjects is a list of people who
   exercised a right to object, and that document is written to be sent to an
-  access body. What it does record is that an exclusion happened at all — which
-  is the point, because a dataset built after an objection should not look
-  identical to one built before it.
+  access body. What it does record is that an exclusion happened at all, and how
+  many entries of each kind — which is the point, because a dataset built after
+  an objection should not look identical to one built before it, and an auditor
+  cannot otherwise tell whether the list could reach the people in it.
 
 Use [`commissura whois`](#commissura-whois) when you need the other direction:
 the label a named person was given, in a dataset you have already released.
