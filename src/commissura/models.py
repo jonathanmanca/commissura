@@ -91,6 +91,8 @@ class ReportKind(StrEnum):
 
     RADIOLOGY = "radiology"
     DISCHARGE = "discharge"
+    PATHOLOGY = "pathology"
+    OUTPATIENT = "outpatient"
 
 
 class AbnormalFlag(StrEnum):

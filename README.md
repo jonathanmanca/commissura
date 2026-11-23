@@ -649,39 +649,61 @@ raw/
 `--cda` writes **everything** as HL7 Italia CDA R2 documents in `cda/` instead
 of HL7 v2 messages in `lab/` and plain text in `reports/`, which is the corpus
 a site that has migrated to the Fascicolo Sanitario Elettronico would hand
-over. Four profiles, each with its own LOINC document code:
+over. **Every document profile the Ministry's index publishes for the three
+modalities this tool reads**, each with its own LOINC document code:
 
 | Document | Code | Specification |
 | --- | --- | --- |
 | Referto di Medicina di Laboratorio | `11502-2` | `HL7IT-IG_CDA2_RefertoMedicinaLab-v1.3-S` |
 | Referto di Radiologia | `68604-8` | `HL7IT-IG_CDA2_RAD-v1.1-S` |
 | Lettera di Dimissione Ospedaliera | `34105-7` | `HL7IT-IG_CDA2_LDO-v1.2-S` |
+| Referto di Anatomia Patologica | `11526-1` | ART-DECOR RAP v1.0 |
+| Referto di Specialistica Ambulatoriale | `11488-4` | ART-DECOR RSA v1.1 |
 | Profilo Sanitario Sintetico | `60591-5` | ART-DECOR PSS v1.5 |
 
 Off by default, so a given seed produces the same corpus it produced before the
 flag existed.
 
-The first three share one header, element for element, and differ in four
-things: the document code above, the title, the template identifier, and which
-LOINC-coded sections the body carries. **A laboratory report yields structured
-results and a narrative; the other two are narrative only** — both
-specifications keep the coded entries optional and say a document with sections
-and no entries is still well formed, and a radiology report's content *is*
-prose. So a radiology or discharge document contributes a report record and no
+The four narrative profiles share one header, element for element, and differ in
+the document code above, the title, the template identifier, which LOINC-coded
+sections the body carries, and two values below. **A laboratory report yields
+structured results and a narrative; the other four are narrative only** — every
+one of those specifications keeps the coded entries optional and says a document
+with sections and no entries is still well formed, and a radiology report's
+content *is* prose. So a narrative document contributes a report record and no
 laboratory record, rather than an empty table claiming the modality carried
 something.
 
+Each profile marks its own sections required, and the numbers are not close:
+radiology two of eleven, the discharge letter three of sixteen, pathology two of
+nine, the outpatient report two of twelve. All of them are emitted, plus the
+optional ones the generator has content for. The sections are written in each
+template's own order, because `structuredBody` is a sequence — a body whose
+sections are each correct and reordered does not validate.
+
+Two header values are per profile rather than shared, and the second is a
+finding rather than a difference. **`setId` and `versionNumber`** are written
+only for the outpatient report, whose template requires `setId` at 1..1 where
+the others leave it optional. And **`typeId/@extension`** is
+`POCD_MT000040UV02` for pathology, outpatient and the patient summary — all
+three fix it in their own templates — against `POCD_HD000040` for the
+laboratory report and the discharge letter. The radiology specification states
+no value at all: its single example reads `[POCD_HDXXXXX]`, a placeholder it
+never instantiates, so what this tool emits there comes from its neighbours.
+
+**Pathology and outpatient reports are written as CDA and never as free text.**
+Both are published CDA profiles; a free-text template for either would be a
+layout invented here, which measures nothing the published form does not. The
+plain-text path stays exactly as it was, which is also why none of the numbers
+captured above moved.
+
 **The patient summary is the one that does not fit that pattern**, and it is
 one per subject rather than one per encounter, because it is a document that is
-kept up to date rather than a record of an event. Its profile is published as
-ART-DECOR rather than as a PDF — every PDF the Ministry's index offers for it
-is marked *obsoleta* — and it differs from the other three in five ways:
-`typeId/@extension` is `POCD_MT000040UV02` where the laboratory specification
-writes `POCD_HD000040`; there is no `componentOf`, so no numero nosologico;
-`documentationOf/serviceEvent` takes its place; `setId` and `versionNumber` say
-which version of the summary this is; and **no section is mandatory**, where
-the radiology profile requires two of eleven and the discharge letter three of
-sixteen.
+kept up to date rather than a record of an event. It differs from the four
+narrative profiles in that there is **no `componentOf`**, so no numero
+nosologico — a subject established only by a summary is keyed on their codice
+fiscale or on nothing — with `documentationOf/serviceEvent` in its place, and
+in that **no section is mandatory** at all.
 
 A generated summary carries an allergies section and a medication section, each
 able to say "nothing known" — which the specification treats as a distinct

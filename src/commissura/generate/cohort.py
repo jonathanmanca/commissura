@@ -29,7 +29,12 @@ from typing import Final
 from commissura.generate import vocabulary as vocab
 from commissura.generate.imaging import sample_study
 from commissura.generate.labs import sample_panel
-from commissura.generate.reports import sample_discharge_report, sample_radiology_report
+from commissura.generate.reports import (
+    sample_discharge_report,
+    sample_outpatient_report,
+    sample_pathology_report,
+    sample_radiology_report,
+)
 from commissura.identifiers import (
     accession_number,
     codice_fiscale,
@@ -362,6 +367,40 @@ def build_subject(rng: Random, *, index: int, spec: CohortSpec) -> PlannedSubjec
                 sample_discharge_report(
                     rng,
                     admitted_at=when,
+                    author_name=_clinician(rng),
+                    specialty=rng.choice(vocab.CLINICAL_SPECIALTIES),
+                    site=site,
+                )
+            )
+
+        # **CDA corpora only, and the guard is first so that a plain corpus
+        # draws nothing at all.** `spec.cda` is constant for a whole run, so
+        # short-circuiting here cannot make the stream depend on the shape of a
+        # cohort -- which is the trap the PSS draw had to avoid on 2026-11-18,
+        # where the condition was a fact about the person. The consequence is
+        # the one that matters: every number the README captures comes from an
+        # HL7 corpus and does not move.
+        #
+        # Why these two are CDA-only at all: both are published CDA R2 profiles
+        # on the Ministry's index, and a free-text template for either would be
+        # a layout this project invented. That measures nothing the published
+        # form does not, and inventing report layouts is the obstacle recorded
+        # on 2026-11-13 rather than a feature.
+        if spec.cda and rng.random() < 0.30:
+            reports.append(
+                sample_pathology_report(
+                    rng,
+                    collected_at=when,
+                    author_name=_clinician(rng),
+                    site=site,
+                )
+            )
+
+        if spec.cda and rng.random() < 0.30:
+            reports.append(
+                sample_outpatient_report(
+                    rng,
+                    seen_at=when,
                     author_name=_clinician(rng),
                     specialty=rng.choice(vocab.CLINICAL_SPECIALTIES),
                     site=site,

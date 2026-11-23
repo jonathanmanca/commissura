@@ -43,6 +43,13 @@ from commissura.generate.defects import DefectInjector
 from commissura.generate.vocabulary import (
     DISCHARGE_INSTRUCTIONS,
     DISCHARGE_REASONS,
+    OUTPATIENT_FINDINGS,
+    OUTPATIENT_QUESTIONS,
+    OUTPATIENT_SERVICES,
+    PATHOLOGY_CLINICAL_NOTES,
+    PATHOLOGY_DIAGNOSES,
+    PATHOLOGY_MICROSCOPY,
+    PATHOLOGY_PROCEDURES,
     RADIOLOGY_CONCLUSIONS,
     RADIOLOGY_FINDINGS,
     RADIOLOGY_INDICATIONS,
@@ -145,6 +152,83 @@ def sample_discharge_report(
     )
 
 
+def sample_pathology_report(
+    rng: Random,
+    *,
+    collected_at: datetime,
+    author_name: str,
+    site: Site,
+) -> ClinicalReport:
+    """Invent the structured content of a pathology report, RAP v1.0.
+
+    Args:
+        rng: Seeded random source.
+        collected_at: When the specimen was taken.
+        author_name: The reporting pathologist.
+        site: The institution.
+
+    Returns:
+        The report content, not yet rendered.
+    """
+    return ClinicalReport(
+        kind=ReportKind.PATHOLOGY,
+        # A specimen is reported days after it is taken, which is what puts a
+        # pathology report's date apart from the encounter that produced it.
+        authored_at=collected_at + timedelta(days=rng.randrange(3, 21)),
+        author_name=author_name,
+        author_role="Anatomia Patologica",
+        institution=site.name,
+        indication=rng.choice(PATHOLOGY_CLINICAL_NOTES),
+        technique=rng.choice(PATHOLOGY_PROCEDURES),
+        findings=tuple(rng.sample(PATHOLOGY_MICROSCOPY, rng.randrange(1, 3))),
+        conclusion=rng.choice(PATHOLOGY_DIAGNOSES),
+    )
+
+
+def sample_outpatient_report(
+    rng: Random,
+    *,
+    seen_at: datetime,
+    author_name: str,
+    specialty: str,
+    site: Site,
+) -> ClinicalReport:
+    """Invent the structured content of an outpatient specialist report, RSA v1.1.
+
+    Args:
+        rng: Seeded random source.
+        seen_at: When the patient was seen.
+        author_name: The specialist.
+        specialty: Which clinic.
+        site: The institution.
+
+    Returns:
+        The report content, not yet rendered.
+    """
+    return ClinicalReport(
+        kind=ReportKind.OUTPATIENT,
+        authored_at=seen_at + timedelta(hours=rng.randrange(1, 8)),
+        author_name=author_name,
+        author_role=specialty,
+        institution=site.name,
+        indication=rng.choice(OUTPATIENT_QUESTIONS),
+        technique=rng.choice(OUTPATIENT_SERVICES),
+        findings=tuple(rng.sample(OUTPATIENT_FINDINGS, rng.randrange(1, 3))),
+        conclusion=rng.choice(RADIOLOGY_CONCLUSIONS),
+    )
+
+
+PLAIN_TEXT_KINDS: frozenset[ReportKind] = frozenset({ReportKind.RADIOLOGY, ReportKind.DISCHARGE})
+"""Which report kinds this module has a free-text template for.
+
+Two of the four, and the other two are CDA-only by the decision recorded on
+2026-11-23: a pathology report and an outpatient specialist report are read
+from published CDA profiles, while a free-text template for either would be
+this project inventing a layout — which measures nothing a published one does
+not, and which is the obstacle recorded on 2026-11-13 rather than a feature.
+"""
+
+
 def render_report(
     report: ClinicalReport,
     *,
@@ -172,12 +256,21 @@ def render_report(
     Returns:
         The report text and its identifier spans.
     """
-    text = AnnotatedText(path)
+    if report.kind not in PLAIN_TEXT_KINDS:
+        # Refused rather than rendered, because every branch below treats "not
+        # radiology" as "discharge letter": a pathology report arriving here
+        # would come out with a discharge letter's headings and its contact
+        # sentence, and nothing would say so. The CDA-only kinds are
+        # unreachable from any generated corpus, and this project has recorded
+        # four times that an unreachable path is not a safe one.
+        message = f"no free-text template for a {report.kind.value} report"
+        raise ValueError(message)
     heading = (
         "REFERTO DI DIAGNOSTICA PER IMMAGINI"
         if report.kind is ReportKind.RADIOLOGY
         else "LETTERA DI DIMISSIONE"
     )
+    text = AnnotatedText(path)
 
     text.line(Phi(site.name, PhiCategory.INSTITUTION))
     text.line(Phi(site.address, PhiCategory.ADDRESS), " - ", Phi(site.city, PhiCategory.ADDRESS))

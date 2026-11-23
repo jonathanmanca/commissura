@@ -231,11 +231,41 @@ what :func:`commissura.generate.cda.render_lab_cda` and the narrative renderer
 emit. The PSS Schematron permits only ``POCD_MT000040UV02``, in a closed
 template, so a document carrying the other value is rejected outright.
 
+**Reading RAP and RSA settled which side is the outlier, and it is the
+laboratory report.** Both of those templates fix ``typeId/@extension`` to
+``POCD_MT000040UV02`` as well, so three HL7 Italia profiles agree and one does
+not. The lab value is kept where the lab specification states it, because this
+constant records what each document declares rather than a house style -- but
+anybody choosing a value for a profile they have not read should start from
+this one.
+
 Checked rather than assumed, and the check is the reason this constant exists:
 writing one value for every HL7 Italia profile is what anybody would do, and it
 would have produced a non-conformant PSS while the laboratory documents stayed
 right. Two specifications from one affiliate disagreeing on a fixed attribute
 is the `NNITA` lesson again, in a place nothing would have surfaced it.
+"""
+
+PATHOLOGY_DOCUMENT_CODE: Final = "11526-1"
+"""``ClinicalDocument/code`` for a pathology report, RAP v1.0.
+
+Read from the profile's own ART-DECOR template, where ``code/@code`` is fixed
+(``F``) to this value against LOINC ``2.16.840.1.113883.6.1``. The publication
+is `hl7itig-html-20230329T145023`, document template
+``2.16.840.1.113883.2.9.10.1.8.1``, effective 2022-09-20, **status Draft** --
+which is worth knowing, because it is the only one of the four narrative
+profiles this tool writes that upstream has not marked Active.
+"""
+
+OUTPATIENT_DOCUMENT_CODE: Final = "11488-4"
+"""``ClinicalDocument/code`` for an outpatient specialist report, RSA v1.1.
+
+Fixed the same way, in publication `hl7itig-html-20260416T111817`, document
+template ``2.16.840.1.113883.2.9.10.1.9.1`` effective 2026-04-14, status
+**Active**. LOINC ``11488-4`` is "Consult note", which is what a specialist
+report is: the Ministry's index offers this profile only as a PDF, and the
+ART-DECOR publication carrying the same version is the machine-readable form of
+it.
 """
 
 DISCHARGE_DOCUMENT_CODE: Final = "34105-7"

@@ -141,6 +141,26 @@ def _another_clinician(rng: Random, besides: str) -> str:
     return f"{family} {given}"
 
 
+_REPORT_MARKER: dict[ReportKind, str] = {
+    ReportKind.RADIOLOGY: "rad",
+    ReportKind.DISCHARGE: "dim",
+    ReportKind.PATHOLOGY: "rap",
+    ReportKind.OUTPATIENT: "rsa",
+}
+"""The filename fragment that says which kind of report a file holds.
+
+**Looked up without a default**, which is the point of making it a table: the
+expression it replaced read `"rad" if kind is RADIOLOGY else "dim"`, so a third
+kind would have been filed as a discharge letter under a name nobody would
+question. A kind added without a marker raises `KeyError` and stops the run --
+the `CATEGORY_DISPOSITION` precedent of 2026-11-10, for the same reason.
+
+The markers are the abbreviations the Ministry's own index uses for the
+profiles, so a corpus is readable by somebody who knows the specifications
+rather than only by this tool.
+"""
+
+
 def _write_text(path: Path, content: str) -> None:
     """Write text with no newline translation, creating parent directories.
 
@@ -277,7 +297,7 @@ def _render_subject(
 
     # --- Reports ---
     for position, report in enumerate(planned.subject.reports, start=1):
-        kind = "rad" if report.kind is ReportKind.RADIOLOGY else "dim"
+        kind = _REPORT_MARKER[report.kind]
         # In a CDA corpus the narrative documents go the same way the laboratory
         # panels do: a site that has migrated to the Fascicolo Sanitario
         # Elettronico sends its radiology reports and discharge letters as CDA

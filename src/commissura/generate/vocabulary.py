@@ -489,6 +489,63 @@ DISCHARGE_INSTRUCTIONS: tuple[str, ...] = (
 )
 
 
+PATHOLOGY_CLINICAL_NOTES: tuple[str, ...] = (
+    "Nodulo mammario rilevato a screening, BI-RADS 4.",
+    "Lesione cutanea pigmentata in sede dorsale, in progressivo aumento.",
+    "Polipo del colon discendente, rimosso in endoscopia.",
+    "Tumefazione linfonodale laterocervicale persistente.",
+    "Area di addensamento polmonare periferico, sospetta.",
+)
+"""Why a specimen reached the pathology laboratory, for the RAP indication."""
+
+PATHOLOGY_PROCEDURES: tuple[str, ...] = (
+    "Esame istologico su biopsia incisionale, tre frustoli fissati in formalina.",
+    "Esame citologico su agoaspirato, colorazione di Papanicolaou.",
+    "Esame istologico su pezzo operatorio, campionamento seriato.",
+    "Immunoistochimica su sezioni in paraffina, pannello standard.",
+)
+"""What was done to the specimen: the one RAP section that is obligatory."""
+
+PATHOLOGY_MICROSCOPY: tuple[str, ...] = (
+    "Proliferazione epiteliale atipica con nuclei ipercromici e mitosi sparse.",
+    "Infiltrato infiammatorio cronico linfomonocitario, senza atipie.",
+    "Architettura ghiandolare conservata, lieve displasia di basso grado.",
+    "Margini di resezione indenni da neoplasia alla distanza minima di 4 mm.",
+)
+"""The microscopic observation, which is the clinical substance of a RAP."""
+
+PATHOLOGY_DIAGNOSES: tuple[str, ...] = (
+    "Adenoma tubulare con displasia di basso grado.",
+    "Iperplasia nodulare benigna, assenza di atipie.",
+    "Carcinoma in situ, margini indenni.",
+    "Flogosi cronica aspecifica.",
+)
+"""The RAP diagnosis, which is its second obligatory section."""
+
+OUTPATIENT_QUESTIONS: tuple[str, ...] = (
+    "Controllo cardiologico per cardiopalmo riferito da alcune settimane.",
+    "Valutazione dermatologica di lesione cutanea in sede scapolare.",
+    "Visita endocrinologica per alterazione degli indici tiroidei.",
+    "Controllo pneumologico per dispnea da sforzo.",
+)
+"""Why the patient was referred, for the RSA indication."""
+
+OUTPATIENT_SERVICES: tuple[str, ...] = (
+    "Visita specialistica con anamnesi ed esame obiettivo completo.",
+    "Elettrocardiogramma a dodici derivazioni a riposo.",
+    "Ecografia dei tessuti molli con sonda lineare ad alta frequenza.",
+    "Spirometria globale con test di broncodilatazione.",
+)
+"""The services actually performed: one of RSA's two obligatory sections."""
+
+OUTPATIENT_FINDINGS: tuple[str, ...] = (
+    "Obiettivita' nei limiti, non segni di scompenso.",
+    "Ritmo sinusale regolare, nessuna alterazione della conduzione.",
+    "Quadro funzionale compatibile con lieve deficit ostruttivo reversibile.",
+    "Lesione a margini regolari, aspetto dermoscopico non sospetto.",
+)
+"""The RSA report body, which is its other obligatory section."""
+
 ALLERGIES: tuple[str, ...] = (
     "Penicillina (reazione cutanea documentata)",
     "Acido acetilsalicilico (broncospasmo)",

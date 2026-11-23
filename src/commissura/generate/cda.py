@@ -63,6 +63,8 @@ from commissura.read.cda import (
     ENI_NATIONAL_ROOT,
     LABORATORY_DOCUMENT_CODE,
     LOINC_SYSTEM,
+    OUTPATIENT_DOCUMENT_CODE,
+    PATHOLOGY_DOCUMENT_CODE,
     RADIOLOGY_DOCUMENT_CODE,
     STP_NATIONAL_ROOT,
     SUMMARY_DOCUMENT_CODE,
@@ -401,6 +403,16 @@ class _NarrativeProfile:
         sections: ``(code, display, title, field)`` in document order, where
             ``field`` names the :class:`ClinicalReport` attribute the section
             carries.
+        addendum_code: Which section the closing prose goes in. Was a
+            two-branch conditional inside :func:`_narrative_attribution`, which
+            stopped scaling at the third profile: one fact, one place.
+        type_id_extension: ``typeId/@extension``, which is **not the same for
+            all four** -- see this table's own docstring.
+        versioned: Whether to write ``setId`` and ``versionNumber``. True only
+            for RSA, whose template requires ``setId`` at 1..1 where the other
+            three leave it conditional or absent -- so this is not a style
+            choice but the one header difference the seam did not already
+            absorb.
     """
 
     document_code: str
@@ -409,6 +421,9 @@ class _NarrativeProfile:
     template_root: str
     template_extension: str
     sections: tuple[tuple[str, str, str, str], ...]
+    addendum_code: str
+    type_id_extension: str
+    versioned: bool = False
 
 
 NARRATIVE_PROFILES: Final[dict[ReportKind, _NarrativeProfile]] = {
@@ -429,6 +444,8 @@ NARRATIVE_PROFILES: Final[dict[ReportKind, _NarrativeProfile]] = {
             ("18782-3", "Radiology Study observation", "Referto", "findings"),
             ("55110-1", "Conclusions", "Conclusioni", "conclusion"),
         ),
+        addendum_code="55107-7",
+        type_id_extension="POCD_HD000040",
     ),
     ReportKind.DISCHARGE: _NarrativeProfile(
         document_code=DISCHARGE_DOCUMENT_CODE,
@@ -442,6 +459,44 @@ NARRATIVE_PROFILES: Final[dict[ReportKind, _NarrativeProfile]] = {
             ("11535-2", "Hospital Discharge Dx", "Condizioni alla dimissione", "conclusion"),
             ("18776-5", "Treatment Plan", "Istruzioni di follow-up", "technique"),
         ),
+        addendum_code="18776-5",
+        type_id_extension="POCD_HD000040",
+    ),
+    ReportKind.PATHOLOGY: _NarrativeProfile(
+        document_code=PATHOLOGY_DOCUMENT_CODE,
+        display_name="Referto di Anatomia Patologica",
+        title="Referto di Anatomia Patologica",
+        template_root="2.16.840.1.113883.2.9.10.1.8.1",
+        template_extension="1.0",
+        sections=(
+            ("22636-5", "Notizie Cliniche", "Notizie Cliniche", "indication"),
+            ("29300-1", "Procedura", "Procedura", "technique"),
+            (
+                "22635-7",
+                "Osservazione Microscopica",
+                "Osservazione Microscopica",
+                "findings",
+            ),
+            ("22637-3", "Diagnosi", "Diagnosi", "conclusion"),
+        ),
+        addendum_code="55107-7",
+        type_id_extension=SUMMARY_TYPE_ID_EXTENSION,
+    ),
+    ReportKind.OUTPATIENT: _NarrativeProfile(
+        document_code=OUTPATIENT_DOCUMENT_CODE,
+        display_name="Referto di Specialistica Ambulatoriale",
+        title="Referto di Specialistica Ambulatoriale",
+        template_root="2.16.840.1.113883.2.9.10.1.9.1",
+        template_extension="1.1",
+        sections=(
+            ("29299-5", "Quesito Diagnostico", "Quesito Diagnostico", "indication"),
+            ("62387-6", "Prestazioni", "Prestazioni", "technique"),
+            ("47045-0", "Referto", "Referto", "findings"),
+            ("55110-1", "Conclusioni", "Conclusioni", "conclusion"),
+        ),
+        addendum_code="55107-7",
+        type_id_extension=SUMMARY_TYPE_ID_EXTENSION,
+        versioned=True,
     ),
 }
 """Section codes and obligations read from the two specifications, not recalled.
@@ -456,6 +511,51 @@ OPZIONALE and are emitted because the generator has the content for them.
 ``11535-2`` "Condizioni del paziente alla dimissione e diagnosi alla
 dimissione". All three are emitted, plus the optional ``18776-5`` "Istruzioni di
 follow-up", which is where a discharge letter's technique text belongs.
+
+**RAP v1.0 and RSA v1.1 were read from ART-DECOR, not from a PDF**, and each
+marks exactly *two* of its sections required. RAP: ``29300-1`` "Procedura" and
+``22637-3`` "Diagnosi", of nine. RSA: ``62387-6`` "Prestazioni" and ``47045-0``
+"Referto", of twelve. Both are emitted for both profiles, plus two optional
+sections each because the generator has the content.
+
+The sections are in **document order**, which is not cosmetic: CDA's
+``structuredBody`` is a sequence, and the templates list their components in a
+fixed order, so a body whose sections are correct and reordered is a body that
+does not validate.
+
+**The display names for these two are the Italian section titles**, where the
+first two profiles carry LOINC's English ones. That is deliberate: the
+ART-DECOR pages give the code and the Italian title, and the English LOINC
+display names were not read. Writing a plausible one would be the trap of
+2026-11-18 -- ``18748-4`` looked exactly as right as ``68604-8``.
+
+**And ``typeId/@extension`` is not one value, which emitting RAP and RSA is
+what exposed.** The renderer wrote ``POCD_HD000040`` for every narrative
+profile -- the laboratory specification's value, applied to documents that are
+not laboratory reports. Reading the four sources gives four different
+situations:
+
+* **RAP** and **RSA** *fix* ``POCD_MT000040UV02`` in their own templates, as
+  the PSS does. Three profiles pin it, and all three pin the same value.
+* **LDO v1.2** writes ``POCD_HD000040``, in a worked example rather than in a
+  normative table.
+* **RAD v1.1 states nothing at all.** Its only ``typeId`` reads
+  ``extension="[POCD_HDXXXXX]"`` -- a bracketed placeholder that the document
+  never instantiates, anywhere in its 106 pages.
+
+So the value is per profile now. RAD keeps what it has been emitting, because
+its own specification offers nothing to replace it with and LDO's example
+agrees; it is the one of the four that rests on a neighbouring document rather
+than on its own. Anybody adding a fifth profile should read its template before
+inheriting a value from here.
+
+**``template_extension`` is sourced for three profiles and inferred for one.**
+RSA fixes it at ``1.1`` and RAD at ``1.1``; LDO states none. RAP's template
+*requires* an extension at 1..1 and **fixes no value**, so ``1.0`` here comes
+from the publisher's own version designation -- the Ministry's index names the
+document "RAP v 1.0" and the publication reads "Release V1.0" -- rather than
+from a constraint. It is the one value in these four rows that a conformance
+check could disagree with.
 
 The document codes are the finding worth keeping: radiology is **68604-8** and
 not ``18748-4``, which is what recalling it would produce. See
@@ -546,7 +646,7 @@ def render_narrative_cda(
         'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
     )
     text.line('  <realmCode code="IT"/>')
-    text.line('  <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>')
+    text.line(f'  <typeId root="2.16.840.1.113883.1.3" extension="{profile.type_id_extension}"/>')
     text.line(template)
     text.line(
         f'  <id root="{_SYNTHETIC_ORGANISATION_ARC}.4.6" extension="{_literal(document_id)}"/>'
@@ -559,6 +659,18 @@ def render_narrative_cda(
     text.line(f'  <effectiveTime value="{_timestamp(report.authored_at)}"/>')
     text.line(f'  <confidentialityCode code="V" codeSystem="{_CONFIDENTIALITY_SYSTEM}"/>')
     text.line('  <languageCode code="it-IT"/>')
+    if profile.versioned:
+        # RSA requires `setId` at 1..1 where the other three profiles leave it
+        # conditional, so this is a cardinality difference and not a choice.
+        # The set identifier is derived from the document identifier rather
+        # than drawn, because nothing here issues second versions: a document
+        # and its set are one to one, and inventing a second identifier would
+        # imply a revision history this generator does not model.
+        text.line(
+            f'  <setId root="{_SYNTHETIC_ORGANISATION_ARC}.4.9" '
+            f'extension="{_literal(document_id)}"/>'
+        )
+        text.line('  <versionNumber value="1"/>')
 
     _record_target(text, person, codice_fiscale_root)
     _author(text, report.authored_at, report.author_name, site)
@@ -607,6 +719,7 @@ def render_narrative_cda(
     _narrative_attribution(
         text,
         report=report,
+        addendum_code=profile.addendum_code,
         previous_study_date=previous_study_date,
         previous_site=previous_site,
     )
@@ -622,6 +735,7 @@ def _narrative_attribution(
     text: AnnotatedText,
     *,
     report: ClinicalReport,
+    addendum_code: str,
     previous_study_date: datetime | None,
     previous_site: Site | None,
 ) -> None:
@@ -633,16 +747,27 @@ def _narrative_attribution(
     what an addition like this is for; LDO has no equivalent, so a discharge
     letter carries it under ``18776-5``, which it already uses.
 
+    **RAP and RSA do not list ``55107-7`` either, and use it anyway**, because
+    both of their document templates are declared *Open* -- "other than defined
+    elements are allowed" -- where the PSS is closed and therefore got a
+    different answer on 2026-11-22. Openness is what makes an unlisted section
+    conformant here, so it is the reason rather than convenience, and a profile
+    read later as closed must not simply inherit this.
+
+    Which code to use is now :attr:`_NarrativeProfile.addendum_code` rather
+    than a conditional here: two branches covered two profiles and said nothing
+    about the third.
+
     Why it exists at all is in :func:`render_narrative_cda`: without prose that
     names somebody no structured field declares, a CDA narrative would be
     easier than the plain-text report it replaces and the recall figure would
     improve for no reason but a kinder corpus.
     """
-    addendum = "55107-7" if report.kind is ReportKind.RADIOLOGY else "18776-5"
     text.line("      <component>")
     text.line("        <section>")
     text.line(
-        f'          <code code="{addendum}" codeSystem="{LOINC_SYSTEM}" codeSystemName="LOINC"/>'
+        f'          <code code="{addendum_code}" codeSystem="{LOINC_SYSTEM}" '
+        'codeSystemName="LOINC"/>'
     )
     text.line("          <text>")
     text.line(

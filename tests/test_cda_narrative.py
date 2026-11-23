@@ -61,6 +61,14 @@ KEY = SecretKey(bytes(range(32)))
 MANDATORY_SECTIONS = {
     ReportKind.RADIOLOGY: {"55111-9", "18782-3"},
     ReportKind.DISCHARGE: {"46241-6", "8648-8", "11535-2"},
+    # RAP and RSA arrived on 2026-11-23 and are read from their own ART-DECOR
+    # templates rather than from a PDF table; `test_cda_profiles` is where
+    # their own checks live. They are listed here because this test is
+    # parametrised over the whole enum, and a kind missing from this table
+    # would fail with a KeyError rather than with something a reader can act
+    # on.
+    ReportKind.PATHOLOGY: {"29300-1", "22637-3"},
+    ReportKind.OUTPATIENT: {"62387-6", "47045-0"},
 }
 
 
