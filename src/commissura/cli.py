@@ -1070,6 +1070,7 @@ def verify(
                     "altered": list(report.altered),
                     "missing": list(report.missing),
                     "added": list(report.added),
+                    "symlinks": list(report.symlinks),
                     "manifest_authenticated": report.authenticated,
                 },
                 indent=2,
@@ -1083,6 +1084,13 @@ def verify(
     typer.echo(f"  altered                {len(report.altered)}")
     typer.echo(f"  missing                {len(report.missing)}")
     typer.echo(f"  added                  {len(report.added)}")
+    if report.symlinks:
+        # Reported, and deliberately not counted among the three above: every
+        # recorded byte can still be exactly where it was. What a link means is
+        # that archiving this dataset will either carry somebody else's file or
+        # carry a broken link, which is the next person's problem and not this
+        # verification's verdict.
+        typer.echo(f"  symlinks               {len(report.symlinks)}  (not digested)")
     if report.authenticated is None:
         typer.echo("  manifest               not authenticated (no --key-file)")
     else:
@@ -1095,6 +1103,7 @@ def verify(
         ("altered", report.altered),
         ("missing", report.missing),
         ("added", report.added),
+        ("symlink", report.symlinks),
     ):
         for path in paths[:10]:
             typer.echo(f"    {label:8} {path}")
@@ -1104,6 +1113,10 @@ def verify(
     if report.is_intact:
         typer.echo("")
         typer.echo("  INTACT: every recorded file matches its digest.")
+        if report.symlinks:
+            typer.echo(
+                "  A symlink under the dataset is not part of it: remove it before archiving."
+            )
         if report.authenticated is None:
             typer.echo(
                 "  Note: without the key this detects accident, not tampering. "

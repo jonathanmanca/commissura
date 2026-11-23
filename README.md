@@ -884,7 +884,7 @@ export COMMISSURA_KEY_FILE=~/.commissura/key
 ```
 subject_id  = HMAC-SHA256(key, "subject|" + national_id)[:12]   -> sub-a3f9c21b4e07
 date_offset = HMAC-SHA256(key, "offset|"  + subject_id) % 730 - 365
-dicom_uid   = "2.25." + int(HMAC-SHA256(key, "uid|" + original_uid))
+dicom_uid   = "2.25." + int(uuid8(HMAC-SHA256(key, "uid|" + original_uid)))
 ```
 
 Three properties, each with a tempting wrong alternative:
@@ -1870,7 +1870,7 @@ placed where no authority assigns:
 | Codice fiscale | Place-of-birth code uses an `X` prefix; municipalities are assigned `A`–`M` and foreign states `Z`. The checksum is still valid, so the values exercise a real validator. |
 | Telephone | Subscriber part starts with `0`, which is never assignable after an Italian area code. |
 | Email | `.invalid` is reserved by RFC 2606 and can never be registered. |
-| DICOM UID | The `2.25` arc holds UUIDs as integers, needs no registration, and collides with nobody. |
+| DICOM UID | The `2.25` arc holds UUIDs as integers, needs no registration, and collides with nobody. The integer really is a UUID: the digest's first sixteen bytes carry RFC 9562 version 8, the form defined for one built from application-chosen bits, so a consumer decoding a `2.25` OID gets a valid answer rather than a plausible one. |
 | Institutions | Invented names at invented addresses, every one marked `SINTETIC`. |
 
 ## Development

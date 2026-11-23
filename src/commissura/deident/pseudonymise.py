@@ -66,12 +66,22 @@ produces identifiers that are not ours to issue. Anyone may generate under
 ``2.25`` without applying for an OID.
 """
 
-RULE_VERSION: Final = "1.1.0"
+RULE_VERSION: Final = "1.2.0"
 """Version of the derivation rules in this module.
 
 Recorded in the manifest. If any derivation here changes, this must change with
 it: two datasets built from the same key but different rule versions are not
 linkable, and the manifest is the only place that can say so.
+
+**1.2.0, 2026-11-23.** One change, and it moves values: imaging UIDs are now a
+conformant RFC 9562 version-8 UUID rendered under the ``2.25`` arc, where they
+were a 112-bit integer that the arc's own definition says should have been a
+UUID. Subject labels, day offsets, accessions and the manifest tag are all
+untouched, so a 1.1.0 dataset and a 1.2.0 dataset built from one key still
+share every subject label and remain linkable on people. What does not match
+across the two is `study_uid` and `series_uids`, so an imaging study cannot be
+joined between them by UID. :meth:`Pseudonymiser.uid` says why this was worth a
+version rather than a docstring.
 
 **1.1.0, 2026-11-13.** Two changes, and the minor number rather than the major
 is a claim worth being precise about.
@@ -491,7 +501,32 @@ class Pseudonymiser:
         return (moment - baseline).days
 
     def uid(self, original_uid: str) -> str:
-        """Return a relinkable pseudonymous DICOM UID.
+        """Return a relinkable pseudonymous DICOM UID, as an actual UUID.
+
+        **The integer under ``2.25`` is a conformant UUID, which it was not
+        before, and that is the whole of this change.** ITU-T X.667 defines the
+        arc as a UUID rendered as a single integer; the previous form took 14
+        bytes of the digest, giving a 112-bit value that was well formed as a
+        DICOM UID, unique in practice, and **not a UUID**. A consumer decoding
+        a ``2.25`` OID back into a UUID -- which is the one thing the arc
+        promises -- got a wrong answer.
+
+        So the digest's first sixteen bytes are stamped with RFC 9562's
+        **version 8**, the custom form defined for a UUID built from
+        application-chosen bits, and its variant. Those two edits cost six bits
+        of the 128 and are what make the claim true rather than approximately
+        true. 2^122 leaves collisions out of reach, and the decimal rendering
+        of a 128-bit integer is at most 39 digits, so ``2.25.`` plus the value
+        is at most 44 characters against DICOM's limit of 64.
+
+        **Why now rather than in the docstring, which is what the audit
+        proposed.** Changing a derivation moves every imaging UID in every
+        dataset built from the same key, which is a migration. Nothing has been
+        published and no dataset exists outside this machine, so today that
+        migration costs a rule-version bump and nothing else; after a release
+        it would cost every user who had built one. The cheap moment is the
+        only argument for doing it rather than documenting it, and it is a good
+        one.
 
         Args:
             original_uid: The real UID.
@@ -500,10 +535,10 @@ class Pseudonymiser:
             A UID under the ``2.25`` arc, within the 64-character limit the
             standard imposes.
         """
-        digest = _derive(self.key, _DOMAIN_UID, original_uid)
-        # 112 bits keeps the decimal form comfortably inside the 64-character
-        # UID limit while leaving collisions out of reach.
-        return f"{UID_ROOT}.{int.from_bytes(digest[:14], 'big')}"
+        digest = bytearray(_derive(self.key, _DOMAIN_UID, original_uid)[:16])
+        digest[6] = (digest[6] & 0x0F) | 0x80  # version 8
+        digest[8] = (digest[8] & 0x3F) | 0x80  # variant 10
+        return f"{UID_ROOT}.{int.from_bytes(digest, 'big')}"
 
     def accession(self, original: str) -> str:
         """Return a pseudonymous accession number.
@@ -511,6 +546,17 @@ class Pseudonymiser:
         Accession numbers are identifiers in their own right — they are quoted
         in letters, printed on requests and often sequential enough to reveal
         ordering and volume — so they are replaced rather than kept.
+
+        **No collision check here, where :meth:`subject_label` has one, and the
+        asymmetry is deliberate rather than an omission.** A subject label
+        keeps 48 bits and two people merged under one label is a redaction
+        failure, because targeted redaction removes the identifiers declared
+        for *a subject* -- so that method refuses rather than merges. An
+        accession keeps 64 bits, nothing is keyed on it, and two studies
+        sharing a pseudonymous accession would be a cosmetic oddity in one
+        column. At 64 bits it is also 65,536 times less likely. A reader who
+        found the guard on one and not the other would reasonably wonder which
+        was the mistake; neither is.
 
         Args:
             original: The real accession number.

@@ -84,6 +84,15 @@ def digest_file(path: Path) -> str:
 def digest_tree(root: Path, *, exclude: frozenset[str] = frozenset()) -> dict[str, str]:
     """Digest every file under ``root``, keyed by relative POSIX path.
 
+    **A symlink is never digested, whichever direction it points.** `is_file()`
+    reads *through* a link, so a symlink to a file outside the dataset used to
+    be digested as though its bytes were part of the dataset -- the manifest
+    would then authenticate content that is not there, and a dataset copied
+    without following links would verify as altered through no fault of the
+    person copying it. They are reported instead, by
+    :func:`symlinks_under`, because a dataset meant to be archived and shipped
+    should not contain one at all.
+
     Args:
         root: The dataset root.
         exclude: Relative POSIX paths to leave out.
@@ -94,13 +103,33 @@ def digest_tree(root: Path, *, exclude: frozenset[str] = frozenset()) -> dict[st
     """
     found: dict[str, str] = {}
     for path in sorted(root.rglob("*")):
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
             continue
         relative = path.relative_to(root).as_posix()
         if relative in exclude:
             continue
         found[relative] = digest_file(path)
     return dict(sorted(found.items()))
+
+
+def symlinks_under(root: Path) -> tuple[str, ...]:
+    """Return every symlink under ``root``, by relative POSIX path.
+
+    Its own answer rather than a kind of difference, because a symlink is
+    neither altered, missing nor added: the bytes it points at may be perfectly
+    intact and still not be part of what was built. What it is, is a thing a
+    dataset meant to travel should not contain -- the archive either follows it
+    and carries somebody else's file, or does not and carries a broken link.
+
+    Args:
+        root: The dataset root.
+
+    Returns:
+        The links found, sorted, empty for an ordinary dataset.
+    """
+    return tuple(
+        sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_symlink())
+    )
 
 
 def canonical_payload(payload: Mapping[str, object]) -> str:
@@ -143,6 +172,9 @@ class IntegrityReport:
         altered: Files whose digest no longer matches.
         missing: Files the manifest records that are no longer there.
         added: Files present that the manifest does not record.
+        symlinks: Links found under the root. Reported apart from the three
+            above because a link is not a difference in content -- see
+            :func:`symlinks_under`.
         checked: How many files were compared.
         authenticated: True if the manifest's own tag verified, False if it did
             not, and None if no key was supplied — three states, because "not
@@ -152,6 +184,7 @@ class IntegrityReport:
     altered: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
     added: tuple[str, ...] = ()
+    symlinks: tuple[str, ...] = ()
     checked: int = 0
     authenticated: bool | None = None
 
@@ -161,6 +194,12 @@ class IntegrityReport:
 
         An unchecked tag does not make a dataset broken, so ``authenticated`` of
         ``None`` is not a failure. A tag that was checked and did not match is.
+
+        **A symlink does not make it broken either**, and that is a judgement
+        rather than an oversight: every byte the manifest records can still be
+        exactly where it was. It is reported so that somebody about to archive
+        the dataset sees it, which is a different question from whether the
+        dataset still matches its manifest.
         """
         return not (self.altered or self.missing or self.added) and self.authenticated is not False
 
@@ -218,6 +257,7 @@ def verify_dataset(root: Path, *, key: SecretKey | None = None) -> IntegrityRepo
         altered=tuple(sorted(altered)),
         missing=tuple(sorted(missing)),
         added=tuple(sorted(added)),
+        symlinks=symlinks_under(root),
         checked=len(recorded),
         authenticated=authenticated,
     )
