@@ -201,24 +201,38 @@ def test_a_symlink_does_not_make_a_dataset_fail_verification(tmp_path: Path) -> 
     Every byte the manifest records can still be exactly where it was, so the
     dataset does match its manifest. Whether it should be archived with a link
     in it is a different question, and `verify` answers both separately.
+
+    **Everything up to the link runs on every platform, and the first version
+    of this test is why.** It built a dataset and called `verify_dataset`
+    straight away, which raises: `build_dataset` writes the dataset and
+    `write_manifest` writes the document that describes it, and verification
+    needs the second. On Windows the symlink skip fired *before* that line was
+    ever reached, so the setup defect could only surface on Ubuntu -- which is
+    where CI found it, two pushes later. So the dataset is now verified before
+    the privilege gate: a platform that cannot make a link still exercises
+    everything a platform that can would exercise first. **A skip hides the
+    setup, not only the assertion.**
     """
+    from commissura.build.manifest import write_manifest
     from commissura.build.writer import BuildSpec, build_dataset
     from commissura.generate.cohort import CohortSpec
     from commissura.generate.writer import write_corpus
     from commissura.read.corpus import read_corpus
 
+    spec = BuildSpec(dataset_name="d", description="d", hdab="H", publisher="P")
     raw = tmp_path / "raw"
     write_corpus(CohortSpec(subjects=3, seed=11), raw)
     out = tmp_path / "ds"
-    build_dataset(
-        read_corpus(raw),
-        KEY,
-        BuildSpec(dataset_name="d", description="d", hdab="H", publisher="P"),
-        out,
-    )
+    corpus = read_corpus(raw)
+    summary = build_dataset(corpus, KEY, spec, out)
+    write_manifest(out, corpus=corpus, summary=summary, key=KEY, spec=spec)
+
+    before = verify_dataset(out)
+    assert before.is_intact
+    assert before.symlinks == ()
+
     outside = tmp_path / "stray.txt"
     outside.write_text("stray\n", encoding="utf-8")
-
     if not _link(outside, out / "stray.txt"):
         pytest.skip("symlink creation needs elevation on Windows")
 

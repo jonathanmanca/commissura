@@ -181,6 +181,37 @@ def test_the_console_script_points_at_the_application(built: tuple[Path, Path]) 
     assert f"{DISTRIBUTION} = {DISTRIBUTION}.cli:app" in text
 
 
+def test_the_published_metadata_declares_only_links_that_work(
+    built: tuple[Path, Path],
+) -> None:
+    """Every URL the package declares is a link somebody who installs it can follow.
+
+    PyPI renders `[project.urls]` as the sidebar of a page strangers read, and
+    a dead link there is worse than no link: it tells a reader the project has
+    somewhere to go and then wastes their time. So the set of labels is pinned
+    rather than only the one value, which makes adding a URL a deliberate edit
+    with a test to update.
+
+    **`Homepage` and `Repository` are absent on purpose.** They would point at
+    the GitHub repository, which is private, so they would resolve for the
+    author and for nobody else. Adding them belongs in the same change as
+    making the repository public — not before it, which is the whole reason
+    this is asserted rather than left to good intentions.
+    """
+    with zipfile.ZipFile(built[0]) as archive:
+        entry = next(n for n in archive.namelist() if n.endswith(".dist-info/METADATA"))
+        metadata = archive.read(entry).decode("utf-8")
+
+    declared = {
+        line.removeprefix("Project-URL:").split(",", 1)[0].strip()
+        for line in metadata.splitlines()
+        if line.startswith("Project-URL:")
+    }
+
+    assert declared == {"Author"}
+    assert "Project-URL: Author, https://www.linkedin.com/in/jonathan-manca/" in metadata
+
+
 @pytest.mark.parametrize("artefact", ["wheel", "sdist"])
 def test_both_artefacts_carry_the_licence_and_the_notice(
     artefact: str, wheel_names: list[str], sdist_names: list[str]

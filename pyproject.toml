@@ -66,6 +66,13 @@ dev = [
   "pyshacl>=0.26",
 ]
 
+[project.urls]
+# The author's profile, at their explicit request. Deliberately the only entry
+# for now: a `Homepage` or `Repository` URL pointing at a private repository is
+# a dead link for everybody who installs the package, so those wait on the
+# decision about whether the repository goes public.
+Author = "https://www.linkedin.com/in/jonathan-manca/"
+
 [project.scripts]
 commissura = "commissura.cli:app"
 
