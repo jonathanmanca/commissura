@@ -823,8 +823,26 @@ than a shortcut.** The package describes one -- "Vaccinazioni (PSS)", LOINC
 ``11369-6`` -- but every root it offers for it reads
 ``'2.16.840.1.113883.2.9.10.1.4.2.3 '``, with a trailing space **inside the
 attribute value**, in the document template's permitted list and in the
-section's own context alike. Two more, ``.2.13`` and ``.2.14``, carry a leading
-space the same way, and so does ``.3.10.5``.
+section's own context alike. Four others are spelled the same way, and the
+asymmetry is worth recording rather than rounding off: ``.2.13``, ``.2.14`` and
+``.3.14.2`` carry a *leading* space, while ``.3.10.5`` carries a trailing one.
+
+**Re-checked against the newer publication and unchanged.** HL7 Italia's own
+page links the 2026-04-10 publication for the HTML and still offers the
+2025-09-10 package for both downloads, but a runtime zip exists for the newer
+one and was read: ``hl7itig-runtime-20260410T150005.zip``. Its closed document
+template is dated 2026-04-09 and names the vaccinations section
+``@root = '2.16.840.1.113883.2.9.10.1.4.2.3 '`` exactly as before. Enumerating
+every ``@root`` in both packages gives the same five malformed values and no
+others, so the decision below rests on the current publication and not only on
+the package this project first read.
+
+One packaging difference, which is not a content one: the newer zip names the
+PSS closed template after HL7 Italia's own template OID where the older one
+named it after an ART-DECOR internal object id
+(``2.16.840.1.113883.3.1937.777.63.10.391``, dated 2023-12-20). Both carry the
+same ``ClinicalDocument`` context, so a reader looking for the PSS template by
+filename finds it under one name in one package and the other in the other.
 
 Because the malformed string is used consistently, there is no spelling that is
 both a well-formed OID and accepted by the package: a document carrying

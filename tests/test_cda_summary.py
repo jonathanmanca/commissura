@@ -71,6 +71,12 @@ VACCINATION_ROOT_AS_PUBLISHED = "2.16.840.1.113883.2.9.10.1.4.2.3 "
 Trailing space included. This constant exists so the assertions below can say
 what they are refusing without a reader thinking the space is a typo in the
 test.
+
+Still the package's spelling in the 2026-04-10 publication, which was read
+rather than assumed; the renderer's docstring records what that check covered.
+Four other roots are malformed the same way, in the other direction for three
+of them, so the shape assertion above is the guard and this constant is only
+the one that costs this project a section.
 """
 
 
