@@ -18,6 +18,7 @@ and a limit that does not apply is not claimed.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ from commissura.deident.keys import SecretKey
 from commissura.generate.cohort import CohortSpec
 from commissura.generate.writer import write_corpus
 from commissura.read.corpus import read_corpus
+from commissura.read.identity import KeyKind
 from commissura.validate import validate_dataset
 
 KEY = SecretKey(bytes(range(32)))
@@ -234,6 +236,13 @@ def test_the_manifest_says_what_established_each_subject(tmp_path: Path) -> None
 
     Nothing else in the document would tell a reader which subjects those are,
     and an HDAB combining two holders' datasets needs to know.
+
+    This asserted every subject was keyed nationally, which stopped being a
+    property of a generated corpus once one site's laboratory feed began
+    sending no national identifier. The counts are recounted here from the
+    subjects rather than written down, which is the claim — the manifest
+    reports what the corpus holds — and the exact total is asserted too, so a
+    kind the manifest forgot cannot hide inside a recount.
     """
     corpus, summary, spec, out = _built(tmp_path)
 
@@ -242,11 +251,11 @@ def test_the_manifest_says_what_established_each_subject(tmp_path: Path) -> None
     source = manifest["source"]
     assert isinstance(source, dict)
     counts = source["subject_keys"]
-    assert counts == {
-        "national_id": len(corpus.subjects),
-        "scoped_record_number": 0,
-        "assigned_identifier": 0,
-    }
+    expected = Counter(subject.key.kind.value for subject in corpus.subjects)
+
+    assert counts == {kind.value: expected[kind.value] for kind in KeyKind}
+    assert sum(expected.values()) == len(corpus.subjects)
+    assert expected[KeyKind.SCOPED_RECORD_NUMBER.value] > 0
 
 
 def test_both_kinds_of_subject_key_are_reported_even_at_zero(tmp_path: Path) -> None:

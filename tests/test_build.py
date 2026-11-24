@@ -46,6 +46,7 @@ from commissura.generate.writer import write_corpus
 from commissura.measure import MEASURABLE_LENGTH, _pattern
 from commissura.read.corpus import Identity, read_corpus
 from commissura.read.hl7 import parse_message, parse_timestamp, unescape
+from commissura.read.identity import REASON_KEEPS_RECORD, RefusalReason
 from commissura.validate import validate_dataset
 
 KEY = SecretKey(bytes(range(32)))
@@ -174,11 +175,25 @@ def test_an_unreadable_timestamp_returns_none_rather_than_raising(value: str) ->
 
 
 def test_every_record_links_in_a_clean_corpus(tmp_path: Path) -> None:
+    """And "every record links" is not the same claim as "nothing is reported".
+
+    This asserted ``corpus.issues == ()``, which was a proxy for what its name
+    says and stopped being equivalent to it once one generated site's feed sent
+    no national identifier: that is a property of the interface rather than a
+    defect, so it is reported at ``--defect-rate 0`` — and the reason *keeps*
+    the record, attaching it by the record number within the institution that
+    issued it. So the assertion is now on the refusals, which is what "links"
+    means, and the project's own table decides which reasons those are rather
+    than a list written here.
+    """
     root = _corpus(tmp_path, subjects=8, seed=3, defect_rate=0.0)
     corpus = read_corpus(root)
+    refused = [
+        issue for issue in corpus.issues if not REASON_KEEPS_RECORD[RefusalReason(issue.reason)]
+    ]
 
     assert len(corpus.subjects) == 8
-    assert corpus.issues == ()
+    assert refused == [], [issue.reason for issue in refused]
     assert corpus.record_count > 20
 
 

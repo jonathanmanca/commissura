@@ -77,48 +77,29 @@ def _entry(key: IdentityKey) -> str:
     return FIELD_SEPARATOR.join((key.kind.value, key.authority, key.value))
 
 
-UNUSABLE_MESSAGE = """MSH|^~\\&|LIS|OSPEDALE SINTETICO DI PROVA|||20230512101500\
-||ORU^R01|MSG0001|P|2.5
-PID|1||{mrn}^^^OSPEDALE SINTETICO DI PROVA^MR~UNKNOWN^^^MINSAL^NNITA||\
-{family}^{given}||19500506|F|||VIA SINTETICA 1^^MILANO^MI^20100^100
-OBR|1|ACC{mrn}|ACC{mrn}|CBC^Emocromo^L|||20230512101500
-OBX|1|NM|718-7^Haemoglobin^LN||13.2|g/dL|12.0-16.0|N|||F
-"""
-"""A laboratory message whose national identifier is the string ``UNKNOWN``.
-
-**The audit's own reproduction, from 2026-11-13**, and what establishes a
-subject on an institution-scoped record number: the national identifier is a
-placeholder, so it is never a key, and the record number identifies the patient
-within the institution that issued it.
-
-A fixture and not a generator defect, for a reason worth knowing: **no
-generated corpus produces a subject of this kind.** Measured rather than
-assumed -- fourteen subjects at defect rates 0.1, 0.6 and 1.0, with and without
-CDA, give only ``national_id`` and ``assigned_identifier``. Closing that means
-a new defect, which shifts the random stream and moves every number the README
-captures; this project does that deliberately rather than in passing, so it is
-queued in the brief instead of done here.
-"""
-
-
-def _unusable_corpus(root: Path) -> None:
-    """Write a corpus whose subjects are keyed on an institution's record number."""
-    (root / "lab").mkdir(parents=True)
-    for index, (mrn, family, given) in enumerate(
-        (("0012345", "FONTANA", "FRANCESCA"), ("0067890", "GRECO", "LUCA")), start=1
-    ):
-        (root / "lab" / f"{mrn}_{index}.hl7").write_text(
-            UNUSABLE_MESSAGE.format(mrn=mrn, family=family, given=given),
-            encoding="utf-8",
-            newline="",
-        )
-
-
 @pytest.fixture(scope="module")
 def scoped_corpus(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A corpus whose subjects hold no usable national identifier."""
+    """A plain corpus, where one site's feed sends no national identifier.
+
+    **A generated corpus and no longer a hand-built fixture**, which is the
+    whole of what changed on 2026-11-24. Until then no generated corpus
+    established a subject on an institution-scoped record number, so this file
+    carried two HL7 messages written here -- the audit's own reproduction, with
+    ``UNKNOWN`` where the codice fiscale belongs -- and a docstring saying that
+    the kind this feature exists to reach was covered by fixtures and by
+    nothing else. One of the five generated sites now has a feed whose source
+    system has no national-identifier field, so the kind arrives from
+    ``write_corpus`` like any other.
+
+    Plain rather than CDA, and that is the specifications rather than a
+    simplification: the CDA laboratory profile marks the codice fiscale
+    OBBLIGATORIO for an enrolled patient, so a conformant document cannot carry
+    a placeholder there, while HL7 v2 imposes no such obligation. A CDA corpus
+    reaches ``assigned_identifier`` instead, so between the two modalities every
+    kind of subject key is reachable from a generated corpus.
+    """
     root = tmp_path_factory.mktemp("opt-out-scoped") / "raw"
-    _unusable_corpus(root)
+    write_corpus(CohortSpec(subjects=14, seed=42, defect_rate=0.2), root)
     return root
 
 
@@ -415,6 +396,35 @@ def test_a_record_number_that_normalises_to_nothing_is_refused(tmp_path: Path) -
     )
 
     with pytest.raises(ExclusionFileError, match="normalises to nothing"):
+        read_exclusions(listing)
+
+
+def test_a_blank_field_is_refused_for_being_blank_and_not_miscounted(
+    tmp_path: Path,
+) -> None:
+    """An ENI code carries no check character, so blankness is the whole guard.
+
+    Found by reading the coverage report rather than by a failure. The parser
+    refused an empty field and a miscounted line through one message, which
+    told an operator their line had "2 field(s) after the kind" — true, and
+    not the problem, on a line whose count was right. The two conditions are
+    now two refusals.
+
+    It also removed an unreachable one. ``normalise_national_id`` strips
+    whitespace and uppercases, so nothing that survives ``str.strip`` can
+    empty under it, which made the per-kind "normalises to nothing" check dead
+    for this kind while the record number's is live. The check is shared now;
+    this test pins the refusal that is actually reachable for an assigned
+    identifier.
+    """
+    listing = tmp_path / "list.txt"
+    listing.write_text(
+        f"{KeyKind.ASSIGNED_IDENTIFIER.value}{FIELD_SEPARATOR}"
+        f"2.16.840.1.113883.2.9.4.3.16{FIELD_SEPARATOR}   \n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ExclusionFileError, match="leaves a field empty"):
         read_exclusions(listing)
 
 

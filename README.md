@@ -149,14 +149,14 @@ Wrote 190 files to ./raw
   imaging       27  DICOM JSON Model sidecars
 
   subjects      25  seed 42
-  PHI spans   3648  recorded as ground truth
+  PHI spans   3628  recorded as ground truth
   defects      366  injected at rate 0.2
 
   Verified: every recorded PHI offset matches the file on disk.
 ```
 
 Three separate exports, as a hospital would hand them over, with 366 injected
-defects and 3,648 identifiers whose exact character positions are on record.
+defects and 3,628 identifiers whose exact character positions are on record.
 
 ### 3. Build the dataset
 
@@ -178,7 +178,7 @@ Wrote 211 files to ./dataset
   key fingerprint        35eea6fcd0bad4df
   free-text redactions   528
   participant ages       exact, truncated at 89
-  linkage issues         29
+  linkage issues         49
   records dropped        3  (no readable date)
     reports/5806125_rad_1.txt  (undated_record)
     reports/2935320_dim_5.txt  (undated_record)
@@ -187,7 +187,7 @@ Wrote 211 files to ./dataset
       identifier with a record naming a different person; both identities are
       kept so that both names are redacted)
 ... nine more of the same ...
-    ... and 19 more linkage issue(s)
+    ... and 39 more linkage issue(s)
   minimum k              1  (21 combination(s) below 5)
   profile                HealthDCAT-AP 8, non-public tier
 
@@ -207,14 +207,29 @@ documents link to a person and then have nowhere to go. They used to vanish
 without a word. Now the count is on the second screen you look at and the paths
 are listed under it.
 
-**`linkage issues 29` is the line to read next, and twenty-nine is not a
+**`linkage issues 49` is the line to read next, and forty-nine is not a
 failure.** A reason either means a record could not be attached to anybody or
 it means the record was attached and something about the attribution is worth a
-second look — here they are all the second kind, injected on purpose by the
-`lab.conflicting_identity` and `reports.wrong_patient_name` defects. The
-manifest counts the two separately, because adding them together would be a
-false statement about what the dataset contains. See
+second look — here they are all the second kind. The manifest counts the two
+separately, because adding them together would be a false statement about what
+the dataset contains. See
 [the manifest](#the-de-identification-manifest) for the split.
+
+Two of the three reasons are defects injected on purpose,
+`lab.conflicting_identity` and `reports.wrong_patient_name`. **The third is not
+a defect at all**: one of the five generated sites has a laboratory feed whose
+source system holds no national-identifier field, so every message from it
+carries a placeholder where the codice fiscale belongs. Those records are
+attached by the record number *within that institution*, which is what
+`invalid_national_identifier` says on the terminal, naming the institution so
+you know whose export to go and ask about. That is a real export, not damaged
+data — which is why it is a property of the site and appears even at
+`--defect-rate 0`.
+
+It also means the walkthrough's dataset holds subjects keyed on something other
+than a codice fiscale, which is the case
+[acting on an opt-out](#acting-on-an-opt-out) needs a different kind of entry
+to reach.
 
 The four `--hdab`, `--publisher`, `--contact-point` and `--access-url` values
 have no defaults, because they are facts about your release arrangement and the
@@ -1535,13 +1550,13 @@ commissura measure ./raw ./dataset
   date                  533       533      533         0
   device_id             168       168      168         0
   institution           316       241      241         0
-  national_id           163       163      163         0
+  national_id           143       143      143         0
   patient_id            259       259      259         0
   person_name           377       373      373         0
   provider_name         440       434      434         0
   uid                   168       168      168         0
 
-  recall                 100.00%  of 3431
+  recall                 100.00%  of 3411
   survived               0
   too short to measure   58  (under 4 characters)
   declared by the holder 75  (publisher, HDAB, title)
@@ -1550,7 +1565,7 @@ commissura measure ./raw ./dataset
   dataset files searched 217
 ```
 
-**100% of 3,431 measurable planted identifiers removed**, on the corpus the
+**100% of 3,411 measurable planted identifiers removed**, on the corpus the
 walkthrough above builds. That number is the point of this project. "Rules
 first, measurement always" is easy to write and the measurement half was a
 promise until this command existed: the generator had been recording every

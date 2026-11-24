@@ -37,6 +37,20 @@ from commissura.models import (
     PhiSpan,
 )
 
+PLACEHOLDER_NATIONAL_ID = "UNKNOWN"
+"""What a feed with no national-identifier field writes in its place.
+
+Taken from :data:`commissura.read.identity.PLACEHOLDER_IDENTIFIERS`, which the
+reader already recognises, and specifically the value the audit of 2026-11-13
+used in its own reproduction -- "what a real interface writes when the field is
+unavailable", in that document's words.
+
+Named here rather than inlined because two sides have to agree on it: a value
+the reader does not classify as a placeholder would be classified *malformed*
+instead, which is a different diagnosis and a different `REASON_KEEPS_RECORD`
+row. A test asserts the reader's own set contains it.
+"""
+
 _ABNORMAL_PROBABILITY = 0.18
 """Fraction of results that fall outside the reference interval.
 
@@ -227,18 +241,25 @@ def render_panel(
     if site.national_id_in_pid_19:
         pid.set(3, record_number)
     else:
+        # A site whose source system has no national-identifier field sends a
+        # placeholder where the codice fiscale belongs. Written as a plain
+        # string and **not** as a `Phi` span, deliberately: `UNKNOWN` is not an
+        # identifier, so recording it as ground truth would put a value in the
+        # annotations that nothing could ever leak and that would count as
+        # removed for free -- the same reasoning as the unfilled date
+        # placeholder in a report. The reader classifies it as a placeholder
+        # and falls back to the record number, which is the whole point.
+        national = (
+            PLACEHOLDER_NATIONAL_ID
+            if site.national_id_is_placeholder
+            else Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID)
+        )
         pid.set(
             3,
             Repeated(
                 (
                     record_number,
-                    (
-                        Phi(person.codice_fiscale, PhiCategory.NATIONAL_ID),
-                        "",
-                        "",
-                        "MINSAL",
-                        "NNITA",
-                    ),
+                    (national, "", "", "MINSAL", "NNITA"),
                 )
             ),
         )

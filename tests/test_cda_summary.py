@@ -474,9 +474,17 @@ def test_a_plain_corpus_draws_exactly_what_it_drew_before() -> None:
     branch, and only after every draw that already existed, so a corpus
     without CDA cannot see them. **The expected values were measured, not
     reasoned about**: they come from running ``write_corpus`` under a worktree
-    at ``45fbae5``, the commit before this profile existed, and the same call
-    on this tree returns them unchanged. The precedent is the enrolment stream
-    pin of 2026-11-18, where reasoning was right and was not evidence.
+    at ``45fbae5``, the commit before this profile existed. The precedent is
+    the enrolment stream pin of 2026-11-18, where reasoning was right and was
+    not evidence.
+
+    **The span count moved once, on 2026-11-24, from 1307 to 1301, and the two
+    numbers beside it are what say why.** One generated site's feed now sends a
+    placeholder where the codice fiscale belongs, so six of its messages carry
+    no national-identifier span -- a change to what is *written*, not to what
+    is *drawn*. The defect count and the file count are identical across that
+    change, which is the evidence: a shifted stream moves the defects too, and
+    these did not move. So this pin still guards what it was written to guard.
     """
     with tempfile.TemporaryDirectory() as directory:
         summary = write_corpus(
@@ -484,7 +492,7 @@ def test_a_plain_corpus_draws_exactly_what_it_drew_before() -> None:
             Path(directory) / "raw",
         )
 
-        assert len(summary.spans) == 1307
+        assert len(summary.spans) == 1301
         assert len(summary.manifest.defects) == 123
         assert summary.file_count == 67
         assert summary.manifest.files.cda == 0

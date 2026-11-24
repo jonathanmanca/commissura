@@ -79,6 +79,14 @@ class Site:
         address: Street address, invented.
         city: A real city, which is realism rather than attribution.
         area_code: Italian telephone area code, without its leading zero.
+        national_id_is_placeholder: True for a feed whose source system has
+            no national-identifier field, so every message carries a
+            placeholder where the codice fiscale belongs. Not a defect and not
+            drawn per message: an interface does not change its mind between
+            two messages, which is the same reasoning that gave one site the
+            deprecated PID-19 placement. It is what makes a subject keyed on
+            an institution's own record number reachable from a generated
+            corpus at all.
         national_id_in_pid_19: True for an interface that still carries the
             codice fiscale in PID-19 instead of the PID-3 identifier list. A
             property of the sending interface and not of the hospital, which is
@@ -92,6 +100,7 @@ class Site:
     city: str
     area_code: str
     national_id_in_pid_19: bool = False
+    national_id_is_placeholder: bool = False
 
 
 FAMILY_NAMES: tuple[str, ...] = (
@@ -223,7 +232,13 @@ CITIES: tuple[tuple[str, str, str, str], ...] = (
 
 SITES: tuple[Site, ...] = (
     Site("OSPEDALE SINTETICO DI COLLEVERDE", "Via dei Tigli 40", "Milano", "2"),
-    Site("AZIENDA OSPEDALIERA SINTETICA NORDVALLE", "Corso delle Betulle 88", "Torino", "11"),
+    Site(
+        "AZIENDA OSPEDALIERA SINTETICA NORDVALLE",
+        "Corso delle Betulle 88",
+        "Torino",
+        "11",
+        national_id_is_placeholder=True,
+    ),
     Site("IRCCS SINTETICO MAREBIANCO", "Via dei Glicini 35", "Milano", "2"),
     # One legacy interface, on purpose: this presidio still sends the codice
     # fiscale in PID-19. Without it every message in a generated corpus would

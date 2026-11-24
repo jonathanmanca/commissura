@@ -313,12 +313,16 @@ def _parse_line(path: Path, number: int, entry: str) -> IdentityKey:
         ) from None
 
     expected = 1 if kind is KeyKind.NATIONAL_ID else 2
-    if len(rest) != expected or not all(rest):
-        shape = (
-            f"{kind.value}{FIELD_SEPARATOR}value"
-            if expected == 1
-            else f"{kind.value}{FIELD_SEPARATOR}authority{FIELD_SEPARATOR}value"
-        )
+    shape = (
+        f"{kind.value}{FIELD_SEPARATOR}value"
+        if expected == 1
+        else f"{kind.value}{FIELD_SEPARATOR}authority{FIELD_SEPARATOR}value"
+    )
+    # Two refusals and not one, because the old shared message reported the
+    # field count for a line whose count was right and whose field was blank --
+    # a true sentence about the wrong thing, in the message an operator reads
+    # to go and fix their list.
+    if len(rest) != expected:
         raise ExclusionFileError(
             f"{path}, line {number}: a {kind.value} entry is written {shape}, "
             f"and this line has {len(rest)} field(s) after the kind. An "
@@ -326,28 +330,45 @@ def _parse_line(path: Path, number: int, entry: str) -> IdentityKey:
             "meaningless without it, and two institutions' record numbers are "
             "deliberately not one namespace."
         )
+    if not all(rest):
+        raise ExclusionFileError(
+            f"{path}, line {number}: a {kind.value} entry is written {shape}, "
+            "and this line leaves a field empty. An empty value is the one "
+            "mistake worse than excluding nobody: it would name every subject "
+            "the rest of the key happens to match."
+        )
 
     if kind is KeyKind.NATIONAL_ID:
         return _national(path, number, rest[0])
+
+    # One check for both scoped kinds, which is deliberate rather than tidy.
+    # The empty-field refusal above already covers a blank value, so the only
+    # way to reach this is a value that survives `str.strip` and normalises to
+    # nothing anyway -- and that is the record number alone, whose leading
+    # zeros are stripped. `normalise_national_id` removes whitespace and
+    # uppercases, so nothing non-blank can empty under it: checked over every
+    # code point, not reasoned about. Written per kind this was therefore one
+    # live guard and one unreachable `raise`, which is the shape this project
+    # has recorded four times as not being a guard at all. Shared, it is
+    # reached by the record-number case and still protects an assigned
+    # identifier if that normaliser ever gains a transformation that can empty
+    # a value.
     if kind is KeyKind.SCOPED_RECORD_NUMBER:
         authority, value = normalise_authority(rest[0]), normalise_record_number(rest[1])
-        if not value:
-            raise ExclusionFileError(
-                f"{path}, line {number}: {rest[1]!r} normalises to nothing, so "
-                "it names no record number. Leading zeros are stripped, which "
-                "is what matches the same patient across two exports."
-            )
-        return IdentityKey.scoped_record_number(authority, value)
-
-    value = normalise_national_id(rest[1])
+    else:
+        # The authority passes through as written, where a record number's is
+        # case-folded: an issuing namespace is an OID, and an OID is not prose.
+        authority, value = rest[0], normalise_national_id(rest[1])
     if not value:
         raise ExclusionFileError(
             f"{path}, line {number}: {rest[1]!r} normalises to nothing, so it "
-            "names no assigned identifier."
+            f"names no {kind.value}. Whitespace is removed and a record "
+            "number's leading zeros are stripped, which is what matches the "
+            "same patient across two exports."
         )
-    # The authority passes through as written, where a record number's is
-    # case-folded: an issuing namespace is an OID, and an OID is not prose.
-    return IdentityKey.assigned_identifier(rest[0], value)
+    if kind is KeyKind.SCOPED_RECORD_NUMBER:
+        return IdentityKey.scoped_record_number(authority, value)
+    return IdentityKey.assigned_identifier(authority, value)
 
 
 def read_exclusions(path: Path) -> Exclusions:

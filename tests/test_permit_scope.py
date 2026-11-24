@@ -40,6 +40,8 @@ from commissura.deident.pseudonymise import (
 )
 from commissura.generate.cohort import CohortSpec
 from commissura.generate.writer import write_corpus
+from commissura.read.corpus import read_corpus
+from commissura.read.identity import KeyKind
 
 KEY = SecretKey(bytes(range(32)))
 PERMIT_A = "IT-HDAB-2029-00417"
@@ -264,20 +266,31 @@ def test_an_unscoped_build_uses_the_root_keys_label_space(tmp_path: Path) -> Non
     that produced every label this tool has ever issued and which this round did
     not touch. Comparing two builds against each other would only prove they
     agree with one another, which they would even if both had moved.
+
+    **The expected set comes from the keys, not from the planted codice
+    fiscali, and it has to.** This read the ground-truth ``national_id`` spans,
+    which was the same set of values until one generated site's laboratory feed
+    began sending no national identifier: those subjects are keyed on a record
+    number within the institution, while their reports still state the codice
+    fiscale the feed withheld. So the annotations name values that keyed
+    nobody, and a set built from them expects directories no build produces.
+    The two halves are pinned against their own derivation, which keeps the
+    equality exact rather than retreating to a subset.
     """
     raw = _corpus(tmp_path)
     out = tmp_path / "dataset"
     _build(tmp_path, raw, out)
     pseudonymiser = Pseudonymiser(KEY)
-    identifiers = {
-        span["text"]
-        for span in json.loads(
-            (raw / "_generator" / "phi_annotations.json").read_text(encoding="utf-8")
-        )["spans"]
-        if span["category"] == "national_id"
-    }
+    keys = [subject.key for subject in read_corpus(raw).subjects]
+    national = [key for key in keys if key.kind is KeyKind.NATIONAL_ID]
+    scoped = [key for key in keys if key.kind is not KeyKind.NATIONAL_ID]
 
-    expected = {f"{layout.SUBJECT_PREFIX}{pseudonymiser.subject_label(i)}" for i in identifiers}
+    assert national and scoped, "this corpus no longer exercises both label spaces"
+
+    expected = {
+        f"{layout.SUBJECT_PREFIX}{pseudonymiser.subject_label(key.value)}" for key in national
+    }
+    expected |= {f"{layout.SUBJECT_PREFIX}{pseudonymiser.subject_label_for(key)}" for key in scoped}
 
     assert _subject_dirs(out) == expected
 
