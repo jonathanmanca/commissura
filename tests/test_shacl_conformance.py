@@ -36,7 +36,7 @@ from typing import Any
 
 import pytest
 
-from commissura import layout
+from commissura import healthdcat, layout
 from commissura.build.manifest import write_healthdcat_description, write_manifest
 from commissura.build.writer import BuildSpec, build_dataset
 from commissura.deident.keys import SecretKey
@@ -249,3 +249,98 @@ def test_the_command_line_can_produce_a_conformant_description(tmp_path: Path) -
         data, shacl_graph=_load_shapes(), advanced=True, inference="none"
     )
     assert conforms, text
+
+
+# --------------------------------------------------------------------------
+# Where the profile keeps the constraint, and where it keeps nothing at all
+# --------------------------------------------------------------------------
+
+
+def _property_block(ttl: str, path: str) -> str:
+    """Return the one property shape that constrains ``path``.
+
+    A blank-node property shape runs from its opening bracket to the next
+    closing one, so the block is what sits around the ``sh:path``. Needed
+    because searching the whole file for ``sh:class`` says only that the file
+    contains one somewhere, which is true of every shapes file here.
+
+    Args:
+        ttl: The file's text.
+        path: The prefixed property, as the file spells it.
+
+    Returns:
+        The block, or the empty string when the file does not constrain it.
+    """
+    needle = f"sh:path {path} ;"
+    if needle not in ttl:
+        return ""
+    at = ttl.index(needle)
+    return ttl[ttl.rfind("[", 0, at) + 1 : ttl.index("]", at)]
+
+
+def test_the_profile_constrains_the_personal_data_range_after_all() -> None:
+    """The correction behind emitting ``dpv:hasPersonalData``.
+
+    It was left unemitted because the shapes "place no value constraint on it,
+    only a path and a severity", so the DPV concept to use was unsourced. True
+    of ``non-public-shapes.ttl`` and false of ``range.ttl``, which this module
+    loads two files below — ``sh:class dpv:PersonalData``, beside the same on
+    ``dpv:hasLegalBasis`` and ``dpv:hasPurpose``. A reading taken from one file
+    of a profile that splits its constraints across four, which is the defect
+    of 2026-11-10 in a smaller place.
+    """
+    shapes = (SHAPES_DIR / "healthdcat-ap/non-public-shapes.ttl").read_text(encoding="utf-8")
+    ranges = (SHAPES_DIR / "healthdcat-ap/range.ttl").read_text(encoding="utf-8")
+
+    assert "sh:class" not in _property_block(shapes, "dpv:hasPersonalData")
+    assert "sh:class dpv:PersonalData" in _property_block(ranges, "dpv:hasPersonalData")
+
+
+def test_no_dataset_property_carries_a_trade_secret_flag() -> None:
+    """The second reading job, and the answer is that there is no such property.
+
+    EHDS Art. 60(3) has a holder notify intellectual property or trade secrets
+    when submitting a dataset description, so the question was which property
+    carries it. None does. The word "secret" appears nowhere in the Release 8
+    specification, and "intellectual property" only inside the definition of
+    ``dct:rights`` — which DCAT-AP 3.0.0 places on ``Catalog`` and
+    ``Distribution`` and not on ``Dataset``. The notification is therefore out
+    of band, and a holder who needs to record it in the description has only a
+    free-text rights statement on a distribution, which is not a flag.
+
+    Asserted against the vendored shapes, because the specification text is not
+    in this repository. If a dataset property for this ever appears, this fails,
+    which is the right way round.
+    """
+    shapes = (SHAPES_DIR / "dcat-ap/shapes.ttl").read_text(encoding="utf-8")
+    dataset_rights = [
+        term
+        for term in {term for tier in healthdcat.Tier for term in healthdcat.required_terms(tier)}
+        if "rights" in term.lower()
+    ]
+
+    assert dataset_rights == ["dct:accessRights"]
+    # Present in the imported profile, and on the two classes that are not the
+    # dataset -- so finding the path proves nothing on its own.
+    assert "sh:path dct:rights ;" in shapes
+    # A guard on the guard: a block helper that returned the wrong text, or
+    # nothing, would satisfy the assertion below while checking nothing.
+    dataset = _dataset_shape(shapes)
+    assert "sh:path dct:title ;" in dataset
+    assert "sh:path dcat:distribution ;" in dataset
+    assert "dct:rights" not in dataset
+
+
+def _dataset_shape(ttl: str) -> str:
+    """Return the ``Dataset_Shape`` block, which is where the question is.
+
+    Args:
+        ttl: The DCAT-AP shapes text.
+
+    Returns:
+        The text from the shape's declaration to the next top-level one.
+    """
+    at = ttl.index(":Dataset_Shape")
+    rest = ttl[at:]
+    end = rest.find("\n:", 1)
+    return rest if end < 0 else rest[:end]

@@ -370,6 +370,7 @@ NAMESPACES: Final[dict[str, str]] = {
     "foaf": "http://xmlns.com/foaf/0.1/",
     "geodcatap": "http://data.europa.eu/930/",
     "healthdcatap": "http://healthdataportal.eu/ns/health#",
+    "pd": "https://w3id.org/dpv/pd#",
     "prov": "http://www.w3.org/ns/prov#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
     "sh": "http://www.w3.org/ns/shacl#",
@@ -377,7 +378,23 @@ NAMESPACES: Final[dict[str, str]] = {
     "vcard": "http://www.w3.org/2006/vcard/ns#",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
 }
-"""Prefix to IRI, transcribed from the shapes file's own prefix block."""
+"""Prefix to IRI, transcribed from the shapes file's own prefix block.
+
+``pd`` is the exception and had to come from elsewhere, because **the profile's
+own worked example for ``dpv:hasPersonalData`` declares a namespace the current
+vocabulary does not define.** That example writes
+``@prefix dpvpd: <https://w3id.org/dpv/dpv-pd#>``; DPV's Personal Data extension
+states "the namespace for terms is ``https://w3id.org/dpv/pd#``, the suggested
+prefix is ``pd``", and the string ``dpv-pd`` appears nowhere in its vocabulary
+file — no alias, no ``owl:sameAs``.
+
+Worth knowing *why* copying the example would be hard to catch: ``w3id.org``
+redirects both document URLs to the same published page, so following the link
+from the example shows a real specification and confirms nothing about the term
+IRIs, which are compared as strings. This is the trap of 2026-11-07 — a
+plausible IRI that resolves to nothing — in its sharper form, where it resolves
+to something and still denotes nothing.
+"""
 
 HEALTHDCATAP_NAMESPACE_IS_PROVISIONAL: Final = True
 """The health namespace IRI is a placeholder, by the profile's own admission.
@@ -730,6 +747,41 @@ Not to be confused with ``PGEH``, "Personal electronic health data automatically
 generated through medical devices", which is a different Article 51 category. A
 dataset combining both would carry both: ``healthCategory`` is 1..*, not 1..1.
 """
+
+
+PERSONAL_DATA_CATEGORY: Final = f"{NAMESPACES['pd']}HealthRecord"
+"""What ``dpv:hasPersonalData`` names, and the one place `pd` is used.
+
+**The range is sourced, which is the correction.** This was left unemitted on
+the grounds that the Release 8 shapes place no value constraint on the property
+— only a path and a severity — so the concept to use was unknowable. True of
+``non-public-shapes.ttl`` and false of the profile as a whole:
+``healthdcat-ap/range.ttl``, vendored here and loaded by the conformance test,
+carries ``sh:class dpv:PersonalData`` on this path, beside the same constraint
+on ``dpv:hasLegalBasis`` and ``dpv:hasPurpose``. One file was read and the
+conclusion was drawn about all of them, which is the defect of 2026-11-10 in a
+smaller place.
+
+**Both types are restated because ``sh:class`` reads the data graph**, as
+``_typed`` exists to record: DPV declares this concept an instance of
+``dpv:PersonalData`` *and* of ``dpv:SpecialCategoryPersonalData``, so a
+validator holding none of DPV's axioms needs the triples here. Restating them
+quotes DPV rather than asserting anything of our own, and the second one is the
+useful half for an HDAB — DPV sources it to GDPR Art. 9(1), which is the single
+most consequential legal fact about a clinical dataset.
+
+The near miss is ``pd:Health``, "Information about health". Both are siblings
+under ``pd:MedicalHealth`` and both are declared special category, so the choice
+changes what the description *says* and not what it claims legally.
+``HealthRecord``, "Information about health record", is the one that matches
+``healthdcatap:healthCategory`` being ``EHRS``.
+"""
+
+PERSONAL_DATA_CATEGORY_LABEL: Final = "Health Record"
+"""DPV's own ``skos:prefLabel``, quoted."""
+
+PERSONAL_DATA_CATEGORY_TYPES: Final = ("dpv:PersonalData", "dpv:SpecialCategoryPersonalData")
+"""The two classes DPV declares this concept an instance of, in its own file."""
 
 
 def health_category_iri(notation: str) -> str:

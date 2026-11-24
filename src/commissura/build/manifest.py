@@ -954,7 +954,7 @@ def _typical_age_range(out: Path) -> dict[str, object]:
     }
 
 
-def _typed(iri: str, rdf_type: str, label: str = "") -> dict[str, object]:
+def _typed(iri: str, rdf_type: str | tuple[str, ...], label: str = "") -> dict[str, object]:
     """Reference an authority-list IRI as a node that carries its own class.
 
     ``sh:class`` is satisfied by an ``rdf:type`` triple **in the data graph**: a
@@ -965,7 +965,12 @@ def _typed(iri: str, rdf_type: str, label: str = "") -> dict[str, object]:
 
     Args:
         iri: The concept or resource IRI.
-        rdf_type: The prefixed class the shapes require of it.
+        rdf_type: The prefixed class the shapes require of it, or several where
+            the vocabulary itself declares the concept an instance of more than
+            one. Several is not hedging: ``dpv:hasPersonalData`` needs
+            ``dpv:PersonalData`` for the range and carries
+            ``dpv:SpecialCategoryPersonalData`` because DPV's own file says so
+            and because that is the half an access body reads.
         label: The authority list's own label, for a ``skos:Concept``. Restated
             verbatim rather than invented, and omitted for the classes that are
             not concepts and so owe no label.
@@ -973,7 +978,10 @@ def _typed(iri: str, rdf_type: str, label: str = "") -> dict[str, object]:
     Returns:
         The JSON-LD node.
     """
-    node: dict[str, object] = {"@id": iri, "@type": rdf_type}
+    node: dict[str, object] = {
+        "@id": iri,
+        "@type": rdf_type if isinstance(rdf_type, str) else list(rdf_type),
+    }
     if label:
         node["skos:prefLabel"] = label
     return node
@@ -1062,6 +1070,16 @@ def write_healthdcat_description(
             )
             for code in spec.health_categories
         ],
+        # Recommended rather than mandatory, and emitted because the range is
+        # sourced and the value is derivable: everything this tool builds is
+        # personal data about health, which is what `healthdcat.
+        # PERSONAL_DATA_CATEGORY` names and why it is a constant rather than a
+        # flag -- the same reasoning as `healthCategory` being EHRS.
+        "dpv:hasPersonalData": _typed(
+            healthdcat.PERSONAL_DATA_CATEGORY,
+            healthdcat.PERSONAL_DATA_CATEGORY_TYPES,
+            healthdcat.PERSONAL_DATA_CATEGORY_LABEL,
+        ),
         "healthdcatap:hasStructuredData": True,
         "healthdcatap:numberOfUniqueIndividuals": _non_negative(summary.subject_count),
         "healthdcatap:numberOfRecords": _non_negative(summary.file_count),

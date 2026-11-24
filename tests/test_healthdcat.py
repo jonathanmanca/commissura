@@ -39,6 +39,9 @@ from commissura.healthdcat import (
     IMPORTED_PROFILE,
     NAMESPACES,
     NON_PUBLIC_ONLY_TERMS,
+    PERSONAL_DATA_CATEGORY,
+    PERSONAL_DATA_CATEGORY_LABEL,
+    PERSONAL_DATA_CATEGORY_TYPES,
     PROPERTIES,
     PROPERTY_COUNT,
     RANGE_CONSTRAINTS_PATH,
@@ -824,3 +827,41 @@ def test_the_dataset_type_base_is_served_over_plain_http() -> None:
     """Like data-theme and unlike health categories, which use https."""
     assert f"{DATASET_TYPE_SCHEME}/" == DATASET_TYPE_BASE
     assert DATASET_TYPE_BASE.startswith("http://")
+
+
+# --------------------------------------------------------------------------
+# The DPV personal-data category, and the namespace the profile gets wrong
+# --------------------------------------------------------------------------
+
+
+def test_the_personal_data_concept_uses_dpvs_current_namespace() -> None:
+    """Not the one the profile's own worked example declares.
+
+    `html/examples/dpvhasPersonalData.ttl` writes
+    ``@prefix dpvpd: <https://w3id.org/dpv/dpv-pd#>``. DPV's Personal Data
+    extension states that the namespace for its terms is
+    ``https://w3id.org/dpv/pd#``, and ``dpv-pd`` appears nowhere in its
+    vocabulary file as an alias. Copying the example would emit an IRI no
+    current DPV release defines — and `w3id.org` redirects both document URLs
+    to the same page, so following the link confirms nothing. Pinned because
+    the next person to read that example will reach for it.
+    """
+    assert NAMESPACES["pd"] == "https://w3id.org/dpv/pd#"
+    assert "dpv-pd" not in PERSONAL_DATA_CATEGORY
+    assert PERSONAL_DATA_CATEGORY == "https://w3id.org/dpv/pd#HealthRecord"
+
+
+def test_the_personal_data_concept_carries_both_classes_dpv_declares() -> None:
+    """``dpv:PersonalData`` for the range, special category for the reader.
+
+    ``healthdcat-ap/range.ttl`` constrains this path with
+    ``sh:class dpv:PersonalData``, which is satisfied by an ``rdf:type`` triple
+    in the data graph and by nothing else. The second class is DPV's own
+    statement about this concept and is the half an access body reads, since
+    DPV sources it to GDPR Art. 9(1).
+    """
+    assert PERSONAL_DATA_CATEGORY_TYPES == (
+        "dpv:PersonalData",
+        "dpv:SpecialCategoryPersonalData",
+    )
+    assert PERSONAL_DATA_CATEGORY_LABEL == "Health Record"

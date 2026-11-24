@@ -1880,7 +1880,7 @@ agent's `cv:contactPoint` to `cv:ContactPoint`. Two profiles, two contact
 models. Each is used where its own shapes ask for it; picking one and using it
 everywhere is the tempting move and fails half the shapes.
 
-Two findings are about the profiles rather than about this project. **Release 8's
+Three findings are about the profiles rather than about this project. **Release 8's
 published shapes are not valid SHACL**: an `sh:or` sits inside the `sh:property`
 list with no `sh:path`, which no property shape may lack, and a strict engine
 refuses the whole file. The test repairs it on the parsed graph — not by editing
@@ -1895,6 +1895,30 @@ ones, so the date-type checks DCAT-AP intends on `dct:modified`,
 `dcat:startDate` and `dcat:endDate` are not enforced by anything. Nothing here
 depends on them; it is recorded because "conformant" means less than it looks in
 that corner.
+
+And **one worked example points at a namespace that is not the vocabulary's.**
+The example for `dpv:hasPersonalData` declares
+`@prefix dpvpd: <https://w3id.org/dpv/dpv-pd#>`, while DPV's Personal Data
+extension states that the namespace for its terms is
+`https://w3id.org/dpv/pd#` — and `dpv-pd` appears nowhere in that vocabulary as
+an alias. What makes it hard to catch is that `w3id.org` redirects both
+document URLs to the same published page, so following the link from the
+example shows a real specification and confirms nothing about the term IRIs,
+which are compared as strings.
+
+So the description names `pd:HealthRecord`, typed as both `dpv:PersonalData`
+and `dpv:SpecialCategoryPersonalData` because DPV's own file declares it an
+instance of each, and because a validator holding none of DPV's axioms needs
+the triples in the document. The near miss is `pd:Health`; both are special
+category, so the choice changes what the description says rather than what it
+claims.
+
+**There is no property for a trade-secret flag**, which is worth stating
+because EHDS Article 60(3) has a holder notify intellectual property or trade
+secrets when submitting a dataset description. The word "secret" appears
+nowhere in the Release 8 specification, and "intellectual property" only in the
+definition of `dct:rights` — which DCAT-AP 3.0.0 puts on a catalogue and a
+distribution, not on a dataset. The notification is out of band.
 
 ### Synthetic by construction
 
