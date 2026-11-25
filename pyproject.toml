@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "commissura"
-version = "0.1.0"
+version = "0.1.1"
 description = "Turn raw clinical material into standardised, de-identified, research-ready datasets"
 readme = "README.md"
 requires-python = ">=3.11"

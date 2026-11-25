@@ -3,11 +3,36 @@
 Notable changes to `commissura`, newest first. Versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-Three other version numbers travel inside the output and move independently of
+Four other version numbers travel inside the output and move independently of
 this one, because a consumer needs to know which of them changed:
 `.deident/manifest.json` and `.deident/risk_report.json` each declare their own
 schema version, the dataset layout declares a third, and the de-identification
 rules declare a fourth. A release that moves any of them says so below.
+
+## 0.1.1 — 2026-11-25
+
+Packaging only. Nothing an installation reaches has changed: the
+pseudonymisation, the manifest, the risk report and the emitted dataset
+description are what 0.1.0 produced, byte for byte.
+
+### Fixed
+
+- The test suite errored when run from an unpacked source distribution, which
+  is not a git checkout. `tests/test_line_endings.py` asks git which files are
+  tracked, and the source distribution carries the tests on purpose so that
+  somebody packaging this can run them without cloning — so a guard added for
+  one declared property had broken another. It skips there now, stating why.
+- The README overstated what the source distribution allows. It said the
+  HealthDCAT-AP conformance claim is checkable "with no clone and no network",
+  and installing the development extras plainly needs the network. The claim
+  worth making is that the profile's own SHACL shapes are not fetched from a
+  server nobody here controls, because the archive carries them, and that is
+  now measured against the published archive rather than asserted.
+
+### Schema versions carried by this release
+
+- Manifest `7.2.0`, risk report `1.2.0`, dataset layout `1.1.0`,
+  de-identification rules `1.2.0`. Unchanged from 0.1.0.
 
 ## 0.1.0 — 2026-11-25
 
