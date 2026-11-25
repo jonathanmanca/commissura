@@ -23,6 +23,17 @@ from pathlib import Path
 from typer.main import get_command
 
 from commissura.cli import app
+from commissura.read.identity import RefusalReason
+from commissura.validate import registered_rules
+
+DROP_REASONS = frozenset({"undated_record", "subject_has_no_dated_event"})
+"""The two reasons a record that linked is still absent from the dataset.
+
+Unlike :class:`RefusalReason` these are string literals in
+``build/writer.py``, so there is nothing to import and this set is a
+transcription. The honest limit that follows: the guard below catches a reason
+the README invents or misspells, and not a third reason the code grows.
+"""
 
 README = Path(__file__).resolve().parents[1] / "README.md"
 """Resolved from this file, not from the working directory.
@@ -198,3 +209,77 @@ def test_every_anchor_in_the_readme_has_a_heading() -> None:
     anchors = set(re.findall(r"\]\(#([^)]+)\)", text))
     assert anchors, "the README uses no in-page links, so this guard checks nothing"
     assert anchors <= _heading_slugs(text), sorted(anchors - _heading_slugs(text))
+
+
+def test_the_readme_counts_the_same_records_twice_and_agrees_with_itself() -> None:
+    """The walkthrough's build block and the manifest fragment describe one run.
+
+    They are forty lines apart and were recaptured apart, which is how the
+    fragment came to read 17 + 12 = 29 linkage issues under a block printing
+    49. A third reason had appeared in between, `invalid_national_identifier`
+    at 20, and nothing compared the two.
+
+    That is the third time a README number has gone stale because the output
+    was recaptured in parts, so this checks the arithmetic that ties them:
+    the reasons in the fragment must add up to the number the command printed,
+    and the dropped records must agree across all three places they are
+    stated. It cannot see a number stale in every place at once, which is what
+    `tests/test_walkthrough.py` is for — it re-runs the command.
+    """
+    text = README.read_text(encoding="utf-8")
+
+    printed = re.search(r"^  linkage issues +(\d+)$", text, re.MULTILINE)
+    dropped = re.search(r"^  records dropped +(\d+)", text, re.MULTILINE)
+    assert printed and dropped, "the build block no longer prints these lines"
+
+    counts = [int(n) for n in re.findall(r'"reason": "\w+",? *"count": (\d+)', text)]
+    assert len(counts) == 4, counts  # three linkage reasons and one drop reason
+    assert sum(counts[:3]) == int(printed.group(1)), (counts, printed.group(1))
+    assert counts[3] == int(dropped.group(1)), (counts, dropped.group(1))
+
+    stated = re.search(r'"records_not_in_dataset": +(\d+)', text)
+    assert stated and stated.group(1) == dropped.group(1), "the two totals disagree"
+
+
+def test_every_refusal_reason_the_readme_names_is_one_the_code_emits() -> None:
+    """A worked manifest fragment must not invent a reason, or misspell one.
+
+    The fragment is the only place a reader sees what `linkage_issues` looks
+    like, so a reason that no build can produce teaches them to look for
+    something that will never appear.
+    """
+    named = set(re.findall(r'"reason": "(\w+)"', README.read_text(encoding="utf-8")))
+    assert named, "the README shows no worked reasons, so this guard checks nothing"
+    real = {reason.value for reason in RefusalReason} | DROP_REASONS
+    assert named <= real, sorted(named - real)
+
+
+def test_the_rule_total_the_readme_prints_is_the_real_one() -> None:
+    """`from N rules` appears twice, and only one of the two is ever re-run.
+
+    `tests/test_walkthrough.py` executes the walkthrough's `validate` and
+    compares its summary line, so that occurrence is pinned by a run. The
+    other sits in the `commissura validate` section as a hand-written example
+    of a dataset that does not conform, and nothing has ever checked it. Both
+    say 40 today; a rule added to the registry would move one and leave the
+    other, which is the shape of drift this project keeps finding.
+    """
+    totals = {int(n) for n in re.findall(r"from (\d+) rules", README.read_text(encoding="utf-8"))}
+    assert totals, "the README prints no rule total, so this guard checks nothing"
+    assert totals == {len(registered_rules())}, (totals, len(registered_rules()))
+
+
+def test_the_readme_counts_the_packages_the_lockfile_pins() -> None:
+    """A number stating how many dependencies are pinned, next to the lockfile.
+
+    It read 36 while `uv.lock` held 41 entries, one of which is `commissura`
+    itself — so the dependency set had grown by four and the sentence beside
+    it had not. Nobody would notice: the figure is plausible, it is in a
+    paragraph about reproducibility, and the lockfile is the one file in the
+    repository nobody reads.
+    """
+    lock = README.parent / "uv.lock"
+    entries = len(re.findall(r"^\[\[package\]\]", lock.read_text(encoding="utf-8"), re.MULTILINE))
+    stated = re.search(r"pins all (\d+) packages", README.read_text(encoding="utf-8"))
+    assert stated, "the README no longer states how many packages the lock pins"
+    assert int(stated.group(1)) == entries - 1, (stated.group(1), entries)

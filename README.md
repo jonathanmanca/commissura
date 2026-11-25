@@ -558,7 +558,7 @@ this was fixed nothing said anything at all, and the only evidence was a file
 count lower than the number of files you handed over.
 
 Both are now counted where you will see them. On a clean export both are zero;
-the walkthrough above shows 29 and 3, because its corpus has defects injected on
+the walkthrough above shows 49 and 3, because its corpus has defects injected on
 purpose:
 
 ```
@@ -581,7 +581,7 @@ second a date format the reader does not recognise, and the third is not a
 problem at all. Your terminal gets the filenames; the document that travels
 gets the counts.
 
-**Twenty-nine of those linkage issues are records that *are* in the dataset.**
+**All forty-nine of those linkage issues are records that *are* in the dataset.**
 A reason either means the record could not be attached to anybody, or it means
 the record was attached and something about the attribution is worth a second
 look. The two are counted separately, because adding them together is a false
@@ -589,12 +589,13 @@ statement about what the dataset contains:
 
 ```json
 "linkage_issues": [
-  { "reason": "conflicting_identity",     "count": 17 },
-  { "reason": "conflicting_report_name",  "count": 12 }
+  { "reason": "conflicting_identity",        "count": 17 },
+  { "reason": "conflicting_report_name",     "count": 12 },
+  { "reason": "invalid_national_identifier", "count": 20 }
 ],
 "records_dropped":            [ { "reason": "undated_record", "count": 3 } ],
 "records_not_in_dataset":     3,
-"records_flagged_in_dataset": 29
+"records_flagged_in_dataset": 49
 ```
 
 `conflicting_identity` means two laboratory messages carry one codice fiscale
@@ -605,11 +606,20 @@ to the wrong record, or a template filled in over the previous report. Both
 records stay in the dataset and both names are redacted; what you are told is
 that the attribution is suspect, which is a thing no amount of redacting fixes.
 
-These come from the `lab.conflicting_identity` and
+Those two come from the `lab.conflicting_identity` and
 `reports.wrong_patient_name` defects, injected at the walkthrough's rate. Before
 they existed the corpus reported zero conflicts — not because the data was clean
 but because the generator could not produce one, which left the whole path
 untested end to end.
+
+`invalid_national_identifier` is the largest group of the three and **is not a
+defect at all.** One of the generated sites does not send a codice fiscale: its
+PID-3 carries the literal `UNKNOWN`, which is what a real interface writes when
+the field is unavailable. Those records are attached by their record number
+within the institution that issued it, which is why they are reported rather
+than refused — and why they appear at `--defect-rate 0` as well. What the
+reason tells you is that those subjects cannot be linked to another holder's
+dataset, because an institution's own number means nothing outside it.
 
 A dropped record carries one of two reasons. `undated_record` names the field
 that should have held a date. `subject_has_no_dated_event` is worse and is
@@ -1357,14 +1367,14 @@ nobody anticipated is accounted for rather than going unmentioned:
 
 ```json
 { "field": "00100030", "name": "PatientBirthDate",
-  "disposition": "removed", "files_present": 13 },
+  "disposition": "removed", "files_present": 27 },
 { "field": "0020000D", "name": "StudyInstanceUID",
-  "disposition": "replaced", "files_present": 13,
+  "disposition": "replaced", "files_present": 27,
   "note": "as an HMAC-derived UID under the 2.25 arc" },
-{ "field": "00290010", "disposition": "removed", "files_present": 3 }
+{ "field": "00290010", "disposition": "removed", "files_present": 4 }
 ```
 
-That last row is a private vendor tag, present in three of thirteen files
+That last row is a private vendor tag, present in four of twenty-seven files
 because a defect put it there. Nothing declares it; it is in the table because
 it was in the data, and an odd DICOM group number means its meaning belongs to
 the vendor and is in no dictionary.
@@ -1382,12 +1392,14 @@ quoted, because a header label from somebody else's template is written beside
 the value it labels and is a line of the input:
 
 ```json
-{ "field": "other labelled lines", "disposition": "removed", "files_present": 49 }
+{ "field": "other labelled lines", "disposition": "removed", "files_present": 12 }
 ```
 
 That row is how you find out your template carries fields this tool never saw —
 the same signal as reports landing in `records_dropped`, in the table rather
-than in a count.
+than in a count. **It is the one fragment on this page that is not a real
+capture**, because the walkthrough's own corpus uses labels this tool
+recognises, so no such row appears in its manifest.
 
 A report's prose body is not a field, so the reports modality carries a second
 table beside the first, with the same three-way vocabulary:
@@ -1977,7 +1989,7 @@ uv sync --locked --extra dev
 pytest && ruff check . && ruff format --check . && mypy
 ```
 
-`uv.lock` is committed and pins all 36 packages, so two people installing a
+`uv.lock` is committed and pins all 40 packages, so two people installing a
 month apart get the same dependency set. `--locked` fails rather than silently
 re-resolving when `pyproject.toml` and the lock disagree, which is what you want
 in a checkout and in CI: a lock that quietly updates itself is not a lock. After

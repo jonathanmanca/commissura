@@ -54,12 +54,14 @@ Every identifier in the walkthrough is synthetic.
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -255,8 +257,20 @@ def divergence(segment: list[str], real: list[str], start: int) -> str:
     return f"the README says:\n    {expected}\n  the command printed:\n    {printed}"
 
 
+class Walkthrough(NamedTuple):
+    """What one run of the README's own commands produced.
+
+    The directory is kept alongside the output because the README quotes the
+    manifest as well as the terminal, and a fragment of a document the run
+    wrote can only be checked against the document itself.
+    """
+
+    printed: dict[str, str]
+    root: Path
+
+
 @pytest.fixture(scope="module")
-def walkthrough(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
+def walkthrough(tmp_path_factory: pytest.TempPathFactory) -> Walkthrough:
     """Run every captured command in one directory and return what each printed.
 
     They share a directory because they share their artefacts: `build` reads
@@ -283,7 +297,7 @@ def walkthrough(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
         assert finished.returncode == 0, f"{step.title}\n{finished.stdout}{finished.stderr}"
         produced[step.title] = finished.stdout
 
-    return produced
+    return Walkthrough(printed=produced, root=root)
 
 
 @pytest.mark.parametrize(
@@ -292,7 +306,7 @@ def walkthrough(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     ids=lambda step: step.title,
 )
 def test_the_captured_block_is_what_the_command_prints(
-    step: Step, walkthrough: dict[str, str]
+    step: Step, walkthrough: Walkthrough
 ) -> None:
     """Every captured segment, as consecutive lines of the real output.
 
@@ -301,7 +315,7 @@ def test_the_captured_block_is_what_the_command_prints(
     the run. The second is what four days of a missing ``cda`` count needed,
     and what a subsequence check would have let through.
     """
-    real = comparable(walkthrough[step.title])
+    real = comparable(walkthrough.printed[step.title])
     position = 0
 
     for segment in segments(comparable(step.captured)):
@@ -313,7 +327,7 @@ def test_the_captured_block_is_what_the_command_prints(
         position = index + len(segment)
 
 
-def test_the_validate_summary_line_is_real(walkthrough: dict[str, str]) -> None:
+def test_the_validate_summary_line_is_real(walkthrough: Walkthrough) -> None:
     """The one line of step 4 that two machines can agree on.
 
     It carries the error, warning and notice counts and the number of rules
@@ -324,7 +338,7 @@ def test_the_validate_summary_line_is_real(walkthrough: dict[str, str]) -> None:
     """
     step = next(step for step in readme_steps() if step.title.startswith("4."))
     stated = [line for line in comparable(step.captured) if line.startswith("CONFORMANT:")]
-    real = comparable(walkthrough[step.title])
+    real = comparable(walkthrough.printed[step.title])
 
     assert len(stated) == 1, stated
     assert stated[0] in real, f"the README says:\n  {stated[0]}\nthe command printed:\n  {real[-1]}"
@@ -353,3 +367,53 @@ def test_the_readme_says_the_walkthrough_is_re_run() -> None:
     text = " ".join(README.read_text(encoding="utf-8").split())
 
     assert "A test re-runs this walkthrough" in text
+
+
+ILLUSTRATIVE_FIELDS = frozenset({"other labelled lines"})
+"""Ledger rows the README shows that this corpus cannot produce.
+
+`other labelled lines` is the row that appears when a report carries a header
+label this tool does not recognise, and the walkthrough's corpus uses labels
+it does. The README says so beside the fragment; this names it here so that
+the comparison below can be exact about everything else.
+"""
+
+
+def test_the_manifest_fragments_are_what_the_build_wrote(walkthrough: Walkthrough) -> None:
+    """Every ledger row the README quotes, against the manifest of a real run.
+
+    The README quotes the per-modality table in fragments, and a fragment is
+    recaptured by hand or not at all. Two of them had gone stale by the time
+    anybody looked: the imaging rows still said `files_present: 13` from a
+    ten-subject era while the walkthrough writes twenty-seven sidecars, and
+    the prose under them restated it as "three of thirteen".
+
+    The build already runs for this module, so checking its manifest costs
+    nothing. It is the same argument that paid for re-running the walkthrough
+    itself: the README promises these came from a real run, and a promise with
+    no check behind it is the thing this file exists to retire.
+    """
+    manifest = json.loads(
+        (walkthrough.root / "dataset" / ".deident" / "manifest.json").read_text(encoding="utf-8")
+    )
+    written = {
+        row["field"]: row
+        for modality in manifest["modalities"]
+        for row in modality.get("fields", [])
+    }
+
+    quoted = re.findall(r'\{\s*"field": "([^"]+)"(.*?)\}', README.read_text(encoding="utf-8"), re.S)
+    checked = 0
+    for field, body in quoted:
+        if field in ILLUSTRATIVE_FIELDS:
+            continue
+        assert field in written, f"the README quotes a row for {field!r} that no build wrote"
+        present = re.search(r'"files_present": (\d+)', body)
+        if present:
+            assert int(present.group(1)) == written[field]["files_present"], (
+                field,
+                present.group(1),
+                written[field]["files_present"],
+            )
+            checked += 1
+    assert checked >= 3, f"only {checked} quoted rows carried a count"
