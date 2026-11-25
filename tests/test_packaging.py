@@ -37,12 +37,19 @@ Every identifier mentioned here is synthetic.
 from __future__ import annotations
 
 import json
+import re
 import tarfile
+import tomllib
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+from commissura import layout
+from commissura.build.manifest import MANIFEST_SCHEMA_VERSION
+from commissura.build.risk import RISK_SCHEMA_VERSION
+from commissura.deident.pseudonymise import RULE_VERSION
 
 ROOT = Path(__file__).resolve().parent.parent
 DISTRIBUTION = "commissura"
@@ -362,3 +369,63 @@ def test_the_sdist_can_run_its_own_test_suite(sdist_names: list[str]) -> None:
     assert "third_party/PROVENANCE.json" in sdist_names
     assert "pyproject.toml" in sdist_names
     assert "uv.lock" in sdist_names
+
+
+# --------------------------------------------------------------------------
+# The release describes itself, and keeps describing itself truthfully
+# --------------------------------------------------------------------------
+
+
+def _changelog() -> str:
+    return (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+def test_the_changelog_names_the_version_the_package_declares() -> None:
+    """A changelog whose newest entry is not this version describes something else.
+
+    The `NOTICE` precedent: that file said `polybids` from the initial commit
+    until a test read it, because nothing else did. A changelog is the same kind
+    of file — written once per release, read by somebody deciding whether to
+    upgrade, and invisible to everything in between. So the newest heading is
+    checked against the version `pyproject.toml` declares, which means bumping
+    the version without writing an entry fails here rather than shipping a
+    release the changelog does not mention.
+    """
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "version"
+    ]
+    headings = re.findall(r"^## (\S+)", _changelog(), re.MULTILINE)
+
+    assert headings, "the changelog declares no versions"
+    assert headings[0] == version
+
+
+def test_the_changelog_quotes_the_schema_versions_the_code_carries() -> None:
+    """Four numbers that move independently, and the changelog promises to track them.
+
+    The file says in its own preamble that a release moving any of the four
+    output version numbers says so, and those four have moved nine times in two
+    weeks. A promise like that is prose until something checks it, so this reads
+    the constants and requires the newest entry to quote each one — the same
+    reasoning as the heading above, applied to the part a consumer actually
+    needs in order to know whether their parser still works.
+    """
+    newest = _changelog().split("\n## ")[1]
+
+    for name, value in (
+        ("manifest", MANIFEST_SCHEMA_VERSION),
+        ("risk report", RISK_SCHEMA_VERSION),
+        ("dataset layout", layout.SCHEMA_VERSION),
+        ("de-identification rules", RULE_VERSION),
+    ):
+        assert value in newest, f"the changelog does not quote the {name} version {value}"
+
+
+def test_the_sdist_carries_the_changelog(sdist_names: list[str]) -> None:
+    """Because somebody who installed from an index has no checkout to read it in.
+
+    The wheel deliberately carries nothing but the package and the two licence
+    files, so this is the only artefact that can answer "what changed", and the
+    archive is where a distribution packager looks.
+    """
+    assert "CHANGELOG.md" in sdist_names

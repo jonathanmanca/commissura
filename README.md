@@ -2006,6 +2006,37 @@ later, was caught before it shipped. To exercise the floor itself:
 uv run --python 3.11 pytest
 ```
 
+## Problems and questions
+
+**There is no public issue tracker yet, because the repository is private.**
+Until there is, the way to reach the author is the profile the package itself
+declares: [linkedin.com/in/jonathan-manca](https://www.linkedin.com/in/jonathan-manca/).
+What changed between releases is in [CHANGELOG.md](CHANGELOG.md).
+
+**Do not send clinical material, and do not send a key.** That request is not
+politeness about mailbox sizes: a bug report about a de-identification tool is
+exactly the place somebody pastes the message that reproduces it, and a message
+that reproduces a de-identification bug is by definition one this tool failed to
+de-identify.
+
+Nearly everything reproduces on synthetic data, because the generator ships in
+the same package and its corpora are deterministic. A seed, a subject count and
+a defect rate are usually the whole report:
+
+```bash
+commissura generate --out ./raw --subjects 25 --seed 42 --defect-rate 0.2
+```
+
+What helps, in order: the command you ran, the output of `commissura --version`,
+your platform, and the `--json` output of whatever went wrong.
+`.deident/manifest.json` and `.deident/risk_report.json` are safe to attach
+whatever corpus they came from — they are built to carry counts and never
+values, and a test asserts that no planted identifier reaches them.
+
+**Never the `--report` page.** Its left-hand column is the input before
+redaction, which is the one artefact this tool produces that must not leave the
+machine that built it.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
