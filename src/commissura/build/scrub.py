@@ -372,6 +372,37 @@ def _longest_first(values: Iterable[str]) -> list[str]:
     return sorted(values, key=lambda value: (-len(value), value))
 
 
+def _tolerant_pattern(value: str) -> re.Pattern[str] | None:
+    r"""Return a pattern matching ``value`` however it is punctuated, or None.
+
+    Between any two characters it allows at most one space, dot or hyphen, so
+    ``LMBDVD63H13X767I`` is matched as itself and as
+    ``LMB DVD 63H13 X767I``, which is how a form prints a codice fiscale and
+    how somebody reads one out. Newlines are deliberately not separators: a
+    value spanning two lines is two values as far as a reader is concerned,
+    and allowing ``\s`` would let a sixteen-character pattern wander down the
+    page.
+
+    **At most one** separator, for the same reason the telephone pattern says
+    so: a run of them means the match is crossing from one token to the next.
+    And the boundaries keep it from matching inside a longer alphanumeric run,
+    where a sixteen-character identifier has no business being found.
+
+    Returns None below the minimum redactable length, which is the scrubber's
+    own floor rather than a second opinion about it.
+
+    Args:
+        value: A declared identifier, as the structured export spelled it.
+
+    Returns:
+        The compiled pattern, or None when the value is too short to redact.
+    """
+    if len(value) < _MINIMUM_REDACTABLE:
+        return None
+    body = r"[ .\-]?".join(re.escape(character) for character in value)
+    return re.compile(rf"(?<![A-Za-z0-9]){body}(?![A-Za-z0-9])", re.IGNORECASE)
+
+
 def _replace_all(text: str, needle: str, placeholder: str) -> tuple[str, int]:
     """Replace ``needle`` case-insensitively, reporting how often it matched."""
     if len(needle) < _MINIMUM_REDACTABLE:
@@ -430,6 +461,31 @@ def scrub_text(
         if count:
             report.replacements.append(
                 Replacement(category, f"<{pattern.pattern[:16]}>", placeholder, count)
+            )
+
+    # The national identifier, however the document punctuates it. Exact
+    # substitution reads `LMBDVD63H13X767I` and not `LMB DVD 63H13 X767I`,
+    # which is how a form prints one -- found on 2026-11-25 by writing a
+    # report the way a person would and seeing which identifiers survived.
+    # Derived from the declared value rather than from a shape, so it is the
+    # same targeted method as everything else here and cannot fire on a value
+    # no export declared.
+    #
+    # The recorded original is a fixed label and NOT the pattern text, which
+    # would carry the identifier's first characters into `ScrubReport` and
+    # from there into `build --report`. The manifest only ever reads the
+    # placeholder, so nothing travels today; the label is what stops that
+    # being a fact about the current consumers rather than about the record.
+    for declared_id in dict.fromkeys(
+        [one.national_id for one in known.identities] + [one.national_id for one in known.declared]
+    ):
+        tolerant = _tolerant_pattern(declared_id) if declared_id else None
+        if tolerant is None:
+            continue
+        scrubbed, count = tolerant.subn(PLACEHOLDER_NATIONAL_ID, scrubbed)
+        if count:
+            report.replacements.append(
+                Replacement("national_id", "<national-id>", PLACEHOLDER_NATIONAL_ID, count)
             )
 
     ordered: list[tuple[str, str, str]] = [

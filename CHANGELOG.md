@@ -9,6 +9,36 @@ this one, because a consumer needs to know which of them changed:
 schema version, the dataset layout declares a third, and the de-identification
 rules declare a fourth. A release that moves any of them says so below.
 
+## 0.1.4 — 2026-11-25
+
+Closes the limit 0.1.3 stated. A dataset built with any earlier version may
+contain a codice fiscale written with separators, and the remedy is the same
+as for 0.1.3: build it again.
+
+### Fixed
+
+- **A codice fiscale written with spaces, dots or hyphens survived
+  redaction.** `LMB DVD 63H13 X767I` is how a form prints one and how somebody
+  reads one out, and exact substitution reads only `LMBDVD63H13X767I`. Each
+  declared national identifier now also matches a separator-tolerant form of
+  itself, derived from the declared value rather than from a shape — so it
+  still cannot fire on a value no export declared, which is what keeps this
+  the same targeted method as the rest.
+- Three constraints keep that pattern from wandering: at most one separator
+  between two characters, no newline among them, and no match inside a longer
+  alphanumeric run.
+
+### Known limits, unchanged
+
+- An accented variant of a declared name is not matched, and is not a defect:
+  it is a different string, and the documented limit of targeted redaction.
+
+### Schema versions carried by this release
+
+- Manifest `7.2.0`, risk report `1.2.0`, dataset layout `1.1.0`,
+  de-identification rules `1.2.0`. Unchanged: nothing here touches a derived
+  label, an offset or a UID.
+
 ## 0.1.3 — 2026-11-25
 
 **The first release that changes what is removed from a dataset.** Two
