@@ -111,7 +111,22 @@ one thing or the other would be worse than a build that stopped.
 
 _AGE_PATTERN = re.compile(r"\b(\d{1,3})\s*anni\b", re.IGNORECASE)
 _EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
-_PHONE_PATTERN = re.compile(r"\+?\d[\d\s]{7,}\d")
+_PHONE_PATTERN = re.compile(r"\+?\d(?:[\s.\-/]?\d){8,}")
+"""Nine digits or more, with at most one separator between any two of them.
+
+The earlier form accepted only spaces between digits, so `+39 010 0310547`
+was caught and the same number written `010-0310547` was not -- and the
+pattern exists precisely for the number a document states that no structured
+field declared. Hyphens, dots and slashes are how people actually write a
+telephone number down.
+
+**The digit floor is what makes the separators safe.** Allowing them without
+it matches a date: `22/11/2023` is eight digits and two slashes, and turning
+a date into `[CONTACT]` would destroy the one value this pipeline converts to
+an offset rather than removes. Nine is the shortest Italian telephone number.
+And at most *one* separator between digits is what stops a match spanning
+`22/11/2023 - 24/11/2023`, where the three characters of ` - ` break it.
+"""
 
 _MINIMUM_REDACTABLE = 4
 """Shortest string worth replacing by exact match.
@@ -270,6 +285,17 @@ def _identity_entries(
             ("person_name", identity.family_name, PLACEHOLDER_NAME),
             ("person_name", identity.given_name, PLACEHOLDER_NAME),
         ]
+        # The same record number without its leading zeros, which is a
+        # different string and the same identifier. `normalise_record_number`
+        # strips them precisely so that `0012345` in one export and `12345` in
+        # another resolve to one patient -- so the reader already treats the
+        # two as equal, and matching only the padded form meant the tool
+        # disagreed with itself: a document writing the unpadded number kept
+        # it. Added after the padded form, so a text carrying both loses the
+        # longer one first and never leaves a placeholder beside a fragment.
+        unpadded = identity.mrn.lstrip("0")
+        if unpadded and unpadded != identity.mrn:
+            entries.append(("patient_id", unpadded, PLACEHOLDER_PATIENT_ID))
     seen: set[tuple[str, str, str]] = set()
     unique: list[tuple[str, str, str]] = []
     for entry in entries:
