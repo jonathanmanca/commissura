@@ -9,6 +9,47 @@ this one, because a consumer needs to know which of them changed:
 schema version, the dataset layout declares a third, and the de-identification
 rules declare a fourth. A release that moves any of them says so below.
 
+## 0.1.3 — 2026-11-25
+
+**The first release that changes what is removed from a dataset.** Two
+identifiers survived redaction in spellings this tool had every reason to
+recognise, found by an adversarial pass rather than by a test. A dataset built
+with 0.1.0, 0.1.1 or 0.1.2 may contain either of them, and the only remedy is
+to build it again — the values were never in the manifest, so nothing recorded
+that they had stayed.
+
+### Fixed
+
+- **A medical record number written without its leading zeros survived.**
+  `normalise_record_number` strips them on purpose, so that `0012345` in one
+  export and `12345` in another resolve to one patient; the redactor matched
+  only the padded form, and so disagreed with the linkage that had already
+  decided the two were the same person. A document writing the unpadded number
+  kept it.
+- **A telephone number punctuated with anything but spaces survived.** The
+  pattern read `+39 010 0310547` and not `010-0310547`, and it exists for the
+  number a document states that no structured field declared. It now accepts
+  hyphens, dots and slashes, with two constraints that keep it from eating
+  clinical content: at least nine digits, which is the shortest Italian
+  telephone number and excludes every date, and at most one separator between
+  two digits, which stops a match spanning a date range. Without the first,
+  `22/11/2023` would become a redacted contact rather than a day offset.
+
+### Known limits, stated rather than fixed
+
+- A codice fiscale written with spaces, `LMB DVD 63H13 X767I`, is not matched.
+  Closing it needs a separator-tolerant form of each declared value, which is
+  a mechanism rather than a correction.
+- An accented variant of a declared name is not matched, and is not a defect:
+  it is a different string, and the documented limit of targeted redaction.
+
+### Schema versions carried by this release
+
+- Manifest `7.2.0`, risk report `1.2.0`, dataset layout `1.1.0`,
+  de-identification rules `1.2.0`. Unchanged: nothing here touches a derived
+  label, an offset or a UID, so datasets built across these versions remain
+  linkable to each other.
+
 ## 0.1.2 — 2026-11-25
 
 Documentation only. `src/` is byte for byte what 0.1.1 shipped, so nothing an
