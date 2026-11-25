@@ -9,6 +9,46 @@ this one, because a consumer needs to know which of them changed:
 schema version, the dataset layout declares a third, and the de-identification
 rules declare a fourth. A release that moves any of them says so below.
 
+## 0.1.2 — 2026-11-25
+
+Documentation only. `src/` is byte for byte what 0.1.1 shipped, so nothing an
+installation does is different; what changes is the project page, which is this
+README and could only be corrected by publishing it again.
+
+### Fixed
+
+- Every relative link in the README 404ed on the PyPI page. PyPI does not
+  resolve a relative target against the repository that produced the archive,
+  and has no reason to — the archive could have come from anywhere. Eight of
+  them, including three pointing at source modules the prose tells the reader
+  to go and read. All absolute now.
+- One in-page link pointed at a heading that has never existed, which is
+  quieter than a 404: the page stays where it is, so it reads as the browser
+  ignoring the click. Broken on GitHub too, for as long as it had been there.
+- Six numbers had gone stale, each one restated away from the block it came
+  from: the worked `linkage_issues` fragment added up to 29 under a build
+  printing 49, having missed a third reason added on 2026-11-24; the imaging
+  ledger still quoted a ten-subject corpus; and the lockfile sentence had
+  missed four packages. Recaptured from a real build.
+- A seventh number was never a capture at all. The illustrative
+  `other labelled lines` row carried a count that collided with the linkage
+  total by coincidence, so a reader could check it against another part of the
+  page and be reassured. The README now says which fragment is an illustration.
+
+### Added
+
+- A badge row: version, Python versions and CI read from the index and the
+  workflow rather than being restated here.
+- Guards for all of the above. Four new tests tie the README's numbers to
+  their source — including one that compares every manifest fragment the page
+  quotes against the manifest a real build writes, which closes the class
+  rather than this instance.
+
+### Schema versions carried by this release
+
+- Manifest `7.2.0`, risk report `1.2.0`, dataset layout `1.1.0`,
+  de-identification rules `1.2.0`. Unchanged from 0.1.0.
+
 ## 0.1.1 — 2026-11-25
 
 Packaging only. Nothing an installation reaches has changed: the
