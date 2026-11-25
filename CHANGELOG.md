@@ -9,10 +9,9 @@ this one, because a consumer needs to know which of them changed:
 schema version, the dataset layout declares a third, and the de-identification
 rules declare a fourth. A release that moves any of them says so below.
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-11-25
 
-First release. `commissura` is not on an index yet, so this entry describes what
-a first release would carry rather than what anybody has installed.
+First release.
 
 ### The tool
 

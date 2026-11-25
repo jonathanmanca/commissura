@@ -73,38 +73,35 @@ somewhere you will still have in five years.
 
 Requires Python 3.11 or newer.
 
-**Not published to PyPI yet**, so install from a checkout:
+```bash
+pip install commissura
+```
+
+From a checkout instead, which is what running the tests and the linters needs:
 
 ```bash
 git clone https://github.com/jonathanmanca/commissura.git
 ```
 
 ```bash
-cd commissura && uv venv && uv pip install -e .
+cd commissura && uv venv && uv pip install -e ".[dev]"
 ```
 
-Add the development extras to run the tests and the linters:
+**What each artefact carries** is asserted by `tests/test_packaging.py` rather
+than intended: the wheel is the package, its typing marker and the two licence
+files and nothing else, while the source distribution additionally carries the
+tests and the vendored SHACL shapes — so the HealthDCAT-AP conformance claim is
+checkable from the archive alone, with no clone and no network.
 
-```bash
-uv pip install -e ".[dev]"
-```
-
-**What "not published yet" does and does not mean.** The package builds, and the
-wheel has been installed into an environment that had never seen this source
-tree and driven through the whole walkthrough above — on Python 3.11, the
-declared floor, with dependencies resolved freely rather than from the lock.
-`tests/test_packaging.py` asserts what each artefact carries: the wheel is the
-package, its typing marker and the two licence files and nothing else, while the
-source distribution additionally carries the tests and the vendored shapes, so
-the HealthDCAT-AP conformance claim is checkable from the archive alone. What is
-missing is a decision, not a capability.
-
-That decision is deliberately not automated. `.github/workflows/publish.yml`
-exists, uses trusted publishing so that no upload token is stored anywhere here,
-defaults to TestPyPI, and can only be started by hand — there is no tag or
-release trigger, and a test asserts there is not. PyPI refuses to re-upload a
-filename it has already accepted and a yanked release stays downloadable by
-exact version, so a release is the one thing this project cannot take back.
+**Releases are started by hand, and checked before they leave.** The same
+workflow that uploads a release first runs the whole suite, builds both
+artefacts, and installs the wheel into an environment that has never seen this
+source tree to drive it end to end on Python 3.11, the declared floor.
+`.github/workflows/publish.yml` uses trusted publishing, so no upload token is
+stored anywhere here; it has no tag and no release trigger, and a test asserts
+there is not. PyPI refuses to re-upload a filename it has already accepted and
+a yanked release stays downloadable by exact version, so a release is the one
+thing this project cannot take back.
 
 ## The whole thing, start to finish
 
@@ -2008,9 +2005,10 @@ uv run --python 3.11 pytest
 
 ## Problems and questions
 
-**There is no public issue tracker yet, because the repository is private.**
-Until there is, the way to reach the author is the profile the package itself
-declares: [linkedin.com/in/jonathan-manca](https://www.linkedin.com/in/jonathan-manca/).
+**Report a problem as a
+[GitHub issue](https://github.com/jonathanmanca/commissura/issues).** To reach
+the author some other way, the package also declares the profile
+[linkedin.com/in/jonathan-manca](https://www.linkedin.com/in/jonathan-manca/).
 What changed between releases is in [CHANGELOG.md](CHANGELOG.md).
 
 **Do not send clinical material, and do not send a key.** That request is not

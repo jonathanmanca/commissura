@@ -199,11 +199,11 @@ def test_the_published_metadata_declares_only_links_that_work(
     rather than only the one value, which makes adding a URL a deliberate edit
     with a test to update.
 
-    **`Homepage` and `Repository` are absent on purpose.** They would point at
-    the GitHub repository, which is private, so they would resolve for the
-    author and for nobody else. Adding them belongs in the same change as
-    making the repository public — not before it, which is the whole reason
-    this is asserted rather than left to good intentions.
+    **They waited on the repository becoming public**, decided on 2026-11-25
+    in the same change that published 0.1.0. Before that, every one of them but
+    the author's own profile would have resolved for the author and for nobody
+    else — a link that works for one person, which is the shape this test
+    exists to catch.
     """
     with zipfile.ZipFile(built[0]) as archive:
         entry = next(n for n in archive.namelist() if n.endswith(".dist-info/METADATA"))
@@ -215,8 +215,9 @@ def test_the_published_metadata_declares_only_links_that_work(
         if line.startswith("Project-URL:")
     }
 
-    assert declared == {"Author"}
+    assert declared == {"Homepage", "Repository", "Issues", "Changelog", "Author"}
     assert "Project-URL: Author, https://www.linkedin.com/in/jonathan-manca/" in metadata
+    assert "Project-URL: Repository, https://github.com/jonathanmanca/commissura" in metadata
 
 
 @pytest.mark.parametrize("artefact", ["wheel", "sdist"])

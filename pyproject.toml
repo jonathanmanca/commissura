@@ -67,10 +67,16 @@ dev = [
 ]
 
 [project.urls]
-# The author's profile, at their explicit request. Deliberately the only entry
-# for now: a `Homepage` or `Repository` URL pointing at a private repository is
-# a dead link for everybody who installs the package, so those wait on the
-# decision about whether the repository goes public.
+# PyPI renders these as the sidebar of a page strangers read, so each one has
+# to resolve for them and not only for the author. They waited on the decision
+# of 2026-11-25 to make the repository public; before it, every link but the
+# last would have been dead for everybody who installs the package.
+# `tests/test_packaging.py` pins the set, so adding one stays a deliberate
+# edit.
+Homepage = "https://github.com/jonathanmanca/commissura"
+Repository = "https://github.com/jonathanmanca/commissura"
+Issues = "https://github.com/jonathanmanca/commissura/issues"
+Changelog = "https://github.com/jonathanmanca/commissura/blob/main/CHANGELOG.md"
 Author = "https://www.linkedin.com/in/jonathan-manca/"
 
 [project.scripts]
