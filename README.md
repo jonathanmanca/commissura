@@ -91,7 +91,10 @@ cd commissura && uv venv && uv pip install -e ".[dev]"
 than intended: the wheel is the package, its typing marker and the two licence
 files and nothing else, while the source distribution additionally carries the
 tests and the vendored SHACL shapes — so the HealthDCAT-AP conformance claim is
-checkable from the archive alone, with no clone and no network.
+checkable from the archive alone, with no clone and without fetching the
+profile's shapes from a server nobody here controls. Measured against the
+published 0.1.0 rather than asserted: unpack it, install the development
+extras, and the conformance tests pass.
 
 **Releases are started by hand, and checked before they leave.** The same
 workflow that uploads a release first runs the whole suite, builds both

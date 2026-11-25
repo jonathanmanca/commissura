@@ -34,6 +34,17 @@ to ask about.
 purpose -- the decision of 2026-11-19, so that the repository holds what the
 publisher serves and `NOTICE`'s claim that each vendored file is unmodified
 stays true if upstream ever ships CRLF.
+
+**One skip, and it is the one kind that cannot hide a defect.** Outside a git
+checkout there is no working copy to drift and no tracked set to ask about, so
+the property is undefined rather than unchecked -- unlike every skip this
+project has recorded as a silent failure, each of which disabled a real check
+on a real target. The case is not hypothetical: the source distribution
+carries the tests on purpose, so that a packager can run them without cloning,
+and the first version of this file failed there with `git ls-files` returning
+128. Found by running the published 0.1.0 archive's own suite. A guard added
+in the afternoon must not break a capability `tests/test_packaging.py` exists
+to preserve.
 """
 
 from __future__ import annotations
@@ -41,9 +52,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 CARRIAGE_RETURN = b"\r"
 BYTE_FOR_BYTE = "third_party"
+
+pytestmark = pytest.mark.skipif(
+    not (ROOT / ".git").exists(),
+    reason="not a git checkout, so there is no working copy for the rule to govern",
+)
 
 
 def _is_text(data: bytes) -> bool:
