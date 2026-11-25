@@ -136,3 +136,24 @@ def test_the_two_captured_warning_counts_agree() -> None:
         "the README states two different warning counts for the same walkthrough run: "
         f"{sorted(set(conformant))}"
     )
+
+
+def test_the_readme_links_nothing_relatively() -> None:
+    """The README is the long description, so a relative link is broken on PyPI.
+
+    `pyproject.toml` declares `readme = "README.md"`, so this file is what
+    renders as the project page. PyPI does not resolve a relative target
+    against the repository that produced the archive, and it has no reason to:
+    the archive could have come from anywhere. So `[LICENSE](LICENSE)` resolves
+    under `pypi.org/project/commissura/` and 404s, while reading as a working
+    link right up until somebody clicks it.
+
+    Eight of them shipped in 0.1.0 and 0.1.1 before anybody looked, found on
+    2026-11-25 while adding the badge row — one of whose links would have been
+    the ninth. The README has two audiences and only one of them can follow a
+    relative path; an absolute URL works for both.
+
+    Anchors are deliberately not caught: `#section` resolves on either.
+    """
+    relative = re.findall(r"\]\((?!https?://|#)([^)]+)\)", README.read_text(encoding="utf-8"))
+    assert relative == [], relative

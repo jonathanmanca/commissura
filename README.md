@@ -1,5 +1,12 @@
 # commissura
 
+[![PyPI](https://img.shields.io/pypi/v/commissura?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/commissura/)
+[![Python](https://img.shields.io/pypi/pyversions/commissura?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![CI](https://img.shields.io/github/actions/workflow/status/jonathanmanca/commissura/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/jonathanmanca/commissura/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)](https://github.com/jonathanmanca/commissura/blob/main/LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/jonathanmanca/commissura/actions/workflows/ci.yml)
+[![Status](https://img.shields.io/badge/status-alpha-orange?style=flat-square)](https://pypi.org/project/commissura/)
+
 Turn raw clinical material — HL7 v2 lab messages, free-text reports, DICOM
 imaging metadata — into a standardised, de-identified, research-ready dataset
 with a verifiable manifest.
@@ -356,7 +363,7 @@ downstream can tell when it is wrong. Targeted redaction removes the identifiers
 your structured exports *declared for that subject*, so two people grouped under
 one key leave only one set of identifiers to remove — and the other person's name
 is never looked for. The policy is in
-[`read/identity.py`](src/commissura/read/identity.py), which states its own
+[`read/identity.py`](https://github.com/jonathanmanca/commissura/blob/main/src/commissura/read/identity.py), which states its own
 reasoning; the shape of it is:
 
 **A subject is established by a validated national identifier, or by a record
@@ -612,7 +619,7 @@ their records drops — and a row still appears in `participants.tsv`, so the
 dataset claims a participant it holds nothing for.
 
 The labels live in one table, `_REPORT_LABELS` in
-[`read/corpus.py`](src/commissura/read/corpus.py), for exactly this reason:
+[`read/corpus.py`](https://github.com/jonathanmanca/commissura/blob/main/src/commissura/read/corpus.py), for exactly this reason:
 adapting to another hospital's template is an edit there rather than a rewrite
 of the reader.
 
@@ -867,7 +874,7 @@ invisible to anything that scrubs by field.
 
 `validate` exists before the command that produces datasets. That ordering
 forces the schema to be precise: the layout lives in one module,
-[`commissura/layout.py`](src/commissura/layout.py), and the validator is derived
+[`commissura/layout.py`](https://github.com/jonathanmanca/commissura/blob/main/src/commissura/layout.py), and the validator is derived
 from it, so `build` will have a specification to satisfy instead of defining one
 by accident as it goes.
 
@@ -1835,7 +1842,7 @@ skip rather than an error.
 Two works are redistributed, both under CC BY 4.0, which permits it with
 attribution: **HealthDCAT-AP Release 8** (European Commission, DG SANTE /
 HealthDataEU) and **DCAT-AP 3.0.0** (SEMIC), the second because the first
-imports it. [NOTICE](NOTICE) carries the attribution and
+imports it. [NOTICE](https://github.com/jonathanmanca/commissura/blob/main/NOTICE) carries the attribution and
 `third_party/PROVENANCE.json` carries the bytes — per file, the URL it came
 from, the date, and a SHA-256 that `tests/test_vendored_shapes.py` checks on
 every run. The files are unmodified; the one defect in the published shapes is
@@ -2012,7 +2019,7 @@ uv run --python 3.11 pytest
 [GitHub issue](https://github.com/jonathanmanca/commissura/issues).** To reach
 the author some other way, the package also declares the profile
 [linkedin.com/in/jonathan-manca](https://www.linkedin.com/in/jonathan-manca/).
-What changed between releases is in [CHANGELOG.md](CHANGELOG.md).
+What changed between releases is in [CHANGELOG.md](https://github.com/jonathanmanca/commissura/blob/main/CHANGELOG.md).
 
 **Do not send clinical material, and do not send a key.** That request is not
 politeness about mailbox sizes: a bug report about a de-identification tool is
@@ -2040,4 +2047,4 @@ machine that built it.
 
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0. See [LICENSE](https://github.com/jonathanmanca/commissura/blob/main/LICENSE) and [NOTICE](https://github.com/jonathanmanca/commissura/blob/main/NOTICE).
