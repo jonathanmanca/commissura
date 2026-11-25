@@ -21,9 +21,19 @@ name: Publish
 # repository, and none should be: trusted publishing exchanges a short-lived
 # OIDC identity for an upload token at the moment of upload.
 #
-# The declared environments are the second guard. Configure each in the
-# repository settings with a required reviewer, and every run then waits for a
-# human before it uploads anything.
+# The declared environments are the second guard, and on this repository they
+# are only half of one. A required reviewer would make every run wait for a
+# human before it uploads anything -- but GitHub does not offer that rule for a
+# private repository on this plan: "If you are on a GitHub Free, GitHub Pro, or
+# GitHub Team plan, other deployment protection rules, such as a wait timer or
+# required reviewers, are only available for public repositories." Measured on
+# 2026-11-25, when the `testpypi` environment was created and that section of
+# the settings page simply was not there.
+#
+# So while this repository is private, the environment names the claim the
+# index trusts and nothing else, and the only human gate is the one above: a
+# `workflow_dispatch` run can be started only by somebody with write access.
+# Configure the reviewer if the repository ever goes public.
 #
 # Rehearse on TestPyPI first, which is why it is the default and the only
 # choice a careless click produces.
@@ -138,8 +148,9 @@ jobs:
     name: Upload to ${{ inputs.index }}
     runs-on: ubuntu-latest
     needs: build
-    # Names the environment the index was told to trust, and the place to
-    # require a reviewer. A run stops here until that reviewer approves.
+    # Names the environment the index was told to trust, and the place a
+    # required reviewer would go. While this repository is private it cannot
+    # have one, so a run does not stop here -- see the note at the top.
     environment: ${{ inputs.index }}
     permissions:
       # Required for trusted publishing, and the reason no token is stored.
