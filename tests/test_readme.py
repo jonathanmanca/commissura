@@ -157,3 +157,44 @@ def test_the_readme_links_nothing_relatively() -> None:
     """
     relative = re.findall(r"\]\((?!https?://|#)([^)]+)\)", README.read_text(encoding="utf-8"))
     assert relative == [], relative
+
+
+def _heading_slugs(text: str) -> set[str]:
+    """Return the anchor GitHub and PyPI derive from each heading.
+
+    Both lowercase the text, drop everything that is not a letter, a digit, a
+    space or a hyphen, and join the rest with hyphens. Backticks and
+    apostrophes vanish, which is why `` `commissura risk` `` becomes
+    `commissura-risk` and "the profile's own shapes" becomes
+    `the-profiles-own-shapes`.
+    """
+    slugs = set()
+    for heading in re.findall(r"^#{1,6} +(.+?)\s*$", text, re.MULTILINE):
+        kept = re.sub(r"[^\w\- ]", "", heading.lower(), flags=re.UNICODE)
+        slugs.add(re.sub(r"\s+", "-", kept.strip()))
+    return slugs
+
+
+def test_every_anchor_in_the_readme_has_a_heading() -> None:
+    """An anchor with no heading is a link that silently does nothing.
+
+    It is worse than the relative links above rather than better: a 404 at
+    least tells the reader something went wrong, while a dangling `#section`
+    leaves the page exactly where it was, which reads as the link being
+    ignored by the browser.
+
+    PyPI does resolve these, which was not obvious and was measured rather
+    than assumed: `readme_renderer` emits no `id` on a heading at all, so the
+    rendered HTML alone suggests every in-page link is dead. Warehouse adds
+    them afterwards, prefixed `user-content-`, and rewrites the anchors to
+    match — so of the eight in-page links on the published 0.1.1 page, seven
+    jumped and exactly one did not.
+
+    That one was `#the-de-identification-manifest`, pointing at a heading that
+    has never existed, broken on GitHub for as long as it has been there and
+    found on 2026-11-25 by reading the live page rather than the source.
+    """
+    text = README.read_text(encoding="utf-8")
+    anchors = set(re.findall(r"\]\(#([^)]+)\)", text))
+    assert anchors, "the README uses no in-page links, so this guard checks nothing"
+    assert anchors <= _heading_slugs(text), sorted(anchors - _heading_slugs(text))

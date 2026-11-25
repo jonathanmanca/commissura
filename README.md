@@ -220,7 +220,7 @@ it means the record was attached and something about the attribution is worth a
 second look — here they are all the second kind. The manifest counts the two
 separately, because adding them together would be a false statement about what
 the dataset contains. See
-[the manifest](#the-de-identification-manifest) for the split.
+[the manifest](#linkage-is-accountable) for the split.
 
 Two of the three reasons are defects injected on purpose,
 `lab.conflicting_identity` and `reports.wrong_patient_name`. **The third is not
