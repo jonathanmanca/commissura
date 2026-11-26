@@ -165,8 +165,15 @@ def test_the_readme_links_nothing_relatively() -> None:
     relative path; an absolute URL works for both.
 
     Anchors are deliberately not caught: `#section` resolves on either.
+
+    **Raw HTML counts too**, which the first version of this guard missed. It
+    matched Markdown link syntax only, and the logo added on 2026-11-26 is an
+    `<img src=...>` -- so a relative path there would have been the ninth 404
+    on the page, past a test written to stop the eighth.
     """
-    relative = re.findall(r"\]\((?!https?://|#)([^)]+)\)", README.read_text(encoding="utf-8"))
+    body = README.read_text(encoding="utf-8")
+    relative = re.findall(r"\]\((?!https?://|#)([^)]+)\)", body)
+    relative += re.findall(r'(?:src|href)="(?!https?://|#)([^"]+)"', body)
     assert relative == [], relative
 
 

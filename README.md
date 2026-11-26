@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/jonathanmanca/commissura/main/assets/mark.svg" alt="commissura" width="92">
+
 # commissura
 
 [![PyPI](https://img.shields.io/pypi/v/commissura?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/commissura/)
