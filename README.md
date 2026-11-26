@@ -1,3 +1,5 @@
+<div align="center">
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jonathanmanca/commissura/main/assets/logo-dark.svg">
   <img src="https://raw.githubusercontent.com/jonathanmanca/commissura/main/assets/logo-light.svg" alt="" width="360">
@@ -11,6 +13,8 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-green?style=flat-square)](https://github.com/jonathanmanca/commissura/blob/main/LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/jonathanmanca/commissura/actions/workflows/ci.yml)
 [![Status](https://img.shields.io/badge/status-alpha-orange?style=flat-square)](https://pypi.org/project/commissura/)
+
+</div>
 
 Turn raw clinical material — HL7 v2 lab messages, free-text reports, DICOM
 imaging metadata — into a standardised, de-identified, research-ready dataset
