@@ -173,7 +173,7 @@ def test_the_readme_links_nothing_relatively() -> None:
     """
     body = README.read_text(encoding="utf-8")
     relative = re.findall(r"\]\((?!https?://|#)([^)]+)\)", body)
-    relative += re.findall(r'(?:src|href)="(?!https?://|#)([^"]+)"', body)
+    relative += re.findall(r'(?:src|srcset|href)="(?!https?://|#)([^"]+)"', body)
     assert relative == [], relative
 
 

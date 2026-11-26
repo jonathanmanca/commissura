@@ -1,4 +1,7 @@
-<img src="https://raw.githubusercontent.com/jonathanmanca/commissura/main/assets/mark.svg" alt="commissura" width="92">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jonathanmanca/commissura/main/assets/logo-dark.svg">
+  <img src="https://raw.githubusercontent.com/jonathanmanca/commissura/main/assets/logo-light.svg" alt="" width="360">
+</picture>
 
 # commissura
 
