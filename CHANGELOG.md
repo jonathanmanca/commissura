@@ -9,6 +9,34 @@ this one, because a consumer needs to know which of them changed:
 schema version, the dataset layout declares a third, and the de-identification
 rules declare a fourth. A release that moves any of them says so below.
 
+## 0.1.5 — 2026-11-27
+
+Documentation and assets only. `src/` is byte for byte what 0.1.4 shipped, so
+nothing an installation does is different. What this release changes is the
+project page, which is this repository's README, and a long description is
+frozen into the artefact that carried it — so correcting one means publishing
+again.
+
+### Added
+
+- The project's symbol and its full lockup as SVG under `assets/`, traced from
+  the original raster rather than redrawn, and verified by parsing each emitted
+  file back and comparing it against the mask it came from. The README header
+  now carries the lockup above the title, with a dark-theme variant that GitHub
+  resolves and PyPI reduces to the light one.
+
+### Changed
+
+- The README header is centred. `readme_renderer`, the library PyPI renders a
+  long description with, keeps `<div align="center">` and strips `style`, so
+  the centring is written as the attribute and not as CSS: written as CSS it
+  would look right on GitHub and sit flush left on the index.
+
+### Schema versions carried by this release
+
+- Manifest `7.2.0`, risk report `1.2.0`, dataset layout `1.1.0`,
+  de-identification rules `1.2.0`. All unchanged, because no code changed.
+
 ## 0.1.4 — 2026-11-25
 
 Closes the limit 0.1.3 stated. A dataset built with any earlier version may
