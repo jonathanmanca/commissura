@@ -9,6 +9,45 @@ this one, because a consumer needs to know which of them changed:
 schema version, the dataset layout declares a third, and the de-identification
 rules declare a fourth. A release that moves any of them says so below.
 
+## 0.1.6 — 2026-11-27
+
+Documentation only. `src/` is byte for byte what 0.1.5 shipped, so nothing an
+installation does is different. This release exists because three sentences in
+the README were **wrong**, not merely improvable, and a long description is
+frozen into the artefact that carried it: the page on the index keeps whatever
+the last upload said until a new one replaces it.
+
+### Fixed
+
+- **"Twenty-one of twenty-five participants are unique on age and sex
+  together" misread the block printed directly above it, twice.** That block
+  reads `below k=5  21 combination(s)`: twenty-one counts combinations of
+  attribute values, and several participants can share one, so it is not a
+  count of people. And `below k=5` includes k=2, k=3 and k=4, where "unique"
+  means k=1 alone. Measured on a rebuild of the walkthrough's own dataset:
+  twenty-one distinct pairs, every one of them below the threshold, and
+  eighteen participants alone on theirs.
+- **The age-band example named `42`, which no participant in the walkthrough
+  has.** The cohort runs 22, 26, 41, 44, 46 and up. An invented number beside a
+  measured one is the worse kind, because a reader checks the measured half and
+  is reassured. It now names `44`.
+- **"because 22 is clinically useful" sat three lines under a worked example
+  reading `Eta: 72 anni`.**
+
+### Added
+
+- Two guards, so these cannot drift again. The walkthrough fixture already
+  builds the dataset, so both are free: one recomputes the (age, sex) pairs
+  from `participants.tsv` and requires the prose to state that count and that
+  number of lone participants, the other requires the age the banding sentence
+  names to be an age the cohort has and to fall inside the band it claims.
+  Both were checked by restoring the original errors, and both caught them.
+
+### Schema versions carried by this release
+
+- Manifest `7.2.0`, risk report `1.2.0`, dataset layout `1.1.0`,
+  de-identification rules `1.2.0`. All unchanged, because no code changed.
+
 ## 0.1.5 — 2026-11-27
 
 Documentation and assets only. `src/` is byte for byte what 0.1.4 shipped, so
