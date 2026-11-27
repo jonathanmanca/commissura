@@ -308,12 +308,14 @@ commissura risk ./dataset
 ... eight more rows, then the laboratory-values section ...
 ```
 
-Twenty-one of twenty-five participants are unique on age and sex together. That
-is not a defect — twenty-five people with exact ages cannot reach k=5 on two
-attributes — and it is the number an access body would ask you to fix by banding
-the ages before release. The command reports it rather than passing judgement.
+Those twenty-one are combinations of age and sex rather than people: every
+distinct combination in this cohort is shared by fewer than five participants,
+and eighteen of the twenty-five are alone on theirs. That is not a defect —
+twenty-five people with exact ages cannot reach k=5 on two attributes — and it
+is the number an access body would ask you to fix by banding the ages before
+release. The command reports it rather than passing judgement.
 
-You can act on it. `build --age-band 10` writes `40-49` instead of `42` and
+You can act on it. `build --age-band 10` writes `40-49` instead of `44` and
 takes the same cohort from twenty-one combinations below the threshold to ten;
 see [generalising ages](#generalising-ages) for the width, which is yours to
 choose.
@@ -357,7 +359,7 @@ Data del referto: 26/08/2022                         Data del referto: [day_offs
 
 Four things to notice. The clinical question survives word for word — a scrubber
 that removed the medicine would protect a useless dataset. The **age stays**,
-because 22 is clinically useful and not identifying on its own, while the
+because 72 is clinically useful and not identifying on its own, while the
 **birth date is removed rather than offset**, since an offset from the subject's
 own baseline would state it exactly. The report date became an offset, so the
 interval to every other event in this subject's record is still exact. And the

@@ -59,9 +59,10 @@ import re
 import shlex
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import Final, NamedTuple
 
 import pytest
 
@@ -417,3 +418,80 @@ def test_the_manifest_fragments_are_what_the_build_wrote(walkthrough: Walkthroug
             )
             checked += 1
     assert checked >= 3, f"only {checked} quoted rows carried a count"
+
+
+SPELLED: Final[dict[int, str]] = {
+    4: "four",
+    10: "ten",
+    18: "eighteen",
+    21: "twenty-one",
+    25: "twenty-five",
+}
+"""The number words the risk prose uses, so a count can be looked up as text.
+
+The README writes these out rather than in digits, which is why the captured
+block beside them cannot be the check: `below k=5  21 combination(s)` is
+compared by `test_the_captured_block_is_what_the_command_prints`, and the
+sentence under it is prose nothing had ever read.
+"""
+
+
+def _age_and_sex(root: Path) -> Counter[tuple[str, str]]:
+    """How many participants share each (age, sex) pair, from the built table."""
+    rows = (root / "dataset" / "participants.tsv").read_text(encoding="utf-8").splitlines()
+    header = rows[0].split("\t")
+    age, sex = header.index("age"), header.index("sex")
+    return Counter((row.split("\t")[age], row.split("\t")[sex]) for row in rows[1:])
+
+
+def test_the_risk_prose_counts_people_and_combinations_apart(
+    walkthrough: Walkthrough,
+) -> None:
+    """The sentence under the risk block, against the table the build wrote.
+
+    It used to read "Twenty-one of twenty-five participants are unique on age
+    and sex together", and both halves were wrong about the same number. The
+    block prints `below k=5  21 combination(s)`: twenty-one counts *pairs of
+    attribute values*, and several participants can share one, so it is not a
+    count of people. And `below k=5` includes k=2, k=3 and k=4, where "unique"
+    means k=1 alone. Measured here: twenty-one distinct pairs, all of them
+    below the threshold, and eighteen participants alone on theirs.
+
+    This is the defect of 2026-11-25 in a section that pass did not reach: a
+    number is safe where it is printed and unsafe wherever it is restated.
+    """
+    pairs = _age_and_sex(walkthrough.root)
+    readme = README.read_text(encoding="utf-8")
+
+    alone = sum(1 for shared in pairs.values() if shared == 1)
+    total = sum(pairs.values())
+    assert f"Those {SPELLED[len(pairs)]} are combinations" in readme, (
+        f"the cohort has {len(pairs)} distinct (age, sex) pairs"
+    )
+    assert f"{SPELLED[alone]} of the {SPELLED[total]} are alone on theirs" in readme, (
+        f"{alone} of {total} participants are alone on their pair"
+    )
+    assert all(shared < 5 for shared in pairs.values()), (
+        "the prose says every combination is below five; one is not"
+    )
+
+
+def test_the_age_the_banding_sentence_names_is_an_age_the_cohort_has(
+    walkthrough: Walkthrough,
+) -> None:
+    """`--age-band 10` writes `40-49` instead of one of this cohort's ages.
+
+    The sentence named `42`, which no participant in the walkthrough has: the
+    ages run 22, 26, 41, 44, 46 and up. An invented number beside a measured
+    one is the worst kind, because a reader can check the measured half and be
+    reassured, which is what the illustrative `files_present: 49` row did
+    before it was labelled.
+    """
+    readme = README.read_text(encoding="utf-8")
+    match = re.search(r"writes `(\d+)-(\d+)` instead of `(\d+)`", readme)
+    assert match is not None, "the banding sentence has moved"
+    low, high, named = (int(part) for part in match.groups())
+
+    ages = {age for age, _ in _age_and_sex(walkthrough.root)}
+    assert str(named) in ages, f"no participant is {named}; the ages are {sorted(ages)}"
+    assert low <= named <= high, f"{named} is not inside the band {low}-{high}"
